@@ -14,4 +14,4 @@ services:
       YOUTUBE_COOKIES: /cookies/www.youtube.com_cookies.txt
     volumes:
       - ./server_data:/data
-      - ./cookies:/cookies:ro
+      - ./cookies:/cookies

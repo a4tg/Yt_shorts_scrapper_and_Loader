@@ -120,7 +120,8 @@ sudo certbot --nginx -d YOUR_DOMAIN
 Данные очереди, метаданные и готовые файлы сохраняются в `server_data/`.
 По умолчанию сервис автоматически удаляет их через 24 часа; срок регулируется
 переменной `YT_LOADER_RETENTION_HOURS`. Cookies YouTube монтируются
-из `cookies/www.youtube.com_cookies.txt` и не попадают в Git.
+из `cookies/www.youtube.com_cookies.txt` и не попадают в Git. Контейнеру нужен
+доступ на запись к папке `cookies`, поскольку `yt-dlp` может обновлять файл.
 
 Для установки без Docker подготовлены `requirements-server.txt` и unit-файл
 `deploy/yt-loader.service`. При ручной установке также нужны системные пакеты
