@@ -1,16 +1,14 @@
-import csv
-import json
 import queue
 import re
 import shutil
 import subprocess
 import threading
+import time
 import tkinter as tk
-from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from typing import Callable
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -30,6 +28,12 @@ LOCAL_FFMPEG = BASE_DIR / "ffmpeg.exe"
 LOCAL_FFPROBE = BASE_DIR / "ffprobe.exe"
 DOWNLOAD_PATH_MARKER = "__YTLOADER_FILE__:"
 STATIC_OVERLAY_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp"}
+YOUTUBE_RATE_LIMIT_MARKERS = (
+    "rate-limited by youtube",
+    "this content isn't available, try again later",
+)
+YOUTUBE_RATE_LIMIT_BUFFER_SECONDS = 5 * 60
+YOUTUBE_RATE_LIMIT_MAX_PAUSES = 3
 WINDOWS_RESERVED_NAMES = {
     "CON",
     "PRN",
@@ -95,61 +99,73 @@ def extract_video_ids(output: str) -> list[str]:
     return video_ids
 
 
-def parse_shorts_metadata(output: str) -> list[dict[str, object]]:
-    """Parse compact one-object-per-line JSON printed by yt-dlp."""
-    records: list[dict[str, object]] = []
-    seen: set[str] = set()
-
-    for line in output.splitlines():
-        try:
-            raw_record = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-
-        if not isinstance(raw_record, dict):
-            continue
-
-        video_id = str(raw_record.get("id") or "").strip()
-        if not VIDEO_ID_PATTERN.fullmatch(video_id) or video_id in seen:
-            continue
-
-        raw_tags = raw_record.get("tags")
-        tags = (
-            [str(tag).strip() for tag in raw_tags if str(tag).strip()]
-            if isinstance(raw_tags, list)
-            else []
-        )
-        seen.add(video_id)
-        records.append(
-            {
-                "id": video_id,
-                "url": f"https://www.youtube.com/shorts/{video_id}",
-                "title": str(raw_record.get("title") or ""),
-                "description": str(raw_record.get("description") or ""),
-                "tags": tags,
-                "uploader": str(raw_record.get("uploader") or ""),
-                "upload_date": str(raw_record.get("upload_date") or ""),
-            }
-        )
-
-    return records
+def extract_video_id_from_url(value: str) -> str | None:
+    """Extract a YouTube video ID for robust downloaded-file lookup."""
+    parsed = urlparse(value if "://" in value else f"https://{value}")
+    host = (parsed.hostname or "").lower()
+    parts = [part for part in parsed.path.split("/") if part]
+    video_id = ""
+    if host in {"youtu.be", "www.youtu.be"} and parts:
+        video_id = parts[0]
+    elif len(parts) >= 2 and parts[0] in {"shorts", "embed", "live"}:
+        video_id = parts[1]
+    elif parts == ["watch"]:
+        video_id = parse_qs(parsed.query).get("v", [""])[0]
+    return video_id if VIDEO_ID_PATTERN.fullmatch(video_id) else None
 
 
-def write_shorts_metadata_csv(records: list[dict[str, object]], output_path: Path) -> None:
-    """Write metadata in an Excel-friendly UTF-8 CSV file."""
-    with output_path.open("w", encoding="utf-8-sig", newline="") as csv_file:
-        writer = csv.DictWriter(
-            csv_file,
-            fieldnames=["url", "title", "description", "tags", "uploader", "upload_date"],
-            delimiter=";",
-        )
-        writer.writeheader()
-        for record in records:
-            row = dict(record)
-            tags = row.get("tags")
-            row["tags"] = ", ".join(tags) if isinstance(tags, list) else str(tags or "")
-            row.pop("id", None)
-            writer.writerow(row)
+def find_downloaded_video(
+    output_dir: Path,
+    reported_path: Path | None,
+    url: str,
+    started_at: float,
+) -> Path | None:
+    """Recover the real file when yt-dlp's printed Unicode path was decoded incorrectly."""
+    if reported_path and reported_path.is_file():
+        return reported_path
+
+    candidates = [
+        path
+        for path in output_dir.iterdir()
+        if path.is_file() and path.suffix.lower() == ".mp4" and ".tmp." not in path.name
+    ]
+    video_id = extract_video_id_from_url(url)
+    if video_id:
+        matching_id = [path for path in candidates if f"[{video_id}]" in path.name]
+        if matching_id:
+            return max(matching_id, key=lambda path: path.stat().st_mtime)
+
+    recent = [path for path in candidates if path.stat().st_mtime >= started_at - 2]
+    return max(recent, key=lambda path: path.stat().st_mtime) if recent else None
+
+
+def is_paste_shortcut(keysym: str, keycode: int) -> bool:
+    """Recognize Ctrl+V by symbol and by the physical V key on Windows."""
+    return keysym.lower() in {"v", "cyrillic_em"} or keycode == 86
+
+
+def is_youtube_rate_limit_message(message: str) -> bool:
+    lowered = message.lower()
+    return any(marker in lowered for marker in YOUTUBE_RATE_LIMIT_MARKERS)
+
+
+def youtube_rate_limit_wait_seconds(message: str) -> int | None:
+    """Read YouTube's approximate block duration, defaulting to one hour."""
+    if not is_youtube_rate_limit_message(message):
+        return None
+
+    lowered = message.lower()
+    match = re.search(
+        r"(?:up to|for)\s+(an|one|\d+)\s*(second|minute|hour)s?",
+        lowered,
+    )
+    if not match:
+        return 60 * 60
+
+    raw_amount, unit = match.groups()
+    amount = 1 if raw_amount in {"an", "one"} else int(raw_amount)
+    multiplier = {"second": 1, "minute": 60, "hour": 60 * 60}[unit]
+    return amount * multiplier
 
 
 def find_media_tool(name: str) -> str | None:
@@ -382,6 +398,47 @@ def create_logo_variants(
     return completed_paths
 
 
+def create_logo_variants_batch(
+    source_paths: list[Path],
+    output_dir: Path,
+    logo_paths: list[Path],
+    opacity: int,
+    width_percent: int,
+    log: Callable[[str], None],
+    progress: Callable[[int, int], None],
+) -> int:
+    """Process downloaded sources only after phase one has fully completed."""
+    fully_processed = 0
+    total = len(source_paths)
+    for source_index, source_path in enumerate(source_paths, start=1):
+        progress(source_index, total)
+        if not source_path.is_file():
+            log(f"Исходник не найден, пропускаю: {source_path.name}")
+            continue
+
+        completed_variants = create_logo_variants(
+            source_path,
+            output_dir,
+            logo_paths,
+            opacity,
+            width_percent,
+            log,
+        )
+        if len(completed_variants) == len(logo_paths):
+            source_path.unlink()
+            fully_processed += 1
+            log(
+                f"Все варианты созданы: {source_path.name} "
+                f"({len(completed_variants)}/{len(logo_paths)})"
+            )
+        else:
+            log(
+                f"Исходник сохранён для повторной обработки: {source_path.name}. "
+                f"Готово вариантов: {len(completed_variants)}/{len(logo_paths)}"
+            )
+    return fully_processed
+
+
 class DownloaderApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
@@ -435,16 +492,17 @@ class DownloaderApp:
         )
         channel_frame.pack(fill="x", pady=(16, 0))
 
-        channel_entry = ttk.Entry(
+        self.channel_entry = ttk.Entry(
             channel_frame,
             textvariable=self.channel_url_var,
         )
-        channel_entry.pack(side="left", fill="x", expand=True)
-        channel_entry.bind("<Return>", lambda _event: self.start_shorts_import())
+        self.channel_entry.pack(side="left", fill="x", expand=True)
+        self.channel_entry.bind("<Return>", lambda _event: self.start_shorts_import())
+        self._bind_paste_shortcuts(self.channel_entry)
 
         self.shorts_button = ttk.Button(
             channel_frame,
-            text="Получить ссылки + метаданные",
+            text="Получить ссылки Shorts",
             command=self.start_shorts_import,
         )
         self.shorts_button.pack(side="left", padx=(8, 0))
@@ -467,6 +525,13 @@ class DownloaderApp:
 
         self.urls_text = tk.Text(links_frame, wrap="word", height=14, font=("Consolas", 10))
         self.urls_text.pack(fill="both", expand=True)
+        self._bind_paste_shortcuts(self.urls_text)
+
+        self.paste_menu = tk.Menu(self.root, tearoff=False)
+        self.paste_menu.add_command(label="Вставить", command=self._paste_from_context_menu)
+        self._paste_target: tk.Widget = self.urls_text
+        self.channel_entry.bind("<Button-3>", self._show_paste_menu)
+        self.urls_text.bind("<Button-3>", self._show_paste_menu)
 
         logo_frame = ttk.LabelFrame(
             frame, text="Изображение/анимация поверх видео — можно выбрать несколько", padding=12
@@ -585,15 +650,56 @@ class DownloaderApp:
         self.logo_paths.clear()
         self.logo_listbox.delete(0, "end")
 
-    def paste_from_clipboard(self) -> None:
+    def _bind_paste_shortcuts(self, widget: tk.Widget) -> None:
+        widget.bind("<Control-KeyPress>", self._handle_control_key)
+        widget.bind("<Shift-Insert>", self._handle_paste_event)
+
+    def _handle_control_key(self, event: tk.Event) -> str | None:
+        if is_paste_shortcut(str(event.keysym), int(event.keycode)):
+            return self._handle_paste_event(event)
+        return None
+
+    def _handle_paste_event(self, event: tk.Event) -> str:
+        self._paste_into_widget(event.widget)
+        return "break"
+
+    def _show_paste_menu(self, event: tk.Event) -> str:
+        self._paste_target = event.widget
+        self._paste_target.focus_set()
+        try:
+            self.paste_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self.paste_menu.grab_release()
+        return "break"
+
+    def _paste_from_context_menu(self) -> None:
+        self._paste_into_widget(self._paste_target)
+
+    def _paste_into_widget(self, widget: tk.Widget) -> bool:
         try:
             clipboard_text = self.root.clipboard_get()
         except tk.TclError:
             messagebox.showwarning("Буфер обмена", "В буфере обмена нет текста.")
-            return
+            return False
 
-        if clipboard_text.strip():
-            self.urls_text.insert("end", clipboard_text.strip() + "\n")
+        try:
+            if isinstance(widget, tk.Text):
+                if widget.tag_ranges("sel"):
+                    widget.delete("sel.first", "sel.last")
+            elif isinstance(widget, (tk.Entry, ttk.Entry)) and widget.selection_present():
+                widget.delete("sel.first", "sel.last")
+            widget.insert("insert", clipboard_text)
+        except tk.TclError:
+            return False
+        return True
+
+    def paste_from_clipboard(self) -> None:
+        self.urls_text.focus_set()
+        self.urls_text.mark_set("insert", "end-1c")
+        if self._paste_into_widget(self.urls_text):
+            current_text = self.urls_text.get("1.0", "end-1c")
+            if current_text and not current_text.endswith("\n"):
+                self.urls_text.insert("end", "\n")
 
     def load_urls_file(self) -> None:
         selected_file = filedialog.askopenfilename(
@@ -639,39 +745,41 @@ class DownloaderApp:
 
         self.download_button.config(state="disabled")
         self.shorts_button.config(state="disabled")
-        self.status_var.set("Получаю ссылки, описания и теги...")
-        self._log(f"Получение Shorts и метаданных: {shorts_url}")
-        self._log("Полные метаданные читаются отдельно для каждого ролика — это может занять время.")
+        self.status_var.set("Получаю список Shorts...")
+        self._log(f"Получение списка Shorts: {shorts_url}")
 
         self.worker = threading.Thread(
             target=self._shorts_import_worker,
-            args=(shorts_url, output_dir),
+            args=(shorts_url,),
             daemon=True,
         )
         self.worker.start()
 
-    def _shorts_import_worker(self, shorts_url: str, output_dir: Path) -> None:
-        command = [
+    def _shorts_import_worker(self, shorts_url: str) -> None:
+        list_command = [
             str(YTDLP_EXE),
+            "--encoding",
+            "utf-8",
             "--ignore-config",
             "--ignore-errors",
+            "--flat-playlist",
             "--skip-download",
             "--no-warnings",
             "--no-update",
             "--print",
-            "%(.{id,title,description,tags,uploader,upload_date})j",
+            "%(id)s",
             "--js-runtimes",
             "node",
         ]
 
         cookies_path = detect_cookies(shorts_url)
         if cookies_path:
-            command.extend(["--cookies", str(cookies_path)])
-        command.append(shorts_url)
+            list_command.extend(["--cookies", str(cookies_path)])
+        list_command.append(shorts_url)
 
         try:
-            result = subprocess.run(
-                command,
+            list_result = subprocess.run(
+                list_command,
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -682,26 +790,22 @@ class DownloaderApp:
             self.log_queue.put(("SHORTS_ERROR", f"Ошибка запуска yt-dlp: {exc}"))
             return
 
-        records = parse_shorts_metadata(result.stdout)
-        if result.returncode != 0 and not records:
-            error_text = result.stderr.strip() or f"yt-dlp завершился с кодом {result.returncode}"
+        video_ids = extract_video_ids(list_result.stdout)
+        if not video_ids:
+            error_text = list_result.stderr.strip() or "Не удалось получить список Shorts канала"
             self.log_queue.put(("SHORTS_ERROR", error_text))
             return
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        metadata_path = output_dir / f"shorts_metadata_{timestamp}.csv"
-        try:
-            write_shorts_metadata_csv(records, metadata_path)
-        except OSError as exc:
-            self.log_queue.put(("SHORTS_ERROR", f"Не удалось сохранить CSV: {exc}"))
-            return
+        self._log(f"Найдено Shorts во вкладке канала: {len(video_ids)}")
 
         self.log_queue.put(
             (
                 "SHORTS_RESULT",
                 {
-                    "links": [str(record["url"]) for record in records],
-                    "metadata_path": metadata_path,
+                    "links": [
+                        f"https://www.youtube.com/shorts/{video_id}"
+                        for video_id in video_ids
+                    ],
                 },
             )
         )
@@ -779,15 +883,24 @@ class DownloaderApp:
         logo_width: int,
     ) -> None:
         success_count = 0
+        rate_limit_index: int | None = None
+        rate_limit_pauses = 0
+        downloaded_sources: list[Path] = []
+        downloaded_source_keys: set[str] = set()
         download_dir = output_dir / ".ytloader_downloads" if logo_paths else output_dir
         download_dir.mkdir(parents=True, exist_ok=True)
 
-        for index, url in enumerate(urls, start=1):
+        index = 1
+        while index <= len(urls):
+            url = urls[index - 1]
             cookies_path = detect_cookies(url)
             self._log(f"[{index}/{len(urls)}] Обработка: {url}")
+            download_started_at = time.time()
 
             command = [
                 str(YTDLP_EXE),
+                "--encoding",
+                "utf-8",
                 "-f",
                 f"bv*[height<={max_height}]+ba[ext=m4a]/bv*[height<={max_height}]+ba/b[height<={max_height}][ext=mp4]/b[height<={max_height}]",
                 "--merge-output-format",
@@ -801,7 +914,14 @@ class DownloaderApp:
             ]
 
             if "youtube.com" in url.lower() or "youtu.be" in url.lower():
-                command.extend(["--js-runtimes", "node"])
+                command.extend(
+                    [
+                        "--js-runtimes",
+                        "node",
+                        "-t",
+                        "sleep",
+                    ]
+                )
 
             if cookies_path:
                 command.extend(["--cookies", str(cookies_path)])
@@ -823,55 +943,124 @@ class DownloaderApp:
                 )
             except Exception as exc:
                 self._log(f"Ошибка запуска: {exc}")
+                index += 1
                 continue
 
             assert process.stdout is not None
             downloaded_path: Path | None = None
+            rate_limit_seconds: int | None = None
             for line in process.stdout:
                 clean_line = line.rstrip()
+                parsed_wait = youtube_rate_limit_wait_seconds(clean_line)
+                if parsed_wait is not None:
+                    rate_limit_seconds = max(rate_limit_seconds or 0, parsed_wait)
                 if clean_line.startswith(DOWNLOAD_PATH_MARKER):
                     downloaded_path = Path(clean_line[len(DOWNLOAD_PATH_MARKER) :])
-                    self._log(f"Файл загружен: {downloaded_path.name}")
                 else:
                     self._log(clean_line)
 
             return_code = process.wait()
             if return_code == 0:
-                if logo_paths:
-                    if downloaded_path and downloaded_path.is_file():
-                        completed_variants = create_logo_variants(
-                            downloaded_path,
-                            output_dir,
-                            logo_paths,
-                            logo_opacity,
-                            logo_width,
-                            self._log,
-                        )
-                        if completed_variants:
-                            downloaded_path.unlink()
-                            self._log(
-                                f"Создано вариантов: {len(completed_variants)}/{len(logo_paths)}"
-                            )
-                        else:
-                            fallback_path = output_dir / downloaded_path.name
-                            downloaded_path.replace(fallback_path)
-                            self._log(
-                                "Не удалось создать ни одного варианта; исходное видео "
-                                f"сохранено как {fallback_path.name}."
-                            )
-                    else:
-                        self._log("Не удалось определить скачанный файл — логотип не наложен.")
+                downloaded_path = find_downloaded_video(
+                    download_dir,
+                    downloaded_path,
+                    url,
+                    download_started_at,
+                )
+                if downloaded_path:
+                    self._log(f"Файл загружен: {downloaded_path.name}")
+                    source_key = str(downloaded_path.resolve()).casefold()
+                    if source_key not in downloaded_source_keys:
+                        downloaded_source_keys.add(source_key)
+                        downloaded_sources.append(downloaded_path)
+                else:
+                    self._log("Не удалось определить скачанный файл.")
                 success_count += 1
-                self._log(f"Готово: {url}")
+                self._log(f"Исходник готов: {url}")
+                rate_limit_pauses = 0
+                index += 1
             else:
                 self._log(f"Ошибка загрузки, код {return_code}: {url}")
+                if rate_limit_seconds is not None:
+                    rate_limit_pauses += 1
+                    if rate_limit_pauses > YOUTUBE_RATE_LIMIT_MAX_PAUSES:
+                        rate_limit_index = index
+                        self._log(
+                            "YouTube не снял ограничение после нескольких автоматических "
+                            "пауз. Очередь остановлена."
+                        )
+                        break
+
+                    wait_seconds = rate_limit_seconds + YOUTUBE_RATE_LIMIT_BUFFER_SECONDS
+                    self._log(
+                        f"YouTube ограничил сессию примерно на {rate_limit_seconds // 60} мин. "
+                        f"Автопродолжение через {wait_seconds // 60} мин "
+                        f"(пауза {rate_limit_pauses}/{YOUTUBE_RATE_LIMIT_MAX_PAUSES})."
+                    )
+                    self._wait_for_youtube_rate_limit(wait_seconds, index, len(urls))
+                    self._log(f"Пауза завершена. Повторяю позицию {index}: {url}")
+                    continue
+                index += 1
+
+        if rate_limit_index is None and logo_paths:
+            self.log_queue.put(
+                f"__PHASE__:Создание вариантов: 0/{len(downloaded_sources)}"
+            )
+            self._log(
+                f"Все загрузки завершены. Начинаю создание вариантов для "
+                f"{len(downloaded_sources)} видео."
+            )
+            fully_processed = create_logo_variants_batch(
+                downloaded_sources,
+                output_dir,
+                logo_paths,
+                logo_opacity,
+                logo_width,
+                self._log,
+                lambda current, total: self.log_queue.put(
+                    f"__PHASE__:Создание вариантов: {current}/{total}"
+                ),
+            )
+            self._log(
+                f"Пакетная обработка завершена: {fully_processed}/"
+                f"{len(downloaded_sources)} исходников полностью готовы."
+            )
 
         if logo_paths:
             try:
                 download_dir.rmdir()
             except OSError:
                 pass
-        self.log_queue.put(f"__DONE__:{success_count}/{len(urls)}")
+        if rate_limit_index is not None:
+            self.log_queue.put(
+                f"__RATE_LIMIT__:{success_count}/{len(urls)}:{rate_limit_index}"
+            )
+        else:
+            self.log_queue.put(f"__DONE__:{success_count}/{len(urls)}")
+
+    def _wait_for_youtube_rate_limit(
+        self,
+        wait_seconds: int,
+        index: int,
+        total: int,
+    ) -> None:
+        deadline = time.monotonic() + wait_seconds
+        last_logged_minutes: int | None = None
+        while True:
+            remaining_seconds = max(0, int(deadline - time.monotonic()))
+            if remaining_seconds <= 0:
+                self.log_queue.put(f"__WAIT__:{index}/{total}:0")
+                return
+
+            remaining_minutes = (remaining_seconds + 59) // 60
+            self.log_queue.put(f"__WAIT__:{index}/{total}:{remaining_minutes}")
+            if (
+                remaining_minutes != last_logged_minutes
+                and (remaining_minutes <= 5 or remaining_minutes % 10 == 0)
+            ):
+                self._log(f"До автоматического продолжения: {remaining_minutes} мин.")
+                last_logged_minutes = remaining_minutes
+            time.sleep(min(60, remaining_seconds))
 
     def _flush_log_queue(self) -> None:
         while True:
@@ -896,7 +1085,6 @@ class DownloaderApp:
                     result_data = payload if isinstance(payload, dict) else {}
                     raw_links = result_data.get("links", [])
                     links = list(raw_links) if isinstance(raw_links, list) else []
-                    metadata_path = result_data.get("metadata_path")
                     existing = {
                         line.strip()
                         for line in self.urls_text.get("1.0", "end").splitlines()
@@ -915,12 +1103,7 @@ class DownloaderApp:
                         status += f", дублей: {duplicate_count}"
                     self.status_var.set(status)
                     self._append_log(status)
-                    if metadata_path:
-                        self._append_log(f"Метаданные сохранены: {metadata_path}")
-                        messagebox.showinfo(
-                            "Импорт Shorts завершён",
-                            f"{status}\n\nОписания и теги сохранены в:\n{metadata_path}",
-                        )
+                    messagebox.showinfo("Импорт Shorts завершён", status)
                     continue
 
             if message.startswith("__DONE__:"):
@@ -930,6 +1113,36 @@ class DownloaderApp:
                 self.shorts_button.config(state="normal")
                 self.resolution_combo.config(state="readonly")
                 self._set_logo_controls_state("normal")
+                continue
+
+            if message.startswith("__WAIT__:"):
+                _, position, remaining_minutes = message.split(":", 2)
+                if remaining_minutes == "0":
+                    self.status_var.set(f"Возобновляю загрузку с позиции {position}...")
+                else:
+                    self.status_var.set(
+                        f"Пауза YouTube: {remaining_minutes} мин, позиция {position}"
+                    )
+                continue
+
+            if message.startswith("__PHASE__:"):
+                phase_status = message.split(":", 1)[1]
+                self.status_var.set(phase_status)
+                continue
+
+            if message.startswith("__RATE_LIMIT__:"):
+                _, result, stopped_at = message.split(":", 2)
+                self.status_var.set(f"Остановлено лимитом YouTube: {result}")
+                self.download_button.config(state="normal")
+                self.shorts_button.config(state="normal")
+                self.resolution_combo.config(state="readonly")
+                self._set_logo_controls_state("normal")
+                messagebox.showwarning(
+                    "YouTube временно ограничил загрузку",
+                    f"Очередь остановлена на позиции {stopped_at}.\n\n"
+                    "Автоматические паузы были исчерпаны. Подожди дольше или обнови "
+                    "cookies перед следующим запуском.",
+                )
                 continue
 
             self._append_log(message)
