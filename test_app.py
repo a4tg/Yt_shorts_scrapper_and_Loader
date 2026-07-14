@@ -2,12 +2,17 @@ import csv
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 from app import (
     build_logo_filter,
+    build_overlay_input_args,
+    build_variant_directories,
+    create_logo_variants,
     extract_video_ids,
     normalize_channel_shorts_url,
     parse_shorts_metadata,
+    is_supported_overlay,
     write_shorts_metadata_csv,
 )
 
@@ -91,6 +96,27 @@ class ShortsMetadataTests(unittest.TestCase):
 
 
 class LogoOverlayTests(unittest.TestCase):
+    def test_loops_static_images_and_animated_media_correctly(self) -> None:
+        self.assertEqual(
+            build_overlay_input_args(Path("logo.png")),
+            ["-loop", "1", "-i", "logo.png"],
+        )
+        self.assertEqual(
+            build_overlay_input_args(Path("animation.mov")),
+            ["-stream_loop", "-1", "-i", "animation.mov"],
+        )
+        self.assertEqual(
+            build_overlay_input_args(Path("animation.webm")),
+            ["-stream_loop", "-1", "-i", "animation.webm"],
+        )
+
+    def test_accepts_any_file_with_a_visual_stream(self) -> None:
+        with patch(
+            "app.subprocess.run",
+            return_value=Mock(returncode=0, stdout="video\n"),
+        ):
+            self.assertTrue(is_supported_overlay(Path("animation.custom"), "ffprobe"))
+
     def test_builds_centered_bottom_overlay_filter(self) -> None:
         overlay_filter = build_logo_filter(1080, opacity=35, width_percent=22)
 
@@ -101,6 +127,44 @@ class LogoOverlayTests(unittest.TestCase):
 
     def test_clamps_opacity(self) -> None:
         self.assertIn("aa=1.00", build_logo_filter(1000, opacity=200, width_percent=20))
+
+    def test_builds_unique_safe_directories_from_logo_names(self) -> None:
+        output_dir = Path("C:/result")
+        directories = build_variant_directories(
+            output_dir,
+            [Path("C:/one/promo.gif"), Path("C:/two/promo.gif"), Path("C:/CON.gif")],
+        )
+
+        self.assertEqual(
+            directories,
+            [output_dir / "promo", output_dir / "promo_2", output_dir / "CON_gif"],
+        )
+
+    def test_creates_one_video_copy_per_logo(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source_path = root / "source.mp4"
+            source_path.write_bytes(b"video")
+            logo_paths = [root / "first.gif", root / "second.gif"]
+            for logo_path in logo_paths:
+                logo_path.write_bytes(b"gif")
+
+            with patch("app.overlay_logo", return_value=True) as overlay_mock:
+                completed = create_logo_variants(
+                    source_path,
+                    root / "result",
+                    logo_paths,
+                    opacity=35,
+                    width_percent=22,
+                    log=lambda _message: None,
+                )
+
+            self.assertEqual(
+                completed,
+                [root / "result" / "first" / "source.mp4", root / "result" / "second" / "source.mp4"],
+            )
+            self.assertTrue(all(path.read_bytes() == b"video" for path in completed))
+            self.assertEqual(overlay_mock.call_count, 2)
 
 
 if __name__ == "__main__":

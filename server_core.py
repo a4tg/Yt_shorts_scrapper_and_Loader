@@ -15,6 +15,7 @@ YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com"}
 YOUTUBE_VIDEO_HOSTS = YOUTUBE_HOSTS | {"youtu.be", "www.youtu.be"}
 PATH_MARKER = "__YTLOADER_FILE__:"
 CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+STATIC_OVERLAY_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp"}
 
 
 def resolve_tool(name: str) -> str:
@@ -182,6 +183,34 @@ def probe_width(video_path: Path) -> int:
     return int(result.stdout.strip())
 
 
+def build_overlay_input_args(overlay_path: Path) -> list[str]:
+    """Build an FFmpeg input that loops animations/video until the main video ends."""
+    if overlay_path.suffix.lower() in STATIC_OVERLAY_SUFFIXES:
+        return ["-loop", "1", "-i", str(overlay_path)]
+    return ["-stream_loop", "-1", "-i", str(overlay_path)]
+
+
+def is_supported_overlay(overlay_path: Path) -> bool:
+    """Return whether FFprobe recognizes the upload as a visual media stream."""
+    try:
+        result = subprocess.run(
+            [
+                resolve_tool("ffprobe"), "-v", "error", "-select_streams", "v:0",
+                "-show_entries", "stream=codec_type",
+                "-of", "default=nokey=1:noprint_wrappers=1", str(overlay_path),
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=CREATE_NO_WINDOW,
+            timeout=20,
+        )
+    except (OSError, RuntimeError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0 and result.stdout.strip() == "video"
+
+
 def overlay_logo_cpu(
     video_path: Path,
     logo_path: Path,
@@ -191,11 +220,7 @@ def overlay_logo_cpu(
 ) -> None:
     width = max(16, round(probe_width(video_path) * width_percent / 100))
     alpha = max(0.05, min(opacity / 100, 1.0))
-    logo_input = (
-        ["-stream_loop", "-1", "-i", str(logo_path)]
-        if logo_path.suffix.lower() == ".gif"
-        else ["-loop", "1", "-i", str(logo_path)]
-    )
+    logo_input = build_overlay_input_args(logo_path)
     temp_path = video_path.with_name(f"{video_path.stem}.watermark.tmp.mp4")
     command = [
         resolve_tool("ffmpeg"), "-y", "-hide_banner", "-loglevel", "warning",

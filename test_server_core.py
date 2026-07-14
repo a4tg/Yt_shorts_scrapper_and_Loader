@@ -2,8 +2,17 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
 
-from server_core import find_downloaded_video, normalize_channel_shorts_url, normalize_video_url, parse_metadata_lines, playlist_limit_args
+from server_core import (
+    build_overlay_input_args,
+    find_downloaded_video,
+    is_supported_overlay,
+    normalize_channel_shorts_url,
+    normalize_video_url,
+    parse_metadata_lines,
+    playlist_limit_args,
+)
 
 
 class ServerUrlTests(unittest.TestCase):
@@ -63,6 +72,27 @@ class DownloadResultTests(unittest.TestCase):
             found = find_downloaded_video(output_dir, reported, "abcdefghijk")
 
         self.assertEqual(found, actual)
+
+
+class OverlayMediaTests(unittest.TestCase):
+    def test_video_overlay_is_looped(self) -> None:
+        self.assertEqual(
+            build_overlay_input_args(Path("overlay.mov")),
+            ["-stream_loop", "-1", "-i", "overlay.mov"],
+        )
+
+    def test_static_image_is_held(self) -> None:
+        self.assertEqual(
+            build_overlay_input_args(Path("overlay.jpg")),
+            ["-loop", "1", "-i", "overlay.jpg"],
+        )
+
+    def test_ffprobe_validation_accepts_visual_stream(self) -> None:
+        with patch("server_core.resolve_tool", return_value="ffprobe"), patch(
+            "server_core.subprocess.run",
+            return_value=Mock(returncode=0, stdout="video\n"),
+        ):
+            self.assertTrue(is_supported_overlay(Path("overlay.anything")))
 
 
 if __name__ == "__main__":

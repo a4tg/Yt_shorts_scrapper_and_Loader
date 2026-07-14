@@ -29,7 +29,15 @@ VIDEO_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{11}$")
 LOCAL_FFMPEG = BASE_DIR / "ffmpeg.exe"
 LOCAL_FFPROBE = BASE_DIR / "ffprobe.exe"
 DOWNLOAD_PATH_MARKER = "__YTLOADER_FILE__:"
-SUPPORTED_LOGO_SUFFIXES = {".png", ".gif"}
+STATIC_OVERLAY_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp"}
+WINDOWS_RESERVED_NAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{index}" for index in range(1, 10)),
+    *(f"LPT{index}" for index in range(1, 10)),
+}
 _NVENC_AVAILABLE: bool | None = None
 
 
@@ -162,6 +170,65 @@ def build_logo_filter(video_width: int, opacity: int, width_percent: int) -> str
     )
 
 
+def build_variant_directories(output_dir: Path, logo_paths: list[Path]) -> list[Path]:
+    """Return unique Windows-safe output directories named after each logo file."""
+    directories: list[Path] = []
+    used_names: set[str] = set()
+
+    for logo_path in logo_paths:
+        folder_name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", logo_path.stem).strip(" .")
+        if not folder_name:
+            folder_name = "gif"
+        if folder_name.upper() in WINDOWS_RESERVED_NAMES:
+            folder_name = f"{folder_name}_gif"
+
+        candidate = folder_name
+        suffix = 2
+        while candidate.casefold() in used_names:
+            candidate = f"{folder_name}_{suffix}"
+            suffix += 1
+
+        used_names.add(candidate.casefold())
+        directories.append(output_dir / candidate)
+
+    return directories
+
+
+def build_overlay_input_args(overlay_path: Path) -> list[str]:
+    """Build an FFmpeg input that lasts until the main video ends."""
+    if overlay_path.suffix.lower() in STATIC_OVERLAY_SUFFIXES:
+        return ["-loop", "1", "-i", str(overlay_path)]
+    return ["-stream_loop", "-1", "-i", str(overlay_path)]
+
+
+def is_supported_overlay(overlay_path: Path, ffprobe_path: str) -> bool:
+    """Accept any file that FFprobe recognizes as a visual stream."""
+    try:
+        result = subprocess.run(
+            [
+                ffprobe_path,
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=codec_type",
+                "-of",
+                "default=nokey=1:noprint_wrappers=1",
+                str(overlay_path),
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=subprocess.CREATE_NO_WINDOW,
+            timeout=20,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0 and result.stdout.strip() == "video"
+
+
 def probe_video_width(video_path: Path, ffprobe_path: str) -> int:
     result = subprocess.run(
         [
@@ -225,11 +292,7 @@ def overlay_logo(
         return False
 
     output_path = video_path.with_name(f"{video_path.stem}.with_logo.tmp.mp4")
-    logo_input = (
-        ["-stream_loop", "-1", "-i", str(logo_path)]
-        if logo_path.suffix.lower() == ".gif"
-        else ["-loop", "1", "-i", str(logo_path)]
-    )
+    logo_input = build_overlay_input_args(logo_path)
     common_command = [
         ffmpeg_path,
         "-y",
@@ -281,6 +344,44 @@ def overlay_logo(
             output_path.unlink()
 
 
+def create_logo_variants(
+    source_path: Path,
+    output_dir: Path,
+    logo_paths: list[Path],
+    opacity: int,
+    width_percent: int,
+    log: Callable[[str], None],
+) -> list[Path]:
+    """Create one processed copy per logo in a folder named after that logo."""
+    completed_paths: list[Path] = []
+    variant_dirs = build_variant_directories(output_dir, logo_paths)
+
+    for index, (logo_path, variant_dir) in enumerate(
+        zip(logo_paths, variant_dirs, strict=True), start=1
+    ):
+        variant_dir.mkdir(parents=True, exist_ok=True)
+        variant_path = variant_dir / source_path.name
+        log(
+            f"Вариант {index}/{len(logo_paths)}: {logo_path.name} → "
+            f"{variant_dir.name}\\{variant_path.name}"
+        )
+        try:
+            shutil.copy2(source_path, variant_path)
+        except OSError as exc:
+            log(f"Не удалось создать копию для {logo_path.name}: {exc}")
+            continue
+
+        if overlay_logo(variant_path, logo_path, opacity, width_percent, log):
+            completed_paths.append(variant_path)
+        else:
+            try:
+                variant_path.unlink()
+            except OSError:
+                pass
+
+    return completed_paths
+
+
 class DownloaderApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
@@ -293,7 +394,7 @@ class DownloaderApp:
         self.output_dir_var = tk.StringVar(value=str(DEFAULT_OUTPUT_DIR))
         self.resolution_var = tk.StringVar(value=DEFAULT_RESOLUTION)
         self.channel_url_var = tk.StringVar()
-        self.logo_path_var = tk.StringVar()
+        self.logo_paths: list[Path] = []
         self.logo_opacity_var = tk.IntVar(value=35)
         self.logo_width_var = tk.IntVar(value=22)
         self.status_var = tk.StringVar(value="Готово к загрузке")
@@ -367,26 +468,25 @@ class DownloaderApp:
         self.urls_text = tk.Text(links_frame, wrap="word", height=14, font=("Consolas", 10))
         self.urls_text.pack(fill="both", expand=True)
 
-        logo_frame = ttk.LabelFrame(frame, text="Логотип поверх видео (необязательно)", padding=12)
+        logo_frame = ttk.LabelFrame(
+            frame, text="Изображение/анимация поверх видео — можно выбрать несколько", padding=12
+        )
         logo_frame.pack(fill="x", pady=(16, 0))
 
         logo_file_frame = ttk.Frame(logo_frame)
         logo_file_frame.pack(fill="x")
-        ttk.Entry(
-            logo_file_frame,
-            textvariable=self.logo_path_var,
-            state="readonly",
-        ).pack(side="left", fill="x", expand=True)
+        self.logo_listbox = tk.Listbox(logo_file_frame, height=3, exportselection=False)
+        self.logo_listbox.pack(side="left", fill="x", expand=True)
         self.logo_choose_button = ttk.Button(
             logo_file_frame,
-            text="Выбрать PNG/GIF",
-            command=self.choose_logo,
+            text="Выбрать оверлеи",
+            command=self.choose_logos,
         )
         self.logo_choose_button.pack(side="left", padx=(8, 0))
         self.logo_clear_button = ttk.Button(
             logo_file_frame,
             text="Убрать",
-            command=lambda: self.logo_path_var.set(""),
+            command=self.clear_logos,
         )
         self.logo_clear_button.pack(side="left", padx=(8, 0))
 
@@ -463,14 +563,27 @@ class DownloaderApp:
         if selected:
             self.output_dir_var.set(selected)
 
-    def choose_logo(self) -> None:
-        selected_file = filedialog.askopenfilename(
-            title="Выбери логотип PNG или GIF",
-            filetypes=[("Логотипы", "*.png *.gif"), ("PNG", "*.png"), ("GIF", "*.gif")],
+    def choose_logos(self) -> None:
+        selected_files = filedialog.askopenfilenames(
+            title="Выбери изображения или анимированные оверлеи",
+            filetypes=[
+                (
+                    "Изображения и видео",
+                    "*.png *.jpg *.jpeg *.bmp *.gif *.apng *.webp *.mov *.mp4 *.m4v *.webm *.mkv *.avi *.mpeg *.mpg",
+                ),
+                ("Все файлы", "*.*"),
+            ],
             initialdir=str(BASE_DIR),
         )
-        if selected_file:
-            self.logo_path_var.set(selected_file)
+        if selected_files:
+            self.logo_paths = [Path(selected_file) for selected_file in selected_files]
+            self.logo_listbox.delete(0, "end")
+            for logo_path in self.logo_paths:
+                self.logo_listbox.insert("end", logo_path.name)
+
+    def clear_logos(self) -> None:
+        self.logo_paths.clear()
+        self.logo_listbox.delete(0, "end")
 
     def paste_from_clipboard(self) -> None:
         try:
@@ -602,8 +715,7 @@ class DownloaderApp:
         resolution_label = self.resolution_var.get()
         max_height = RESOLUTION_OPTIONS.get(resolution_label, RESOLUTION_OPTIONS[DEFAULT_RESOLUTION])
         urls = [line.strip() for line in self.urls_text.get("1.0", "end").splitlines() if line.strip()]
-        logo_path_text = self.logo_path_var.get().strip()
-        logo_path = Path(logo_path_text) if logo_path_text else None
+        logo_paths = list(self.logo_paths)
         try:
             logo_opacity = max(5, min(int(self.logo_opacity_var.get()), 100))
             logo_width = max(5, min(int(self.logo_width_var.get()), 80))
@@ -619,9 +731,21 @@ class DownloaderApp:
             messagebox.showerror("Не найден yt-dlp", f"Файл не найден:\n{YTDLP_EXE}")
             return
 
-        if logo_path:
-            if not logo_path.is_file() or logo_path.suffix.lower() not in SUPPORTED_LOGO_SUFFIXES:
-                messagebox.showwarning("Логотип не найден", "Выбери существующий файл PNG или GIF.")
+        if logo_paths:
+            ffprobe_path = find_media_tool("ffprobe")
+            invalid_logos = [
+                path
+                for path in logo_paths
+                if not path.is_file()
+                or not ffprobe_path
+                or not is_supported_overlay(path, ffprobe_path)
+            ]
+            if invalid_logos:
+                messagebox.showwarning(
+                    "Логотип не найден",
+                    "FFprobe не смог прочитать эти изображения/анимации:\n"
+                    + "\n".join(path.name for path in invalid_logos),
+                )
                 return
             if not find_media_tool("ffmpeg") or not find_media_tool("ffprobe"):
                 messagebox.showerror(
@@ -640,7 +764,7 @@ class DownloaderApp:
 
         self.worker = threading.Thread(
             target=self._download_worker,
-            args=(urls, output_dir, max_height, logo_path, logo_opacity, logo_width),
+            args=(urls, output_dir, max_height, logo_paths, logo_opacity, logo_width),
             daemon=True,
         )
         self.worker.start()
@@ -650,11 +774,13 @@ class DownloaderApp:
         urls: list[str],
         output_dir: Path,
         max_height: int,
-        logo_path: Path | None,
+        logo_paths: list[Path],
         logo_opacity: int,
         logo_width: int,
     ) -> None:
         success_count = 0
+        download_dir = output_dir / ".ytloader_downloads" if logo_paths else output_dir
+        download_dir.mkdir(parents=True, exist_ok=True)
 
         for index, url in enumerate(urls, start=1):
             cookies_path = detect_cookies(url)
@@ -671,7 +797,7 @@ class DownloaderApp:
                 "--print",
                 f"after_move:{DOWNLOAD_PATH_MARKER}%(filepath)s",
                 "-P",
-                str(output_dir),
+                str(download_dir),
             ]
 
             if "youtube.com" in url.lower() or "youtu.be" in url.lower():
@@ -711,15 +837,28 @@ class DownloaderApp:
 
             return_code = process.wait()
             if return_code == 0:
-                if logo_path:
+                if logo_paths:
                     if downloaded_path and downloaded_path.is_file():
-                        overlay_logo(
+                        completed_variants = create_logo_variants(
                             downloaded_path,
-                            logo_path,
+                            output_dir,
+                            logo_paths,
                             logo_opacity,
                             logo_width,
                             self._log,
                         )
+                        if completed_variants:
+                            downloaded_path.unlink()
+                            self._log(
+                                f"Создано вариантов: {len(completed_variants)}/{len(logo_paths)}"
+                            )
+                        else:
+                            fallback_path = output_dir / downloaded_path.name
+                            downloaded_path.replace(fallback_path)
+                            self._log(
+                                "Не удалось создать ни одного варианта; исходное видео "
+                                f"сохранено как {fallback_path.name}."
+                            )
                     else:
                         self._log("Не удалось определить скачанный файл — логотип не наложен.")
                 success_count += 1
@@ -727,6 +866,11 @@ class DownloaderApp:
             else:
                 self._log(f"Ошибка загрузки, код {return_code}: {url}")
 
+        if logo_paths:
+            try:
+                download_dir.rmdir()
+            except OSError:
+                pass
         self.log_queue.put(f"__DONE__:{success_count}/{len(urls)}")
 
     def _flush_log_queue(self) -> None:
@@ -805,6 +949,7 @@ class DownloaderApp:
         for control in (
             self.logo_choose_button,
             self.logo_clear_button,
+            self.logo_listbox,
             self.logo_opacity_spinbox,
             self.logo_width_spinbox,
         ):

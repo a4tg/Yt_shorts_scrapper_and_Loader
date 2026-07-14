@@ -16,7 +16,14 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
-from server_core import BASE_DIR, download_short, normalize_channel_shorts_url, normalize_video_url, run_channel_import
+from server_core import (
+    BASE_DIR,
+    download_short,
+    is_supported_overlay,
+    normalize_channel_shorts_url,
+    normalize_video_url,
+    run_channel_import,
+)
 
 
 DATA_DIR = Path(os.getenv("YT_LOADER_DATA_DIR", BASE_DIR / "server_data")).resolve()
@@ -30,6 +37,7 @@ for directory in (JOBS_DIR, IMPORTS_DIR, VIDEOS_DIR, LOGOS_DIR):
 
 AFTER_DOWNLOAD_MINUTES = max(1, int(os.getenv("YT_LOADER_AFTER_DOWNLOAD_MINUTES", "15")))
 READY_HOURS = max(1, int(os.getenv("YT_LOADER_READY_HOURS", "24")))
+MAX_OVERLAY_BYTES = max(1, int(os.getenv("YT_LOADER_MAX_OVERLAY_MB", "100"))) * 1024 * 1024
 
 
 def cleanup_expired_files() -> None:
@@ -319,17 +327,22 @@ def item_metadata(job_id: str, video_id: str) -> PlainTextResponse:
 @app.post("/api/logos")
 async def upload_logo(file: UploadFile) -> dict[str, str]:
     suffix = Path(file.filename or "").suffix.lower()
-    if suffix not in {".png", ".gif"}:
-        raise HTTPException(400, "Разрешены только PNG и GIF")
-    content = await file.read(5 * 1024 * 1024 + 1)
+    if not suffix or len(suffix) > 11 or not suffix[1:].isalnum():
+        suffix = ".media"
+    content = await file.read(MAX_OVERLAY_BYTES + 1)
     await file.close()
-    if len(content) > 5 * 1024 * 1024:
-        raise HTTPException(413, "Логотип больше 5 МБ")
-    valid_signature = content.startswith(b"\x89PNG\r\n\x1a\n") if suffix == ".png" else content.startswith((b"GIF87a", b"GIF89a"))
-    if not valid_signature:
-        raise HTTPException(400, "Файл не похож на корректный PNG/GIF")
+    if len(content) > MAX_OVERLAY_BYTES:
+        raise HTTPException(413, f"Оверлей больше {MAX_OVERLAY_BYTES // 1024 // 1024} МБ")
     token = uuid.uuid4().hex
-    (LOGOS_DIR / f"{token}{suffix}").write_bytes(content)
+    overlay_path = LOGOS_DIR / f"{token}{suffix}"
+    overlay_path.write_bytes(content)
+    if not is_supported_overlay(overlay_path):
+        overlay_path.unlink(missing_ok=True)
+        raise HTTPException(
+            400,
+            "FFmpeg не смог прочитать файл. Выбери изображение или анимацию/видео "
+            "в поддерживаемом формате.",
+        )
     return {"token": token}
 
 

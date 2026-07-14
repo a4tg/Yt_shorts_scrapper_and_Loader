@@ -30,7 +30,7 @@ async function pollJob(id, onUpdate) {
 $('#opacity').addEventListener('input', (e) => $('#opacity-value').textContent = `${e.target.value}%`);
 $('#logo-width').addEventListener('input', (e) => $('#width-value').textContent = `${e.target.value}%`);
 $('#logo-file').addEventListener('change', (e) => {
-  const file = e.target.files[0]; $('#logo-name').textContent = file ? file.name : 'Без логотипа';
+  const file = e.target.files[0]; $('#logo-name').textContent = file ? file.name : 'Без оверлея';
   state.logoToken = null; state.logoFileKey = null;
 });
 
@@ -40,7 +40,7 @@ async function ensureLogoUploaded() {
   const key = `${file.name}:${file.size}:${file.lastModified}`;
   if (state.logoToken && state.logoFileKey === key) return state.logoToken;
   const form = new FormData(); form.append('file', file);
-  showToast('Загружаю логотип…');
+  showToast('Загружаю оверлей…');
   const result = await api('/api/logos', { method: 'POST', body: form });
   state.logoToken = result.token; state.logoFileKey = key; return result.token;
 }
