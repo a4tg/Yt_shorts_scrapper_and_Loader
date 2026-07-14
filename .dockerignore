@@ -1,0 +1,13 @@
+.git
+.agents
+.codex
+__pycache__
+*.pyc
+*.mov
+*.mp4
+*.exe
+cookies
+for_cut
+cut_result
+server_data
+.env

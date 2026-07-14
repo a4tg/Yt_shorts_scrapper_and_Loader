@@ -1,0 +1,17 @@
+services:
+  yt-loader:
+    build: .
+    container_name: yt-loader
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      YT_LOADER_USERNAME: ${YT_LOADER_USERNAME:-admin}
+      YT_LOADER_PASSWORD: ${YT_LOADER_PASSWORD:?Set YT_LOADER_PASSWORD in .env}
+      FFMPEG_PRESET: ${FFMPEG_PRESET:-ultrafast}
+      FFMPEG_CRF: ${FFMPEG_CRF:-20}
+      YT_LOADER_RETENTION_HOURS: ${YT_LOADER_RETENTION_HOURS:-24}
+      YOUTUBE_COOKIES: /cookies/www.youtube.com_cookies.txt
+    volumes:
+      - ./server_data:/data
+      - ./cookies:/cookies:ro

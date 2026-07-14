@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+cookies/
+for_cut/
+cut_result/
+server_data/
+*.mov
+.agents/
+.codex/
+.env

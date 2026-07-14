@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>YT Shorts Loader</title>
+  <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Собственный медиасервис</p>
+        <h1>YT Shorts Loader</h1>
+        <p class="lead">Соберите Shorts канала, отдельно выгрузите метаданные и подготовьте видео с логотипом.</p>
+      </div>
+      <span class="health" id="health"><i></i> Сервер доступен</span>
+    </header>
+
+    <section class="panel import-panel">
+      <div class="section-title">
+        <span class="step">1</span>
+        <div><h2>Канал YouTube</h2><p>Вставьте ссылку вида youtube.com/@channel</p></div>
+      </div>
+      <form id="channel-form" class="channel-form">
+        <input id="channel-url" type="url" placeholder="https://www.youtube.com/@channel" required>
+        <button class="primary" type="submit">Получить Shorts</button>
+      </form>
+      <div id="import-status" class="status hidden"></div>
+    </section>
+
+    <section class="panel settings-panel">
+      <div class="section-title">
+        <span class="step">2</span>
+        <div><h2>Обработка видео</h2><p>Настройки применяются к кнопке «Подготовить видео»</p></div>
+      </div>
+      <div class="settings-grid">
+        <label class="file-control">
+          <span>Логотип PNG/GIF <small>до 5 МБ</small></span>
+          <input id="logo-file" type="file" accept="image/png,image/gif">
+          <b id="logo-name">Без логотипа</b>
+        </label>
+        <label><span>Непрозрачность</span><div class="range-row"><input id="opacity" type="range" min="5" max="100" value="35"><output id="opacity-value">35%</output></div></label>
+        <label><span>Ширина логотипа</span><div class="range-row"><input id="logo-width" type="range" min="5" max="60" value="22"><output id="width-value">22%</output></div></label>
+        <label><span>Разрешение</span><select id="resolution"><option value="720">720p</option><option value="1080" selected>1080p</option><option value="1440">1440p</option><option value="2160">2160p</option></select></label>
+      </div>
+    </section>
+
+    <section id="results-section" class="panel results-panel hidden">
+      <div class="results-head">
+        <div class="section-title compact"><span class="step">3</span><div><h2>Shorts канала</h2><p id="result-count"></p></div></div>
+        <a id="csv-link" class="secondary" href="#">Скачать общий CSV</a>
+      </div>
+      <div id="items" class="items"></div>
+    </section>
+  </main>
+  <div id="toast" class="toast hidden"></div>
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>
