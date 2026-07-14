@@ -52,7 +52,10 @@ $('#channel-form').addEventListener('submit', async (event) => {
   try {
     const created = await api('/api/channels/import', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ channel_url: $('#channel-url').value })
+      body: JSON.stringify({
+        channel_url: $('#channel-url').value,
+        limit: Number($('#shorts-limit').value)
+      })
     });
     state.importId = created.id;
     localStorage.setItem('ytLoaderImportJob', created.id);

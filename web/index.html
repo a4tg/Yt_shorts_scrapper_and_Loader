@@ -24,6 +24,14 @@
       </div>
       <form id="channel-form" class="channel-form">
         <input id="channel-url" type="url" placeholder="https://www.youtube.com/@channel" required>
+        <select id="shorts-limit" aria-label="Сколько Shorts получить">
+          <option value="10">Первые 10</option>
+          <option value="25">Первые 25</option>
+          <option value="50" selected>Первые 50</option>
+          <option value="100">Первые 100</option>
+          <option value="200">Первые 200</option>
+          <option value="0">Все Shorts</option>
+        </select>
         <button class="primary" type="submit">Получить Shorts</button>
       </form>
       <div id="import-status" class="status hidden"></div>

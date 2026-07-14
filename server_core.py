@@ -95,7 +95,11 @@ def parse_metadata_lines(output: str) -> list[dict[str, object]]:
     return records
 
 
-def run_channel_import(channel_url: str, json_path: Path, csv_path: Path) -> int:
+def playlist_limit_args(limit: int) -> list[str]:
+    return ["--playlist-end", str(limit)] if limit > 0 else []
+
+
+def run_channel_import(channel_url: str, json_path: Path, csv_path: Path, limit: int = 50) -> int:
     command = [
         resolve_tool("yt-dlp"),
         "--ignore-config",
@@ -104,6 +108,7 @@ def run_channel_import(channel_url: str, json_path: Path, csv_path: Path) -> int
         "--no-warnings",
         "--no-update",
         "--js-runtimes", "node",
+        *playlist_limit_args(limit),
         "--print",
         "%(.{id,title,description,tags,uploader,upload_date,duration,thumbnail})j",
     ]
@@ -183,8 +188,8 @@ def overlay_logo_cpu(
         f"[1:v]scale={width}:-1,format=rgba,colorchannelmixer=aa={alpha:.2f}[logo];"
         "[0:v][logo]overlay=(W-w)/2:H-h-H*0.03:shortest=1,format=yuv420p[v]",
         "-map", "[v]", "-map", "0:a?", "-c:v", "libx264",
-        "-preset", os.getenv("FFMPEG_PRESET", "ultrafast"),
-        "-crf", os.getenv("FFMPEG_CRF", "20"), "-c:a", "copy",
+        "-preset", os.getenv("FFMPEG_PRESET", "veryfast"),
+        "-crf", os.getenv("FFMPEG_CRF", "22"), "-c:a", "copy",
         "-movflags", "+faststart", "-shortest", str(temp_path),
     ]
     log("Накладываю логотип на CPU…")
@@ -205,6 +210,24 @@ def overlay_logo_cpu(
             temp_path.unlink()
 
 
+def find_downloaded_video(
+    output_dir: Path,
+    reported_path: Path | None,
+    video_id: str,
+) -> Path | None:
+    if reported_path and reported_path.is_file():
+        return reported_path
+    candidates = [
+        path
+        for path in output_dir.iterdir()
+        if path.is_file()
+        and path.suffix.lower() == ".mp4"
+        and f"[{video_id}]" in path.name
+        and ".tmp." not in path.name
+    ]
+    return max(candidates, key=lambda path: path.stat().st_mtime) if candidates else None
+
+
 def download_short(
     url: str,
     output_dir: Path,
@@ -215,9 +238,12 @@ def download_short(
     log: Callable[[str], None],
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
+    normalized_url = normalize_video_url(url)
+    video_id = normalized_url.rsplit("/", 1)[-1]
     command = [
         resolve_tool("yt-dlp"), "--ignore-config",
         "--js-runtimes", "node",
+        "--no-update",
         "-f", f"bv*[height<={max_height}]+ba/b[height<={max_height}]",
         "--merge-output-format", "mp4", "--remux-video", "mp4",
         "--print", f"after_move:{PATH_MARKER}%(filepath)s",
@@ -226,7 +252,7 @@ def download_short(
     cookies = youtube_cookies()
     if cookies:
         command.extend(["--cookies", str(cookies)])
-    command.append(normalize_video_url(url))
+    command.append(normalized_url)
     log("Скачиваю видео…")
     process = subprocess.Popen(
         command,
@@ -238,15 +264,26 @@ def download_short(
         creationflags=CREATE_NO_WINDOW,
     )
     downloaded: Path | None = None
+    output_lines: list[str] = []
     assert process.stdout is not None
     for line in process.stdout:
         clean = line.strip()
         if clean.startswith(PATH_MARKER):
             downloaded = Path(clean[len(PATH_MARKER):])
         elif clean:
+            output_lines.append(clean)
             log(clean[-500:])
-    if process.wait() != 0 or not downloaded or not downloaded.is_file():
-        raise RuntimeError("Не удалось скачать видео")
+    return_code = process.wait()
+    downloaded = find_downloaded_video(output_dir, downloaded, video_id)
+    if return_code != 0:
+        details = "\n".join(output_lines[-8:])
+        raise RuntimeError(f"yt-dlp завершился с кодом {return_code}: {details}".strip())
+    if not downloaded:
+        details = "\n".join(output_lines[-5:])
+        raise RuntimeError(
+            "Видео скачалось, но итоговый MP4 не найден в папке задания. " + details
+        )
+    log(f"Видео сохранено: {downloaded.name}")
     if logo_path:
         overlay_logo_cpu(downloaded, logo_path, opacity, width_percent, log)
     return downloaded

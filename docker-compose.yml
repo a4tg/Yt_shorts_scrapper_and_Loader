@@ -8,8 +8,8 @@ services:
     environment:
       YT_LOADER_USERNAME: ${YT_LOADER_USERNAME:-admin}
       YT_LOADER_PASSWORD: ${YT_LOADER_PASSWORD:?Set YT_LOADER_PASSWORD in .env}
-      FFMPEG_PRESET: ${FFMPEG_PRESET:-ultrafast}
-      FFMPEG_CRF: ${FFMPEG_CRF:-20}
+      FFMPEG_PRESET: ${FFMPEG_PRESET:-veryfast}
+      FFMPEG_CRF: ${FFMPEG_CRF:-22}
       YT_LOADER_RETENTION_HOURS: ${YT_LOADER_RETENTION_HOURS:-24}
       YOUTUBE_COOKIES: /cookies/www.youtube.com_cookies.txt
     volumes:

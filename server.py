@@ -57,6 +57,7 @@ threading.Thread(target=cleanup_loop, daemon=True, name="cleanup-worker").start(
 
 class ChannelRequest(BaseModel):
     channel_url: str = Field(min_length=5, max_length=500)
+    limit: int = Field(default=50, ge=0, le=1000)
 
 
 class DownloadRequest(BaseModel):
@@ -131,6 +132,7 @@ class JobManager:
                         str(args["channel_url"]),
                         IMPORTS_DIR / f"{job_id}.json",
                         IMPORTS_DIR / f"{job_id}.csv",
+                        int(args["limit"]),
                     )
                     result = {"count": count}
                 elif kind == "download":
@@ -182,7 +184,7 @@ def import_channel(payload: ChannelRequest) -> dict[str, object]:
         channel_url = normalize_channel_shorts_url(payload.channel_url)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    return manager.create("import", {"channel_url": channel_url})
+    return manager.create("import", {"channel_url": channel_url, "limit": payload.limit})
 
 
 @app.get("/api/jobs/{job_id}")
