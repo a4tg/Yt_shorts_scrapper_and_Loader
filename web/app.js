@@ -21,6 +21,7 @@ async function pollJob(id, onUpdate) {
   while (true) {
     const job = await api(`/api/jobs/${id}`); onUpdate(job);
     if (job.status === 'done') return job;
+    if (job.status === 'deleted') throw new Error(job.message || 'Видео удалено');
     if (job.status === 'error') throw new Error(job.message || 'Задание завершилось ошибкой');
     await sleep(1500);
   }
@@ -83,29 +84,112 @@ function renderItems(items, importId) {
     const videoButton = document.createElement('button'); videoButton.className = 'primary'; videoButton.textContent = 'Подготовить видео';
     const metadata = document.createElement('a'); metadata.className = 'ghost'; metadata.textContent = 'Теги и описание'; metadata.href = `/api/imports/${importId}/${item.id}/metadata.txt`;
     const note = document.createElement('div'); note.className = 'job-note';
-    videoButton.addEventListener('click', () => startDownload(item, videoButton, note));
+    videoButton.addEventListener('click', () => startDownloadUrl(item.url, videoButton, note));
     actions.append(videoButton, metadata, note); card.append(image, info, actions); container.append(card);
   }
   $('#results-section').classList.remove('hidden');
 }
 
-async function startDownload(item, button, note) {
+function downloadPayload(url, logoToken) {
+  return {
+    url, logo_token: logoToken,
+    opacity: Number($('#opacity').value), width_percent: Number($('#logo-width').value),
+    max_height: Number($('#resolution').value)
+  };
+}
+
+function showReadyDownload(job, oldButton, note) {
+  const downloadButton = document.createElement('button');
+  downloadButton.className = 'primary'; downloadButton.textContent = 'Скачать MP4';
+  oldButton.replaceWith(downloadButton);
+  note.textContent = 'Видео готово. Таймер удаления запустится при скачивании.';
+
+  const markDeleted = (message = 'Видео удалено') => {
+    downloadButton.disabled = true; downloadButton.textContent = 'Файл удалён';
+    const deleteButton = downloadButton.parentElement?.querySelector(`[data-delete-job="${job.id}"]`);
+    if (deleteButton) deleteButton.remove();
+    note.textContent = message;
+  };
+
+  const startCountdown = (ticket) => {
+    let deleteButton = downloadButton.parentElement?.querySelector(`[data-delete-job="${job.id}"]`);
+    if (!deleteButton) {
+      deleteButton = document.createElement('button'); deleteButton.className = 'danger';
+      deleteButton.dataset.deleteJob = job.id;
+      downloadButton.insertAdjacentElement('afterend', deleteButton);
+      deleteButton.addEventListener('click', async () => {
+        deleteButton.disabled = true;
+        try {
+          await api(ticket.delete_url, { method: 'DELETE' });
+          markDeleted('Видео удалено вручную');
+        } catch (error) { note.textContent = error.message; deleteButton.disabled = false; }
+      });
+    }
+    const renderTimer = () => {
+      const seconds = Math.max(0, Math.ceil((new Date(ticket.delete_at).getTime() - Date.now()) / 1000));
+      const minutes = String(Math.floor(seconds / 60)).padStart(2, '0');
+      const rest = String(seconds % 60).padStart(2, '0');
+      deleteButton.textContent = `Удалить сейчас · ${minutes}:${rest}`;
+      if (seconds <= 0) { clearInterval(timer); markDeleted('Таймер истёк, видео удалено'); }
+    };
+    const timer = setInterval(renderTimer, 1000); renderTimer();
+  };
+
+  const waitForCompletedTransfer = async (ticket) => {
+    if (ticket.delete_at) {
+      downloadButton.textContent = 'Скачать ещё раз'; downloadButton.disabled = false;
+      startCountdown(ticket); return;
+    }
+    while (true) {
+      const current = await api(`/api/jobs/${job.id}`);
+      if (current.status === 'deleted') { markDeleted(current.message); return; }
+      if (current.delete_at) {
+        downloadButton.textContent = 'Скачать ещё раз'; downloadButton.disabled = false;
+        startCountdown({ ...ticket, delete_at: current.delete_at }); return;
+      }
+      await sleep(1000);
+    }
+  };
+
+  downloadButton.addEventListener('click', async () => {
+    downloadButton.disabled = true;
+    try {
+      const ticket = await api(job.download_ticket_url, { method: 'POST' });
+      const link = document.createElement('a'); link.href = ticket.download_url; link.download = '';
+      document.body.append(link); link.click(); link.remove();
+      downloadButton.textContent = 'Передаётся файл…';
+      note.textContent = 'Скачивание начато. Таймер появится после передачи файла.';
+      waitForCompletedTransfer(ticket).catch((error) => {
+        note.textContent = error.message; downloadButton.disabled = false; downloadButton.textContent = 'Повторить скачивание';
+      });
+    } catch (error) { note.textContent = error.message; downloadButton.disabled = false; }
+  });
+}
+
+async function startDownloadUrl(url, button, note) {
   button.disabled = true; note.textContent = 'Подготовка задания…';
   try {
     const logoToken = await ensureLogoUploaded();
     const created = await api('/api/videos/download', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        url: item.url, logo_token: logoToken,
-        opacity: Number($('#opacity').value), width_percent: Number($('#logo-width').value),
-        max_height: Number($('#resolution').value)
-      })
+      body: JSON.stringify(downloadPayload(url, logoToken))
     });
     const job = await pollJob(created.id, (current) => { note.textContent = current.message || current.status; });
-    const link = document.createElement('a'); link.className = 'primary'; link.textContent = 'Скачать MP4'; link.href = job.video_url;
-    button.replaceWith(link); note.textContent = 'Видео готово';
+    showReadyDownload(job, button, note);
   } catch (error) { note.textContent = error.message; button.disabled = false; }
 }
+
+$('#direct-video-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const submitButton = event.submitter; const box = $('#direct-video-actions');
+  const buttons = $('#direct-video-buttons'); const note = $('#direct-video-note');
+  box.classList.remove('hidden'); buttons.replaceChildren();
+  const workButton = document.createElement('button'); workButton.className = 'primary';
+  workButton.textContent = 'Подготовка…'; buttons.append(workButton);
+  submitButton.disabled = true;
+  await startDownloadUrl($('#direct-video-url').value, workButton, note);
+  submitButton.disabled = false;
+});
 
 api('/api/health').catch(() => { $('#health').innerHTML = '<i style="background:#ff6b7d"></i> Сервер недоступен'; });
 

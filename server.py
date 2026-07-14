@@ -3,16 +3,18 @@ import json
 import os
 import queue
 import secrets
+import shutil
 import threading
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from starlette.background import BackgroundTask
 
 from server_core import BASE_DIR, download_short, normalize_channel_shorts_url, normalize_video_url, run_channel_import
 
@@ -25,6 +27,9 @@ LOGOS_DIR = DATA_DIR / "logos"
 WEB_DIR = BASE_DIR / "web"
 for directory in (JOBS_DIR, IMPORTS_DIR, VIDEOS_DIR, LOGOS_DIR):
     directory.mkdir(parents=True, exist_ok=True)
+
+AFTER_DOWNLOAD_MINUTES = max(1, int(os.getenv("YT_LOADER_AFTER_DOWNLOAD_MINUTES", "15")))
+READY_HOURS = max(1, int(os.getenv("YT_LOADER_READY_HOURS", "24")))
 
 
 def cleanup_expired_files() -> None:
@@ -75,6 +80,7 @@ class JobManager:
         self.tasks: queue.Queue[tuple[str, str, dict[str, object]]] = queue.Queue()
         self._load_jobs()
         threading.Thread(target=self._worker, daemon=True, name="media-worker").start()
+        threading.Thread(target=self._expiry_worker, daemon=True, name="video-expiry-worker").start()
 
     def _load_jobs(self) -> None:
         for path in JOBS_DIR.glob("*.json"):
@@ -119,6 +125,67 @@ class JobManager:
                 raise KeyError(job_id)
             return dict(self.jobs[job_id])
 
+    def start_download_timer(self, job_id: str) -> dict[str, object]:
+        with self.lock:
+            job = self.jobs.get(job_id)
+            if not job:
+                raise KeyError(job_id)
+            if job.get("kind") != "download" or job.get("status") != "done":
+                raise RuntimeError("Видео ещё не готово")
+            if not job.get("delete_at"):
+                now = datetime.now(timezone.utc)
+                job["downloaded_at"] = now.isoformat()
+                job["delete_at"] = (now + timedelta(minutes=AFTER_DOWNLOAD_MINUTES)).isoformat()
+                self._save(job)
+            return dict(job)
+
+    def authorize_download(self, job_id: str) -> dict[str, object]:
+        with self.lock:
+            job = self.jobs.get(job_id)
+            if not job:
+                raise KeyError(job_id)
+            if job.get("kind") != "download" or job.get("status") != "done":
+                raise RuntimeError("Видео ещё не готово")
+            job["download_ticket_at"] = datetime.now(timezone.utc).isoformat()
+            self._save(job)
+            return dict(job)
+
+    def delete_download(self, job_id: str, message: str = "Видео удалено") -> dict[str, object]:
+        with self.lock:
+            job = self.jobs.get(job_id)
+            if not job:
+                raise KeyError(job_id)
+            if job.get("kind") != "download":
+                raise RuntimeError("Это не задание видео")
+            if job.get("status") in {"queued", "running"}:
+                raise RuntimeError("Нельзя удалить видео, пока оно обрабатывается")
+            if job.get("status") == "deleted":
+                return dict(job)
+            shutil.rmtree(VIDEOS_DIR / job_id, ignore_errors=True)
+            job.update(status="deleted", message=message, deleted_at=datetime.now(timezone.utc).isoformat())
+            self._save(job)
+            return dict(job)
+
+    def _expire_downloads(self) -> None:
+        now = datetime.now(timezone.utc)
+        with self.lock:
+            candidates = [
+                (str(job_id), str(job.get("delete_at") or job.get("ready_expires_at") or ""))
+                for job_id, job in self.jobs.items()
+                if job.get("kind") == "download" and job.get("status") == "done"
+            ]
+        for job_id, expires_at in candidates:
+            try:
+                if expires_at and datetime.fromisoformat(expires_at) <= now:
+                    self.delete_download(job_id, "Срок хранения истёк, видео удалено")
+            except (KeyError, RuntimeError, ValueError):
+                continue
+
+    def _expiry_worker(self) -> None:
+        while True:
+            self._expire_downloads()
+            time.sleep(5)
+
     def _log(self, job_id: str, message: str) -> None:
         self.update(job_id, message=message[-500:])
 
@@ -145,7 +212,14 @@ class JobManager:
                     result = {"filename": video_path.name}
                 else:
                     raise RuntimeError("Неизвестный тип задания")
-                self.update(job_id, status="done", message="Готово", result=result)
+                ready_expires_at = (
+                    (datetime.now(timezone.utc) + timedelta(hours=READY_HOURS)).isoformat()
+                    if kind == "download" else None
+                )
+                values: dict[str, object] = {"status": "done", "message": "Готово", "result": result}
+                if ready_expires_at:
+                    values["ready_expires_at"] = ready_expires_at
+                self.update(job_id, **values)
             except Exception as exc:
                 self.update(job_id, status="error", message=str(exc)[-1000:])
             finally:
@@ -198,7 +272,8 @@ def get_job(job_id: str) -> dict[str, object]:
             job["items_url"] = f"/api/imports/{job_id}/items"
             job["csv_url"] = f"/api/imports/{job_id}/metadata.csv"
         elif job.get("kind") == "download":
-            job["video_url"] = f"/api/videos/{job_id}/download"
+            job["download_ticket_url"] = f"/api/videos/{job_id}/download-ticket"
+            job["delete_url"] = f"/api/videos/{job_id}"
     return job
 
 
@@ -293,13 +368,53 @@ def download_result(job_id: str) -> FileResponse:
         job = manager.get(job_id)
     except KeyError as exc:
         raise HTTPException(404, "Задание не найдено") from exc
+    if job.get("status") == "deleted":
+        raise HTTPException(410, "Видео уже удалено")
     if job.get("kind") != "download" or job.get("status") != "done":
         raise HTTPException(409, "Видео ещё не готово")
+    if not job.get("download_ticket_at"):
+        raise HTTPException(409, "Сначала запросите скачивание")
+    if job.get("delete_at") and datetime.fromisoformat(str(job["delete_at"])) <= datetime.now(timezone.utc):
+        manager.delete_download(job_id, "Срок хранения истёк, видео удалено")
+        raise HTTPException(410, "Срок скачивания истёк")
     filename = str(dict(job.get("result") or {}).get("filename") or "")
     path = VIDEOS_DIR / job_id / filename
     if not filename or not path.is_file() or path.parent != (VIDEOS_DIR / job_id):
         raise HTTPException(404, "Видео не найдено")
-    return FileResponse(path, filename=filename, media_type="video/mp4")
+    background = None if job.get("delete_at") else BackgroundTask(manager.start_download_timer, job_id)
+    return FileResponse(path, filename=filename, media_type="video/mp4", background=background)
+
+
+@app.post("/api/videos/{job_id}/download-ticket")
+def create_download_ticket(job_id: str) -> dict[str, object]:
+    try:
+        job = manager.authorize_download(job_id)
+    except KeyError as exc:
+        raise HTTPException(404, "Задание не найдено") from exc
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    filename = str(dict(job.get("result") or {}).get("filename") or "")
+    if not filename or not (VIDEOS_DIR / job_id / filename).is_file():
+        raise HTTPException(410, "Видео уже удалено")
+    response: dict[str, object] = {
+        "download_url": f"/api/videos/{job_id}/download",
+        "delete_url": f"/api/videos/{job_id}",
+        "timer_minutes": AFTER_DOWNLOAD_MINUTES,
+    }
+    if job.get("delete_at"):
+        response["delete_at"] = job["delete_at"]
+    return response
+
+
+@app.delete("/api/videos/{job_id}")
+def delete_video(job_id: str) -> dict[str, object]:
+    try:
+        job = manager.delete_download(job_id)
+    except KeyError as exc:
+        raise HTTPException(404, "Задание не найдено") from exc
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {"status": job["status"], "message": job["message"]}
 
 
 app.mount("/assets", StaticFiles(directory=WEB_DIR), name="assets")

@@ -1,0 +1,29 @@
+.danger {
+  background: rgba(255, 107, 125, .12);
+  border: 1px solid rgba(255, 107, 125, .55);
+  color: #ff9daa;
+}
+.danger:hover { filter: brightness(1.13); }
+.direct-video {
+  display: grid;
+  grid-template-columns: minmax(210px, .7fr) minmax(320px, 1.3fr);
+  gap: 12px 20px;
+  align-items: center;
+  margin-top: 22px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+.direct-video h3 { margin: 0; font-size: 16px; }
+.direct-video p { margin: 3px 0 0; color: var(--muted); font-size: 13px; }
+.direct-video-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
+.direct-result { grid-column: 2; display: grid; gap: 8px; }
+.direct-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+.direct-buttons > * { flex: 1; }
+.direct-result .job-note { text-align: left; max-width: none; }
+@media (max-width: 850px) {
+  .direct-video { grid-template-columns: 1fr; }
+  .direct-result { grid-column: 1; }
+}
+@media (max-width: 560px) {
+  .direct-video-form { grid-template-columns: 1fr; }
+}

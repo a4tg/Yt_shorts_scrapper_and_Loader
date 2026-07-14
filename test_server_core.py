@@ -16,12 +16,20 @@ class ServerUrlTests(unittest.TestCase):
     def test_short_url(self) -> None:
         self.assertEqual(
             normalize_video_url("https://www.youtube.com/shorts/abcdefghijk"),
-            "https://www.youtube.com/shorts/abcdefghijk",
+            "https://www.youtube.com/watch?v=abcdefghijk",
         )
 
-    def test_rejects_watch_url(self) -> None:
-        with self.assertRaises(ValueError):
-            normalize_video_url("https://www.youtube.com/watch?v=abcdefghijk")
+    def test_watch_url(self) -> None:
+        self.assertEqual(
+            normalize_video_url("https://www.youtube.com/watch?v=abcdefghijk&t=10"),
+            "https://www.youtube.com/watch?v=abcdefghijk",
+        )
+
+    def test_short_youtu_be_url(self) -> None:
+        self.assertEqual(
+            normalize_video_url("youtu.be/abcdefghijk?si=demo"),
+            "https://www.youtube.com/watch?v=abcdefghijk",
+        )
 
     def test_playlist_limit(self) -> None:
         self.assertEqual(playlist_limit_args(50), ["--playlist-end", "50"])

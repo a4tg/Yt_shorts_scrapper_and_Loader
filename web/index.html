@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>YT Shorts Loader</title>
   <link rel="stylesheet" href="/assets/style.css">
+  <link rel="stylesheet" href="/assets/direct-video.css">
 </head>
 <body>
   <main class="shell">
@@ -51,6 +52,20 @@
         <label><span>Непрозрачность</span><div class="range-row"><input id="opacity" type="range" min="5" max="100" value="35"><output id="opacity-value">35%</output></div></label>
         <label><span>Ширина логотипа</span><div class="range-row"><input id="logo-width" type="range" min="5" max="60" value="22"><output id="width-value">22%</output></div></label>
         <label><span>Разрешение</span><select id="resolution"><option value="720">720p</option><option value="1080" selected>1080p</option><option value="1440">1440p</option><option value="2160">2160p</option></select></label>
+      </div>
+      <div class="direct-video">
+        <div>
+          <h3>Конкретное YouTube-видео</h3>
+          <p>Подходят ссылки youtube.com/watch, youtu.be и youtube.com/shorts</p>
+        </div>
+        <form id="direct-video-form" class="direct-video-form">
+          <input id="direct-video-url" type="url" placeholder="https://www.youtube.com/watch?v=..." required>
+          <button class="primary" type="submit">Подготовить видео</button>
+        </form>
+        <div id="direct-video-actions" class="direct-result hidden">
+          <div id="direct-video-buttons" class="direct-buttons"></div>
+          <div id="direct-video-note" class="job-note"></div>
+        </div>
       </div>
     </section>
 

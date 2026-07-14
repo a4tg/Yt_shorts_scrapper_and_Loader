@@ -11,6 +11,8 @@ services:
       FFMPEG_PRESET: ${FFMPEG_PRESET:-veryfast}
       FFMPEG_CRF: ${FFMPEG_CRF:-22}
       YT_LOADER_RETENTION_HOURS: ${YT_LOADER_RETENTION_HOURS:-24}
+      YT_LOADER_AFTER_DOWNLOAD_MINUTES: ${YT_LOADER_AFTER_DOWNLOAD_MINUTES:-15}
+      YT_LOADER_READY_HOURS: ${YT_LOADER_READY_HOURS:-24}
       YOUTUBE_COOKIES: /cookies/www.youtube.com_cookies.txt
     volumes:
       - ./server_data:/data

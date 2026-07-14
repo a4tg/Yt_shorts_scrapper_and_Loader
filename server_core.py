@@ -6,12 +6,13 @@ import shutil
 import subprocess
 from pathlib import Path
 from typing import Callable
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 
 BASE_DIR = Path(__file__).resolve().parent
 VIDEO_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{11}$")
 YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com"}
+YOUTUBE_VIDEO_HOSTS = YOUTUBE_HOSTS | {"youtu.be", "www.youtu.be"}
 PATH_MARKER = "__YTLOADER_FILE__:"
 CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
@@ -54,14 +55,29 @@ def normalize_channel_shorts_url(value: str) -> str:
     return f"https://www.youtube.com/{'/'.join(channel_parts)}/shorts"
 
 
-def normalize_video_url(value: str) -> str:
-    parsed = urlparse(value.strip())
-    if (parsed.hostname or "").lower() not in YOUTUBE_HOSTS:
-        raise ValueError("Разрешены только ссылки YouTube Shorts.")
+def extract_video_id(value: str) -> str:
+    raw_url = value.strip()
+    if "://" not in raw_url:
+        raw_url = "https://" + raw_url
+    parsed = urlparse(raw_url)
+    host = (parsed.hostname or "").lower()
+    if host not in YOUTUBE_VIDEO_HOSTS:
+        raise ValueError("Разрешены только ссылки YouTube.")
     parts = [part for part in parsed.path.split("/") if part]
-    if len(parts) != 2 or parts[0] != "shorts" or not VIDEO_ID_PATTERN.fullmatch(parts[1]):
-        raise ValueError("Некорректная ссылка YouTube Shorts.")
-    return f"https://www.youtube.com/shorts/{parts[1]}"
+    video_id = ""
+    if host in {"youtu.be", "www.youtu.be"} and parts:
+        video_id = parts[0]
+    elif len(parts) == 2 and parts[0] == "shorts":
+        video_id = parts[1]
+    elif parts == ["watch"]:
+        video_id = parse_qs(parsed.query).get("v", [""])[0]
+    if not VIDEO_ID_PATTERN.fullmatch(video_id):
+        raise ValueError("Некорректная ссылка YouTube-видео.")
+    return video_id
+
+
+def normalize_video_url(value: str) -> str:
+    return f"https://www.youtube.com/watch?v={extract_video_id(value)}"
 
 
 def parse_metadata_lines(output: str) -> list[dict[str, object]]:
@@ -239,7 +255,7 @@ def download_short(
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     normalized_url = normalize_video_url(url)
-    video_id = normalized_url.rsplit("/", 1)[-1]
+    video_id = extract_video_id(normalized_url)
     command = [
         resolve_tool("yt-dlp"), "--ignore-config",
         "--js-runtimes", "node",
