@@ -13,6 +13,7 @@ from server_core import (
     is_supported_overlay,
     normalize_channel_shorts_url,
     normalize_video_url,
+    overlay_preview_seek_seconds,
     parse_metadata_lines,
     playlist_limit_args,
 )
@@ -25,7 +26,6 @@ class ServerUrlTests(unittest.TestCase):
             normalize_channel_shorts_url("youtube.com/@demo/videos"),
             "https://www.youtube.com/@demo/shorts",
         )
-
     def test_short_url(self) -> None:
         self.assertEqual(
             normalize_video_url("https://www.youtube.com/shorts/abcdefghijk"),
@@ -47,6 +47,13 @@ class ServerUrlTests(unittest.TestCase):
     def test_playlist_limit(self) -> None:
         self.assertEqual(playlist_limit_args(50), ["--playlist-end", "50"])
         self.assertEqual(playlist_limit_args(0), [])
+
+
+class OverlayPreviewTests(unittest.TestCase):
+    def test_preview_uses_twenty_percent_frame(self) -> None:
+        self.assertEqual(overlay_preview_seek_seconds(10.0), 2.0)
+        self.assertEqual(overlay_preview_seek_seconds(0.0), 0.0)
+        self.assertAlmostEqual(overlay_preview_seek_seconds(0.1), 0.02)
 
 
 class MetadataParserTests(unittest.TestCase):

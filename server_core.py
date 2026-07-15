@@ -214,14 +214,44 @@ def is_supported_overlay(overlay_path: Path) -> bool:
     return result.returncode == 0 and result.stdout.strip() == "video"
 
 
+def overlay_preview_seek_seconds(duration: float) -> float:
+    """Choose a representative early frame instead of a commonly blank frame zero."""
+    if duration <= 0:
+        return 0.0
+    return min(duration * 0.2, max(0.0, duration - 0.05))
+
+
+def probe_media_duration(media_path: Path) -> float:
+    try:
+        result = subprocess.run(
+            [
+                resolve_tool("ffprobe"), "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=nokey=1:noprint_wrappers=1",
+                str(media_path),
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=CREATE_NO_WINDOW,
+            timeout=20,
+        )
+        return max(0.0, float(result.stdout.strip())) if result.returncode == 0 else 0.0
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
+        return 0.0
+
+
 def create_overlay_preview(overlay_path: Path, preview_path: Path) -> None:
     """Render a browser-safe first frame without changing the uploaded overlay."""
     temp_path = preview_path.with_name(f"{preview_path.stem}.tmp.png")
     temp_path.unlink(missing_ok=True)
+    seek_seconds = overlay_preview_seek_seconds(probe_media_duration(overlay_path))
+    seek_args = ["-ss", f"{seek_seconds:.3f}"] if seek_seconds > 0 else []
     result = subprocess.run(
         [
             resolve_tool("ffmpeg"), "-y", "-hide_banner", "-loglevel", "error",
-            "-i", str(overlay_path), "-frames:v", "1",
+            *seek_args, "-i", str(overlay_path), "-frames:v", "1",
             "-vf", "scale=720:-2:force_original_aspect_ratio=decrease,format=rgba",
             str(temp_path),
         ],
