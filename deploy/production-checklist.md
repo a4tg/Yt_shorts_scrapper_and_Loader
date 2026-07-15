@@ -58,3 +58,7 @@ docker compose exec yt-loader python manage_users.py audit-credits
 
 Ожидаемая ревизия Alembic: `5dbe4a9120ef`. Health должен вернуть `status`, `database`
 и `workers` со значением `ok`.
+
+Для самого первого перехода со старой JSON/Basic Auth версии используй
+`deploy/first-saas-upgrade.sh`; обычный `docker compose up -d --build` не создаёт
+предварительную копию legacy-данных и не выполняет поэтапное переключение.

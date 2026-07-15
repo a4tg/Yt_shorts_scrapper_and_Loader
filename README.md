@@ -167,6 +167,52 @@ docker compose logs migrate
 docker compose logs -f
 ```
 
+#### Первое обновление старой Basic Auth версии
+
+Переход со старого контейнера без PostgreSQL выполняй отдельно от обычных обновлений.
+Сначала сохрани текущий commit и проверь, что tracked-файлы на сервере не изменены:
+
+```bash
+cd /opt/yt-loader
+git status --short
+git rev-parse HEAD
+```
+
+Затем получи release, но пока не перезапускай контейнер:
+
+```bash
+git fetch origin
+git pull --ff-only origin main
+cp .env .env.before-saas
+chmod 600 .env .env.before-saas
+nano .env
+```
+
+Добавь в `.env` как минимум `POSTGRES_PASSWORD`, публичный HTTPS URL, допустимые host и
+явный режим email-подтверждения. Для первого запуска без готового SMTP временно укажи
+`YT_LOADER_REQUIRE_EMAIL_VERIFICATION=false`; перед публичной регистрацией SMTP и
+подтверждение обязательно нужно включить.
+
+```dotenv
+POSTGRES_PASSWORD=replace-with-url-safe-openssl-value
+YT_LOADER_PUBLIC_BASE_URL=https://shorts.example.com
+YT_LOADER_SECURE_COOKIES=true
+YT_LOADER_ALLOWED_HOSTS=shorts.example.com,localhost,127.0.0.1
+YT_LOADER_REQUIRE_EMAIL_VERIFICATION=false
+```
+
+Сгенерировать URL-safe пароль PostgreSQL и выполнить контролируемое переключение:
+
+```bash
+openssl rand -base64 36 | tr -dc 'A-Za-z0-9_.~-' | head -c 40; echo
+chmod +x deploy/first-saas-upgrade.sh
+./deploy/first-saas-upgrade.sh
+```
+
+Скрипт не меняет Git и не выводит секреты. Он создаёт root-only копию `.env`, `cookies`
+и `server_data` в `/var/backups/yt-loader-pre-saas/`, собирает образ при ещё работающей
+старой версии, применяет миграции PostgreSQL и только затем заменяет контейнер приложения.
+
 Перед первым запуском создай пароль PostgreSQL и запиши его в
 `POSTGRES_PASSWORD` внутри `.env`:
 
