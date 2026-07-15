@@ -1,7 +1,8 @@
 const $ = (selector) => document.querySelector(selector);
 const state = {
   importId: null, overlayFiles: [], logoTokens: new Map(), activeOverlayIndex: 0,
-  previewUrl: null, positionX: 50, positionY: 96,
+  previewUrl: null, overlayPreviewUrls: new Map(), logoUploads: new Map(),
+  sourceVideoId: null, positionX: 50, positionY: 96,
   itemCards: new Map(), batchRunning: false, currentUser: null, importResumed: false,
   paymentResumed: false, authConfig: {}, accountToken: null
 };
@@ -43,6 +44,38 @@ async function pollJob(id, onUpdate) {
 }
 
 function clamp(value, minimum, maximum) { return Math.min(maximum, Math.max(minimum, value)); }
+
+function youtubeVideoId(value) {
+  try {
+    const url = new URL(value);
+    const host = url.hostname.replace(/^www\./, '');
+    if (host === 'youtu.be') return url.pathname.split('/').filter(Boolean)[0] || null;
+    if (!['youtube.com', 'm.youtube.com'].includes(host)) return null;
+    const parts = url.pathname.split('/').filter(Boolean);
+    if (parts[0] === 'shorts' && parts[1]) return parts[1];
+    if (parts[0] === 'watch') return url.searchParams.get('v');
+  } catch (_) {}
+  return null;
+}
+
+function showSourceVideo(url, thumbnail = '', title = '') {
+  const videoId = youtubeVideoId(url);
+  if (!videoId || videoId.length !== 11) return;
+  state.sourceVideoId = videoId;
+  const preview = $('#stage-video-preview');
+  preview.onerror = () => {
+    const fallback = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+    if (preview.src !== fallback) preview.src = fallback;
+  };
+  preview.src = thumbnail || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+  preview.classList.remove('hidden');
+  const player = $('#stage-video-player');
+  player.src = `https://www.youtube-nocookie.com/embed/${videoId}?playsinline=1&rel=0`;
+  player.classList.remove('hidden');
+  const label = $('#stage-video-label');
+  label.textContent = title || `YouTube · ${videoId}`; label.classList.remove('hidden');
+  $('#stage-placeholder').classList.add('hidden');
+}
 
 function updateOverlayPreview() {
   const stage = $('#video-stage'); const overlay = $('#overlay-object');
@@ -312,9 +345,48 @@ $('#logout-button').addEventListener('click', async () => {
   finally { localStorage.removeItem('ytLoaderImportJob'); showAuthentication(); button.disabled = false; }
 });
 
+function overlayFileKey(file) { return `${file.name}:${file.size}:${file.lastModified}`; }
+
+async function uploadOverlayFile(file) {
+  const key = overlayFileKey(file);
+  const cachedToken = state.logoTokens.get(key);
+  if (cachedToken) return { token: cachedToken, preview_url: state.overlayPreviewUrls.get(key) };
+  let upload = state.logoUploads.get(key);
+  if (!upload) {
+    upload = (async () => {
+      const form = new FormData(); form.append('file', file);
+      const result = await api('/api/logos', { method: 'POST', body: form });
+      state.logoTokens.set(key, result.token);
+      state.overlayPreviewUrls.set(key, result.preview_url);
+      return result;
+    })();
+    state.logoUploads.set(key, upload);
+  }
+  try { return await upload; }
+  finally { state.logoUploads.delete(key); }
+}
+
+async function showGeneratedOverlayPreview(file, expectedIndex) {
+  if (state.overlayFiles[expectedIndex] !== file) return;
+  const container = $('#overlay-media');
+  const pending = document.createElement('span'); pending.className = 'overlay-preview-error';
+  pending.textContent = 'Готовлю кадр для браузера…'; container.replaceChildren(pending);
+  try {
+    const result = await uploadOverlayFile(file);
+    if (state.overlayFiles[expectedIndex] !== file) return;
+    const image = document.createElement('img'); image.alt = ''; image.src = result.preview_url;
+    image.addEventListener('load', updateOverlayPreview);
+    image.addEventListener('error', () => { pending.textContent = 'Предпросмотр недоступен'; container.replaceChildren(pending); });
+    container.replaceChildren(image);
+  } catch (error) {
+    pending.textContent = error.message; container.replaceChildren(pending); showToast(error.message);
+  }
+}
+
 function showOverlayFile(file) {
   if (state.previewUrl) URL.revokeObjectURL(state.previewUrl);
   state.previewUrl = URL.createObjectURL(file);
+  const expectedIndex = state.activeOverlayIndex;
   const extension = file.name.split('.').pop()?.toLowerCase();
   const videoExtensions = new Set(['mov', 'mp4', 'm4v', 'webm', 'mkv', 'avi', 'mpeg', 'mpg']);
   const media = file.type.startsWith('video/') || videoExtensions.has(extension)
@@ -323,12 +395,14 @@ function showOverlayFile(file) {
   if (media instanceof HTMLVideoElement) {
     media.muted = true; media.autoplay = true; media.loop = true; media.playsInline = true;
     media.addEventListener('loadeddata', () => { media.play().catch(() => {}); updateOverlayPreview(); });
+    media.addEventListener('error', () => showGeneratedOverlayPreview(file, expectedIndex), { once: true });
   } else {
     media.alt = ''; media.addEventListener('load', updateOverlayPreview);
+    media.addEventListener('error', () => showGeneratedOverlayPreview(file, expectedIndex), { once: true });
   }
   $('#overlay-media').replaceChildren(media);
   $('#overlay-object').classList.remove('hidden');
-  $('#stage-placeholder').classList.add('hidden');
+  if (state.sourceVideoId) $('#stage-placeholder').classList.add('hidden');
   updateOverlayPreview();
 }
 
@@ -349,7 +423,8 @@ function renderOverlayFileList() {
 function clearOverlayPreview() {
   if (state.previewUrl) URL.revokeObjectURL(state.previewUrl);
   state.previewUrl = null; $('#overlay-media').replaceChildren();
-  $('#overlay-object').classList.add('hidden'); $('#stage-placeholder').classList.remove('hidden');
+  $('#overlay-object').classList.add('hidden');
+  $('#stage-placeholder').classList.toggle('hidden', Boolean(state.sourceVideoId));
 }
 
 $('#opacity').addEventListener('input', (e) => {
@@ -362,10 +437,15 @@ $('#logo-file').addEventListener('change', (e) => {
   const files = Array.from(e.target.files);
   if (files.length > 10) {
     showToast('Можно выбрать не более 10 оверлеев'); e.target.value = '';
-    state.overlayFiles = []; state.logoTokens.clear(); renderOverlayFileList(); clearOverlayPreview();
+    state.overlayFiles = []; state.logoTokens.clear(); state.overlayPreviewUrls.clear(); renderOverlayFileList(); clearOverlayPreview();
     $('#logo-name').textContent = 'Без оверлея'; return;
   }
-  state.overlayFiles = files; state.logoTokens.clear(); state.activeOverlayIndex = 0;
+  const oversized = files.find((file) => file.size > 256 * 1024 * 1024);
+  if (oversized) {
+    showToast(`${oversized.name}: файл больше 256 МБ`); e.target.value = ''; return;
+  }
+  state.overlayFiles = files; state.logoTokens.clear(); state.overlayPreviewUrls.clear();
+  state.logoUploads.clear(); state.activeOverlayIndex = 0;
   $('#logo-name').textContent = files.length ? `Выбрано: ${files.length}` : 'Без оверлея';
   renderOverlayFileList();
   if (files[0]) showOverlayFile(files[0]);
@@ -430,13 +510,11 @@ async function ensureOverlaysUploaded() {
   const tokens = [];
   for (let index = 0; index < state.overlayFiles.length; index += 1) {
     const file = state.overlayFiles[index];
-    const key = `${file.name}:${file.size}:${file.lastModified}`;
+    const key = overlayFileKey(file);
     let token = state.logoTokens.get(key);
     if (!token) {
-      const form = new FormData(); form.append('file', file);
       showToast(`Загружаю оверлей ${index + 1}/${state.overlayFiles.length}…`);
-      const result = await api('/api/logos', { method: 'POST', body: form });
-      token = result.token; state.logoTokens.set(key, token);
+      const result = await uploadOverlayFile(file); token = result.token;
     }
     tokens.push(token);
   }
@@ -488,8 +566,15 @@ function renderItems(items, importId) {
     const metadata = document.createElement('a'); metadata.className = 'ghost'; metadata.textContent = 'Теги и описание'; metadata.href = `/api/imports/${importId}/${item.id}/metadata.txt`;
     const note = document.createElement('div'); note.className = 'job-note';
     const record = { item, card, checkbox, videoButton, note, completed: false };
-    checkbox.addEventListener('change', () => { card.classList.toggle('selected', checkbox.checked); updateBatchSelection(); });
+    checkbox.addEventListener('change', () => {
+      card.classList.toggle('selected', checkbox.checked);
+      if (checkbox.checked) showSourceVideo(item.url, item.thumbnail, item.title);
+      updateBatchSelection();
+    });
+    image.addEventListener('click', () => showSourceVideo(item.url, item.thumbnail, item.title));
+    image.title = 'Показать этот ролик в конструкторе';
     videoButton.addEventListener('click', async () => {
+      showSourceVideo(item.url, item.thumbnail, item.title);
       if (await startDownloadUrl(item.url, videoButton, note)) markVideoCompleted(record);
     });
     loadBilling().catch(() => {});
@@ -548,6 +633,7 @@ $('#prepare-selected').addEventListener('click', async () => {
     const logoTokens = await ensureOverlaysUploaded();
     for (let index = 0; index < records.length; index += 1) {
       const record = records[index]; record.card.classList.add('processing');
+      showSourceVideo(record.item.url, record.item.thumbnail, record.item.title);
       status.textContent = `Обрабатывается ${index + 1} из ${records.length}: ${record.item.title}`;
       const success = await startDownloadUrl(
         record.item.url, record.videoButton, record.note, logoTokens, batchSettings
@@ -693,9 +779,12 @@ $('#direct-video-form').addEventListener('submit', async (event) => {
   const workButton = document.createElement('button'); workButton.className = 'primary';
   workButton.textContent = 'Подготовка…'; buttons.append(workButton);
   submitButton.disabled = true;
+  showSourceVideo($('#direct-video-url').value);
   await startDownloadUrl($('#direct-video-url').value, workButton, note);
   submitButton.disabled = false;
 });
+
+$('#direct-video-url').addEventListener('input', (event) => showSourceVideo(event.target.value));
 
 api('/api/health').then((health) => {
   if (health.status !== 'ok') $('#health').innerHTML = '<i style="background:#e0a93b"></i> База данных недоступна';

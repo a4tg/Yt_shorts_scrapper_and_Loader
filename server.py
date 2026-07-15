@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import json
 import os
@@ -40,6 +41,7 @@ from saas_models import Overlay
 from yookassa_client import YooKassaClient
 from server_core import (
     BASE_DIR,
+    create_overlay_preview,
     create_overlay_archive,
     download_short,
     is_supported_overlay,
@@ -61,7 +63,8 @@ for directory in (JOBS_DIR, IMPORTS_DIR, VIDEOS_DIR, LOGOS_DIR):
 AFTER_DOWNLOAD_MINUTES = max(1, int(os.getenv("YT_LOADER_AFTER_DOWNLOAD_MINUTES", "15")))
 READY_HOURS = max(1, int(os.getenv("YT_LOADER_READY_HOURS", "24")))
 RETENTION_HOURS = max(1, int(os.getenv("YT_LOADER_RETENTION_HOURS", "24")))
-MAX_OVERLAY_BYTES = max(1, int(os.getenv("YT_LOADER_MAX_OVERLAY_MB", "100"))) * 1024 * 1024
+MAX_OVERLAY_BYTES = max(1, int(os.getenv("YT_LOADER_MAX_OVERLAY_MB", "256"))) * 1024 * 1024
+UPLOAD_CHUNK_BYTES = 1024 * 1024
 
 
 def cleanup_expired_files() -> None:
@@ -293,8 +296,9 @@ async def browser_security_headers(request: Request, call_next):
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; "
             "form-action 'self'; object-src 'none'; script-src 'self'; "
-            "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; "
-            "connect-src 'self'"
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: blob: https://i.ytimg.com; media-src 'self' blob:; "
+            "frame-src https://www.youtube-nocookie.com; connect-src 'self'"
         )
     if request.url.scheme == "https":
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
@@ -425,10 +429,6 @@ async def upload_logo(request: Request, file: UploadFile) -> dict[str, str]:
     suffix = Path(file.filename or "").suffix.lower()
     if not suffix or len(suffix) > 11 or not suffix[1:].isalnum():
         suffix = ".media"
-    content = await file.read(MAX_OVERLAY_BYTES + 1)
-    await file.close()
-    if len(content) > MAX_OVERLAY_BYTES:
-        raise HTTPException(413, f"Оверлей больше {MAX_OVERLAY_BYTES // 1024 // 1024} МБ")
     token = uuid.uuid4().hex
     original_name = Path(file.filename or f"overlay{suffix}").name
     safe_stem = re.sub(r'[^\w.-]+', "_", Path(original_name).stem, flags=re.UNICODE).strip(" ._")
@@ -436,14 +436,39 @@ async def upload_logo(request: Request, file: UploadFile) -> dict[str, str]:
     user_logos_dir = LOGOS_DIR / str(request.state.user.id)
     user_logos_dir.mkdir(parents=True, exist_ok=True)
     overlay_path = user_logos_dir / f"{token}_{safe_stem}{suffix}"
-    overlay_path.write_bytes(content)
-    if not is_supported_overlay(overlay_path):
+    preview_path = user_logos_dir / f"{token}_preview.png"
+    size_bytes = 0
+    try:
+        with overlay_path.open("wb") as destination:
+            while chunk := await file.read(UPLOAD_CHUNK_BYTES):
+                size_bytes += len(chunk)
+                if size_bytes > MAX_OVERLAY_BYTES:
+                    raise HTTPException(
+                        413,
+                        f"Оверлей больше {MAX_OVERLAY_BYTES // 1024 // 1024} МБ",
+                    )
+                destination.write(chunk)
+    except Exception:
+        overlay_path.unlink(missing_ok=True)
+        raise
+    finally:
+        await file.close()
+    if not size_bytes:
+        overlay_path.unlink(missing_ok=True)
+        raise HTTPException(400, "Загружен пустой файл")
+    if not await asyncio.to_thread(is_supported_overlay, overlay_path):
         overlay_path.unlink(missing_ok=True)
         raise HTTPException(
             400,
             "FFmpeg не смог прочитать файл. Выбери изображение или анимацию/видео "
             "в поддерживаемом формате.",
         )
+    try:
+        await asyncio.to_thread(create_overlay_preview, overlay_path, preview_path)
+    except (OSError, RuntimeError) as exc:
+        overlay_path.unlink(missing_ok=True)
+        preview_path.unlink(missing_ok=True)
+        raise HTTPException(400, "Не удалось создать предпросмотр оверлея") from exc
     try:
         with SessionLocal() as db:
             db.add(
@@ -453,14 +478,19 @@ async def upload_logo(request: Request, file: UploadFile) -> dict[str, str]:
                     original_name=original_name,
                     storage_path=str(overlay_path.resolve()),
                     mime_type=file.content_type,
-                    size_bytes=len(content),
+                    size_bytes=size_bytes,
                 )
             )
             db.commit()
     except SQLAlchemyError as exc:
         overlay_path.unlink(missing_ok=True)
+        preview_path.unlink(missing_ok=True)
         raise HTTPException(503, "Не удалось сохранить оверлей в базе данных") from exc
-    return {"token": token, "name": original_name}
+    return {
+        "token": token,
+        "name": original_name,
+        "preview_url": f"/api/logos/{token}/preview",
+    }
 
 
 def resolve_overlay_token(token: str, index: int, owner_id: str) -> tuple[Path, str]:
@@ -486,6 +516,23 @@ def resolve_overlay_token(token: str, index: int, owner_id: str) -> tuple[Path, 
         raise HTTPException(404, "Оверлей не найден")
     display_name = str(overlay.original_name or f"overlay_{index}{overlay_path.suffix}")
     return overlay_path, display_name
+
+
+@app.get("/api/logos/{token}/preview")
+def overlay_preview(token: str, request: Request) -> FileResponse:
+    overlay_path, _ = resolve_overlay_token(token, 1, str(request.state.user.id))
+    preview_path = overlay_path.with_name(f"{token}_preview.png")
+    owner_directory = (LOGOS_DIR / str(request.state.user.id)).resolve()
+    if (
+        not preview_path.is_file()
+        or not preview_path.resolve().is_relative_to(owner_directory)
+    ):
+        raise HTTPException(404, "Предпросмотр оверлея не найден")
+    return FileResponse(
+        preview_path,
+        media_type="image/png",
+        headers={"Cache-Control": "private, max-age=86400"},
+    )
 
 
 @app.post("/api/videos/download", status_code=202)

@@ -214,6 +214,32 @@ def is_supported_overlay(overlay_path: Path) -> bool:
     return result.returncode == 0 and result.stdout.strip() == "video"
 
 
+def create_overlay_preview(overlay_path: Path, preview_path: Path) -> None:
+    """Render a browser-safe first frame without changing the uploaded overlay."""
+    temp_path = preview_path.with_name(f"{preview_path.stem}.tmp.png")
+    temp_path.unlink(missing_ok=True)
+    result = subprocess.run(
+        [
+            resolve_tool("ffmpeg"), "-y", "-hide_banner", "-loglevel", "error",
+            "-i", str(overlay_path), "-frames:v", "1",
+            "-vf", "scale=720:-2:force_original_aspect_ratio=decrease,format=rgba",
+            str(temp_path),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        creationflags=CREATE_NO_WINDOW,
+        timeout=30,
+    )
+    try:
+        if result.returncode != 0 or not temp_path.is_file():
+            raise RuntimeError(result.stderr.strip() or "FFmpeg не создал предпросмотр оверлея")
+        temp_path.replace(preview_path)
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
 def build_overlay_filter(
     width: int,
     opacity: int,

@@ -111,6 +111,39 @@ class VideoLifecycleTests(unittest.TestCase):
 
 
 class ConstructorPayloadTests(unittest.TestCase):
+    def test_mov_overlay_gets_private_browser_preview(self) -> None:
+        client, user_id = authenticated_client()
+
+        def write_preview(_source, destination) -> None:
+            destination.write_bytes(b"png-preview")
+
+        with (
+            patch.object(server, "is_supported_overlay", return_value=True),
+            patch.object(server, "create_overlay_preview", side_effect=write_preview),
+        ):
+            response = client.post(
+                "/api/logos",
+                files={"file": ("animated.mov", b"mov-content", "video/quicktime")},
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(payload["name"], "animated.mov")
+        self.assertEqual(payload["preview_url"], f"/api/logos/{payload['token']}/preview")
+        preview = client.get(payload["preview_url"])
+        self.assertEqual(preview.status_code, 200)
+        self.assertEqual(preview.headers["content-type"], "image/png")
+        self.assertEqual(preview.content, b"png-preview")
+
+        with server.SessionLocal() as db:
+            record = db.get(Overlay, payload["token"])
+            overlay_path = server.Path(record.storage_path)
+            db.delete(record)
+            db.commit()
+        overlay_path.unlink(missing_ok=True)
+        overlay_path.with_name(f"{payload['token']}_preview.png").unlink(missing_ok=True)
+        (server.LOGOS_DIR / user_id).rmdir()
+
     def test_constructor_coordinates_are_bounded(self) -> None:
         payload = server.DownloadRequest(
             url="https://youtu.be/abcdefghijk",

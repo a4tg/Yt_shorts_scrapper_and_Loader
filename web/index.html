@@ -124,7 +124,7 @@
       </div>
       <div class="settings-grid">
         <label class="file-control">
-          <span>Оверлеи <small>до 10 файлов, по 100 МБ</small></span>
+          <span>Оверлеи <small>PNG, GIF, MOV, MP4 и другие · до 10 файлов, по 256 МБ</small></span>
           <input id="logo-file" type="file" accept="image/*,video/*,.apng,.m4v,.mkv" multiple>
           <b id="logo-name">Без оверлея</b>
         </label>
@@ -155,10 +155,13 @@
           <button id="reset-overlay" class="ghost" type="button">Сбросить позицию</button>
         </div>
         <div id="video-stage" class="video-stage" aria-label="Предпросмотр вертикального видео">
+          <img id="stage-video-preview" class="stage-video-preview hidden" alt="Кадр выбранного видео" referrerpolicy="no-referrer">
+          <iframe id="stage-video-player" class="stage-video-player hidden" title="Предпросмотр выбранного YouTube-видео" allow="encrypted-media; picture-in-picture" referrerpolicy="strict-origin-when-cross-origin"></iframe>
+          <div id="stage-video-label" class="stage-video-label hidden"></div>
           <div class="stage-safe-zone"></div>
           <div id="stage-placeholder" class="stage-placeholder">
             <span>9:16</span>
-            <small>Выберите оверлей выше</small>
+            <small>Выберите ролик из списка или вставьте ссылку</small>
           </div>
           <div id="overlay-object" class="overlay-object hidden" tabindex="0" role="img" aria-label="Перемещаемый оверлей">
             <div id="overlay-media" class="overlay-media"></div>
