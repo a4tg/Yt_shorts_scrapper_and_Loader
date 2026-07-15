@@ -1,0 +1,17 @@
+.settings-grid {
+  grid-template-columns: 1.35fr 1fr 1fr .7fr 1.25fr;
+}
+
+#metadata-mode-help {
+  display: block;
+  margin-top: 7px;
+  line-height: 1.35;
+}
+
+@media (max-width: 1050px) {
+  .settings-grid { grid-template-columns: 1fr 1fr; }
+}
+
+@media (max-width: 560px) {
+  .settings-grid { grid-template-columns: 1fr; }
+}

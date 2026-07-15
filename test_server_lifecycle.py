@@ -8,31 +8,59 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 import server
+from auth_service import attempt_limiter
+from saas_models import Job, Overlay
+
+
+def authenticated_client() -> tuple[TestClient, str]:
+    client = TestClient(server.app)
+    response = client.post(
+        "/api/auth/register",
+        headers={"Origin": "http://testserver"},
+        json={
+            "email": f"user-{uuid.uuid4().hex}@example.com",
+            "password": "correct horse battery staple",
+        },
+    )
+    if response.status_code != 201:
+        raise AssertionError(response.text)
+    attempt_limiter.clear("register:testclient")
+    client.headers.update(
+        {
+            "Origin": "http://testserver",
+            "X-CSRF-Token": client.cookies.get("yt_loader_csrf"),
+        }
+    )
+    return client, response.json()["id"]
 
 
 class VideoLifecycleTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.client = TestClient(server.app)
+        self.client, self.user_id = authenticated_client()
         self.job_id = uuid.uuid4().hex
         self.video_dir = server.VIDEOS_DIR / self.job_id
         self.video_dir.mkdir(parents=True)
         (self.video_dir / "ready.mp4").write_bytes(b"test-video")
-        self.job = {
-            "id": self.job_id,
-            "kind": "download",
-            "status": "done",
-            "message": "Готово",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "ready_expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
-            "result": {"filename": "ready.mp4"},
-        }
-        with server.manager.lock:
-            server.manager.jobs[self.job_id] = self.job
-            server.manager._save(self.job)
+        server.manager.create(
+            "download",
+            {"url": "https://youtu.be/abcdefghijk"},
+            self.user_id,
+            job_id=self.job_id,
+        )
+        server.manager.update(
+            self.job_id,
+            status="done",
+            message="Готово",
+            ready_expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            result={"filename": "ready.mp4"},
+        )
 
     def tearDown(self) -> None:
-        with server.manager.lock:
-            server.manager.jobs.pop(self.job_id, None)
+        with server.SessionLocal() as db:
+            record = db.get(Job, self.job_id)
+            if record:
+                db.delete(record)
+                db.commit()
         (server.JOBS_DIR / f"{self.job_id}.json").unlink(missing_ok=True)
         shutil.rmtree(self.video_dir, ignore_errors=True)
 
@@ -98,18 +126,20 @@ class ConstructorPayloadTests(unittest.TestCase):
             )
 
     def test_api_forwards_constructor_position_to_worker(self) -> None:
+        client, user_id = authenticated_client()
         with patch.object(
             server.manager,
             "create",
             return_value={"id": "test-job", "status": "queued"},
         ) as create:
-            response = TestClient(server.app).post(
+            response = client.post(
                 "/api/videos/download",
                 json={
                     "url": "https://youtu.be/abcdefghijk",
                     "position_x": 12,
                     "position_y": 34,
                     "width_percent": 40,
+                    "metadata_mode": "synthetic",
                 },
             )
 
@@ -118,22 +148,41 @@ class ConstructorPayloadTests(unittest.TestCase):
         self.assertEqual(worker_args["position_x"], 12)
         self.assertEqual(worker_args["position_y"], 34)
         self.assertEqual(worker_args["width_percent"], 40)
+        self.assertEqual(worker_args["metadata_mode"], "synthetic")
+        self.assertEqual(create.call_args.kwargs["owner_id"], user_id)
 
     def test_api_forwards_multiple_overlays_in_selection_order(self) -> None:
+        client, user_id = authenticated_client()
         tokens = [uuid.uuid4().hex, uuid.uuid4().hex]
+        user_logos_dir = server.LOGOS_DIR / user_id
+        user_logos_dir.mkdir(parents=True, exist_ok=True)
         paths = [
-            server.LOGOS_DIR / f"{tokens[0]}_first.png",
-            server.LOGOS_DIR / f"{tokens[1]}_second.gif",
+            user_logos_dir / f"{tokens[0]}_first.png",
+            user_logos_dir / f"{tokens[1]}_second.gif",
         ]
         for path in paths:
             path.write_bytes(b"overlay")
+        with server.SessionLocal() as db:
+            db.add_all(
+                [
+                    Overlay(
+                        id=token,
+                        user_id=user_id,
+                        original_name=path.name.split("_", 1)[1],
+                        storage_path=str(path.resolve()),
+                        size_bytes=path.stat().st_size,
+                    )
+                    for token, path in zip(tokens, paths)
+                ]
+            )
+            db.commit()
         try:
             with patch.object(
                 server.manager,
                 "create",
                 return_value={"id": "batch-job", "status": "queued"},
             ) as create:
-                response = TestClient(server.app).post(
+                response = client.post(
                     "/api/videos/download",
                     json={
                         "url": "https://youtu.be/abcdefghijk",
@@ -141,8 +190,15 @@ class ConstructorPayloadTests(unittest.TestCase):
                     },
                 )
         finally:
+            with server.SessionLocal() as db:
+                for token in tokens:
+                    record = db.get(Overlay, token)
+                    if record:
+                        db.delete(record)
+                db.commit()
             for path in paths:
                 path.unlink(missing_ok=True)
+            user_logos_dir.rmdir()
 
         self.assertEqual(response.status_code, 202)
         overlays = create.call_args.args[1]["overlays"]

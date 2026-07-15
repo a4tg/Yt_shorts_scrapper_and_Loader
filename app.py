@@ -13,6 +13,8 @@ from urllib.parse import parse_qs, urlparse
 
 from PIL import Image, ImageTk, UnidentifiedImageError
 
+from media_metadata import metadata_movflags, metadata_output_args, process_video_metadata
+
 
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_OUTPUT_DIR = BASE_DIR / "for_cut"
@@ -25,6 +27,12 @@ RESOLUTION_OPTIONS = {
     "3840x2160 (4K)": 2160,
 }
 DEFAULT_RESOLUTION = "1920x1080 (Full HD)"
+METADATA_MODE_OPTIONS = {
+    "Без очистки": "none",
+    "Стандартная очистка": "strip",
+    "Экспериментальная подмена": "synthetic",
+}
+DEFAULT_METADATA_MODE = "Стандартная очистка"
 YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com"}
 VIDEO_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{11}$")
 LOCAL_FFMPEG = BASE_DIR / "ffmpeg.exe"
@@ -339,6 +347,7 @@ def overlay_logo(
     log: Callable[[str], None],
     position_x: int = 50,
     position_y: int = 96,
+    metadata_mode: str = "strip",
 ) -> bool:
     ffmpeg_path = find_media_tool("ffmpeg")
     ffprobe_path = find_media_tool("ffprobe")
@@ -373,8 +382,9 @@ def overlay_logo(
         "0:a?",
         "-c:a",
         "copy",
+        *metadata_output_args(metadata_mode, str(video_path)),
         "-movflags",
-        "+faststart",
+        metadata_movflags(metadata_mode),
         "-shortest",
     ]
 
@@ -416,6 +426,7 @@ def create_logo_variants(
     log: Callable[[str], None],
     position_x: int = 50,
     position_y: int = 96,
+    metadata_mode: str = "strip",
 ) -> list[Path]:
     """Create one processed copy per logo in a folder named after that logo."""
     completed_paths: list[Path] = []
@@ -438,7 +449,7 @@ def create_logo_variants(
 
         if overlay_logo(
             variant_path, logo_path, opacity, width_percent, log,
-            position_x, position_y,
+            position_x, position_y, metadata_mode=metadata_mode,
         ):
             completed_paths.append(variant_path)
         else:
@@ -460,6 +471,7 @@ def create_logo_variants_batch(
     progress: Callable[[int, int], None],
     position_x: int = 50,
     position_y: int = 96,
+    metadata_mode: str = "strip",
 ) -> int:
     """Process downloaded sources only after phase one has fully completed."""
     fully_processed = 0
@@ -479,6 +491,7 @@ def create_logo_variants_batch(
             log,
             position_x,
             position_y,
+            metadata_mode,
         )
         if len(completed_variants) == len(logo_paths):
             source_path.unlink()
@@ -507,6 +520,7 @@ class DownloaderApp:
 
         self.output_dir_var = tk.StringVar(value=str(DEFAULT_OUTPUT_DIR))
         self.resolution_var = tk.StringVar(value=DEFAULT_RESOLUTION)
+        self.metadata_mode_var = tk.StringVar(value=DEFAULT_METADATA_MODE)
         self.channel_url_var = tk.StringVar()
         self.logo_paths: list[Path] = []
         self.logo_opacity_var = tk.IntVar(value=35)
@@ -679,6 +693,16 @@ class DownloaderApp:
             width=22,
         )
         self.resolution_combo.pack(side="left", padx=(8, 0))
+
+        ttk.Label(resolution_frame, text="Метаданные:").pack(side="left", padx=(24, 0))
+        self.metadata_mode_combo = ttk.Combobox(
+            resolution_frame,
+            textvariable=self.metadata_mode_var,
+            values=list(METADATA_MODE_OPTIONS),
+            state="readonly",
+            width=28,
+        )
+        self.metadata_mode_combo.pack(side="left", padx=(8, 0))
 
         options_text = (
             "Формат: лучшее видео в выбранном разрешении или ниже + m4a-аудио, итоговый контейнер mp4. "
@@ -1100,6 +1124,9 @@ class DownloaderApp:
         output_dir = Path(self.output_dir_var.get().strip())
         resolution_label = self.resolution_var.get()
         max_height = RESOLUTION_OPTIONS.get(resolution_label, RESOLUTION_OPTIONS[DEFAULT_RESOLUTION])
+        metadata_mode = METADATA_MODE_OPTIONS.get(
+            self.metadata_mode_var.get(), METADATA_MODE_OPTIONS[DEFAULT_METADATA_MODE]
+        )
         urls = [line.strip() for line in self.urls_text.get("1.0", "end").splitlines() if line.strip()]
         logo_paths = list(self.logo_paths)
         try:
@@ -1121,6 +1148,14 @@ class DownloaderApp:
         if not YTDLP_EXE.exists():
             messagebox.showerror("Не найден yt-dlp", f"Файл не найден:\n{YTDLP_EXE}")
             return
+
+        if logo_paths or metadata_mode != "none":
+            if not find_media_tool("ffmpeg"):
+                messagebox.showerror(
+                    "Не найден FFmpeg",
+                    "Для выбранной обработки нужен ffmpeg.exe в PATH или рядом с app.py.",
+                )
+                return
 
         if logo_paths:
             ffprobe_path = find_media_tool("ffprobe")
@@ -1149,6 +1184,7 @@ class DownloaderApp:
         self.download_button.config(state="disabled")
         self.shorts_button.config(state="disabled")
         self.resolution_combo.config(state="disabled")
+        self.metadata_mode_combo.config(state="disabled")
         self._set_logo_controls_state("disabled")
         self.status_var.set("Идет загрузка...")
         self._log(f"Старт очереди загрузок, разрешение: {resolution_label}")
@@ -1157,7 +1193,7 @@ class DownloaderApp:
             target=self._download_worker,
             args=(
                 urls, output_dir, max_height, logo_paths, logo_opacity, logo_width,
-                logo_position_x, logo_position_y,
+                logo_position_x, logo_position_y, metadata_mode,
             ),
             daemon=True,
         )
@@ -1173,6 +1209,7 @@ class DownloaderApp:
         logo_width: int,
         logo_position_x: int,
         logo_position_y: int,
+        metadata_mode: str,
     ) -> None:
         success_count = 0
         rate_limit_index: int | None = None
@@ -1261,6 +1298,15 @@ class DownloaderApp:
                 )
                 if downloaded_path:
                     self._log(f"Файл загружен: {downloaded_path.name}")
+                    if not logo_paths and metadata_mode != "none":
+                        ffmpeg_path = find_media_tool("ffmpeg")
+                        if not ffmpeg_path or not process_video_metadata(
+                            downloaded_path, ffmpeg_path, metadata_mode, self._log,
+                            subprocess.CREATE_NO_WINDOW,
+                        ):
+                            self._log("Файл скачан, но обработка метаданных не завершена.")
+                            index += 1
+                            continue
                     source_key = str(downloaded_path.resolve()).casefold()
                     if source_key not in downloaded_source_keys:
                         downloaded_source_keys.add(source_key)
@@ -1314,6 +1360,7 @@ class DownloaderApp:
                 ),
                 logo_position_x,
                 logo_position_y,
+                metadata_mode,
             )
             self._log(
                 f"Пакетная обработка завершена: {fully_processed}/"
@@ -1406,6 +1453,7 @@ class DownloaderApp:
                 self.download_button.config(state="normal")
                 self.shorts_button.config(state="normal")
                 self.resolution_combo.config(state="readonly")
+                self.metadata_mode_combo.config(state="readonly")
                 self._set_logo_controls_state("normal")
                 continue
 
@@ -1430,6 +1478,7 @@ class DownloaderApp:
                 self.download_button.config(state="normal")
                 self.shorts_button.config(state="normal")
                 self.resolution_combo.config(state="readonly")
+                self.metadata_mode_combo.config(state="readonly")
                 self._set_logo_controls_state("normal")
                 messagebox.showwarning(
                     "YouTube временно ограничил загрузку",

@@ -16,6 +16,7 @@ from server_core import (
     parse_metadata_lines,
     playlist_limit_args,
 )
+from media_metadata import metadata_movflags, metadata_output_args, normalize_metadata_mode
 
 
 class ServerUrlTests(unittest.TestCase):
@@ -62,6 +63,31 @@ class MetadataParserTests(unittest.TestCase):
         self.assertEqual(records[0]["url"], "https://www.youtube.com/shorts/abcdefghijk")
         self.assertEqual(records[0]["tags"], ["one"])
         self.assertEqual(records[0]["duration"], 42)
+
+
+class MetadataModeTests(unittest.TestCase):
+    def test_standard_mode_strips_input_metadata(self) -> None:
+        args = metadata_output_args("strip", "video.mp4")
+
+        self.assertIn("-map_metadata", args)
+        self.assertIn("-map_metadata:s", args)
+        self.assertIn("-map_chapters", args)
+        self.assertIn("+bitexact", args)
+        self.assertNotIn("make=Apple", args)
+        self.assertEqual(metadata_movflags("strip"), "+faststart")
+
+    def test_synthetic_mode_replaces_device_fields_stably(self) -> None:
+        first = metadata_output_args("synthetic", "video.mp4")
+        second = metadata_output_args("synthetic", "video.mp4")
+
+        self.assertEqual(first, second)
+        self.assertIn("make=Apple", first)
+        self.assertTrue(any(value.startswith("com.apple.quicktime.model=") for value in first))
+        self.assertEqual(metadata_movflags("synthetic"), "+faststart+use_metadata_tags")
+
+    def test_unknown_mode_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            normalize_metadata_mode("magic")
 
 
 class DownloadResultTests(unittest.TestCase):

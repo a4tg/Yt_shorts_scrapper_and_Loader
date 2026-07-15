@@ -1,0 +1,55 @@
+.batch-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 0 0 16px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #0d1520;
+}
+
+.batch-selection {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.batch-selection strong { margin-right: 4px; }
+.batch-toolbar button { padding: 9px 13px; }
+.item { position: relative; }
+.item.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.item.processing { border-color: #e0a93b; }
+.item.ready { border-color: var(--ok); }
+
+.video-selector {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 27px;
+  height: 27px;
+  border-radius: 8px;
+  background: rgba(8, 13, 21, .9);
+  border: 1px solid #41536d;
+  cursor: pointer;
+}
+
+.video-selector input {
+  width: 17px;
+  height: 17px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.video-selector:has(input:disabled) { opacity: .55; cursor: default; }
+
+@media (max-width: 700px) {
+  .batch-toolbar { align-items: stretch; flex-direction: column; }
+  .batch-toolbar > .primary { width: 100%; }
+}

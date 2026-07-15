@@ -1,7 +1,9 @@
 const $ = (selector) => document.querySelector(selector);
 const state = {
   importId: null, overlayFiles: [], logoTokens: new Map(), activeOverlayIndex: 0,
-  previewUrl: null, positionX: 50, positionY: 96
+  previewUrl: null, positionX: 50, positionY: 96,
+  itemCards: new Map(), batchRunning: false, currentUser: null, importResumed: false,
+  paymentResumed: false, authConfig: {}, accountToken: null
 };
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -11,11 +13,18 @@ function showToast(text) {
 }
 
 async function api(url, options = {}) {
+  const method = (options.method || 'GET').toUpperCase();
+  const headers = new Headers(options.headers || {});
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+    const csrfToken = readCookie('yt_loader_csrf');
+    if (csrfToken) headers.set('X-CSRF-Token', csrfToken);
+  }
+  options = { ...options, headers, credentials: 'same-origin' };
   const response = await fetch(url, options);
   if (!response.ok) {
     let message = `Ошибка ${response.status}`;
     try { message = (await response.json()).detail || message; } catch (_) {}
-    throw new Error(message);
+    const error = new Error(message); error.status = response.status; throw error;
   }
   return response.headers.get('content-type')?.includes('json') ? response.json() : response;
 }
@@ -23,9 +32,12 @@ async function api(url, options = {}) {
 async function pollJob(id, onUpdate) {
   while (true) {
     const job = await api(`/api/jobs/${id}`); onUpdate(job);
-    if (job.status === 'done') return job;
+    if (job.status === 'done') { loadBilling().catch(() => {}); return job; }
     if (job.status === 'deleted') throw new Error(job.message || 'Видео удалено');
-    if (job.status === 'error') throw new Error(job.message || 'Задание завершилось ошибкой');
+    if (job.status === 'error') {
+      loadBilling().catch(() => {});
+      throw new Error(job.message || 'Задание завершилось ошибкой');
+    }
     await sleep(1500);
   }
 }
@@ -48,6 +60,257 @@ function updateOverlayPreview() {
   $('#position-y-value').textContent = `${Math.round(state.positionY)}%`;
   $('#editor-width-value').textContent = `${width}%`;
 }
+
+function readCookie(name) {
+  const prefix = `${encodeURIComponent(name)}=`;
+  const part = document.cookie.split('; ').find((value) => value.startsWith(prefix));
+  return part ? decodeURIComponent(part.slice(prefix.length)) : '';
+}
+
+function showAuthenticated(user) {
+  state.currentUser = user;
+  $('#account-email').textContent = user.display_name || user.email;
+  $('#account-email').title = user.email;
+  $('#account-credits').textContent = `${user.credit_balance} кредитов`;
+  $('#auth-screen').classList.add('hidden');
+  $('#app-shell').classList.remove('hidden');
+  const needsVerification = state.authConfig.email_verification_required && !user.email_verified;
+  $('#verification-banner').classList.toggle('hidden', !needsVerification);
+  if (needsVerification) return;
+  loadBilling().catch(() => {});
+  if (!state.paymentResumed) { state.paymentResumed = true; resumePayment().catch(() => {}); }
+  if (!state.importResumed) { state.importResumed = true; resumeImport(); }
+}
+
+function formatPlanPrice(plan) {
+  if (!plan.price_minor) return 'Бесплатно';
+  return new Intl.NumberFormat('ru-RU', {
+    style: 'currency', currency: plan.currency, maximumFractionDigits: 0
+  }).format(plan.price_minor / 100);
+}
+
+async function loadBilling() {
+  if (!state.currentUser) return;
+  const [summary, plans, ledger, paymentConfig] = await Promise.all([
+    api('/api/billing/summary'),
+    api('/api/billing/plans'),
+    api('/api/billing/ledger?limit=8'),
+    api('/api/payments/config')
+  ]);
+  $('#billing-available').textContent = summary.available;
+  $('#billing-reserved').textContent = summary.reserved;
+  $('#billing-balance').textContent = summary.balance;
+  $('#billing-plan-name').textContent = summary.plan
+    ? `Текущий тариф: ${summary.plan.name}` : 'Тариф не назначен';
+  $('#account-credits').textContent = `${summary.available} кредитов`;
+  $('#account-credits').title = summary.reserved
+    ? `Ещё ${summary.reserved} кредитов зарезервировано заданиями` : '';
+
+  const planContainer = $('#billing-plans'); planContainer.replaceChildren();
+  for (const plan of plans) {
+    const card = document.createElement('article');
+    card.className = `plan-card${plan.id === summary.plan?.id ? ' current' : ''}`;
+    const title = document.createElement('h3'); title.textContent = plan.name;
+    const description = document.createElement('p'); description.textContent = plan.description || '';
+    const footer = document.createElement('footer');
+    const credits = document.createElement('b'); credits.textContent = `${plan.monthly_credits} кредитов`;
+    const price = document.createElement('small');
+    price.textContent = plan.id === summary.plan?.id ? 'Текущий тариф' : formatPlanPrice(plan);
+    footer.append(credits, price); card.append(title, description, footer);
+    if (plan.price_minor > 0 && plan.id !== summary.plan?.id) {
+      const action = document.createElement('button');
+      action.className = 'secondary plan-action'; action.type = 'button';
+      action.disabled = !paymentConfig.enabled;
+      action.textContent = paymentConfig.enabled ? 'Выбрать тариф' : 'Оплата пока не настроена';
+      action.addEventListener('click', () => beginCheckout(plan.id, action));
+      card.append(action);
+    }
+    planContainer.append(card);
+  }
+
+  const subscriptionAction = $('#billing-subscription-action');
+  const canManage = summary.subscription_status === 'active' && summary.plan?.id !== 'free';
+  subscriptionAction.classList.toggle('hidden', !canManage);
+  subscriptionAction.dataset.action = summary.cancel_at_period_end ? 'resume' : 'cancel';
+  subscriptionAction.textContent = summary.cancel_at_period_end
+    ? 'Возобновить автопродление' : 'Отключить автопродление';
+
+  const ledgerContainer = $('#billing-ledger'); ledgerContainer.replaceChildren();
+  if (!ledger.length) ledgerContainer.textContent = 'Операций пока нет.';
+  for (const operation of ledger) {
+    const row = document.createElement('div'); row.className = 'ledger-row';
+    const label = document.createElement('span'); label.textContent = operation.description || operation.operation_type;
+    const amount = document.createElement('b');
+    amount.className = operation.amount > 0 ? 'positive' : 'negative';
+    amount.textContent = `${operation.amount > 0 ? '+' : ''}${operation.amount}`;
+    row.append(label, amount); ledgerContainer.append(row);
+  }
+}
+
+async function beginCheckout(planId, button) {
+  const oldText = button.textContent; button.disabled = true; button.textContent = 'Создаю платёж…';
+  try {
+    const payment = await api('/api/payments/checkout', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plan_id: planId })
+    });
+    if (payment.status === 'succeeded') {
+      showToast('Оплата подтверждена, кредиты начислены.'); await loadBilling(); return;
+    }
+    if (!payment.confirmation_url) throw new Error('ЮKassa не вернула ссылку подтверждения.');
+    location.assign(payment.confirmation_url);
+  } catch (error) {
+    showToast(error.message); button.disabled = false; button.textContent = oldText;
+  }
+}
+
+async function resumePayment() {
+  const paymentId = new URLSearchParams(location.search).get('payment');
+  if (!paymentId) return;
+  showToast('Проверяю результат оплаты…');
+  let payment;
+  try {
+    payment = await api(`/api/payments/${encodeURIComponent(paymentId)}/sync`, { method: 'POST' });
+  } catch (error) {
+    if (![409, 502, 503].includes(error.status)) throw error;
+  }
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    payment = payment || await api(`/api/payments/${encodeURIComponent(paymentId)}`);
+    if (payment.status === 'succeeded') {
+      const cleanUrl = new URL(location.href); cleanUrl.searchParams.delete('payment');
+      history.replaceState({}, '', cleanUrl);
+      showToast('Оплата подтверждена, кредиты начислены.'); await loadBilling(); return;
+    }
+    if (['canceled', 'error'].includes(payment.status)) {
+      showToast(payment.failure_reason || 'Платёж не завершён.'); return;
+    }
+    payment = null; await sleep(3000);
+  }
+  showToast('Платёж ещё обрабатывается. Статус сохранён в аккаунте.');
+}
+
+$('#billing-subscription-action').addEventListener('click', async (event) => {
+  const button = event.currentTarget; button.disabled = true;
+  try {
+    const action = button.dataset.action;
+    await api(`/api/billing/subscription/${action}`, { method: 'POST' });
+    await loadBilling();
+  } catch (error) { showToast(error.message); }
+  finally { button.disabled = false; }
+});
+
+function showAuthentication() {
+  state.currentUser = null; state.importResumed = false; state.paymentResumed = false;
+  $('#app-shell').classList.add('hidden');
+  $('#verification-banner').classList.add('hidden');
+  $('#auth-screen').classList.remove('hidden');
+}
+
+async function submitAuthForm(form, endpoint, statusElement, payload) {
+  const button = form.querySelector('button[type="submit"]');
+  button.disabled = true; statusElement.className = 'auth-status'; statusElement.textContent = 'Проверяю…';
+  try {
+    const user = await api(endpoint, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+    });
+    form.reset(); statusElement.classList.add('success'); statusElement.textContent = 'Готово';
+    showAuthenticated(user);
+  } catch (error) {
+    statusElement.classList.add('error'); statusElement.textContent = error.message;
+  } finally { button.disabled = false; }
+}
+
+$('#login-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  submitAuthForm(event.currentTarget, '/api/auth/login', $('#login-status'), {
+    email: $('#login-email').value, password: $('#login-password').value
+  });
+});
+
+$('#register-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  submitAuthForm(event.currentTarget, '/api/auth/register', $('#register-status'), {
+    display_name: $('#register-name').value, email: $('#register-email').value,
+    password: $('#register-password').value
+  });
+});
+
+function showRecoveryForm(form) {
+  $('#login-form').classList.toggle('hidden', Boolean(form));
+  $('#register-form').classList.toggle('hidden', Boolean(form) || !state.authConfig.registration_enabled);
+  $('#forgot-form').classList.toggle('hidden', form !== 'forgot');
+  $('#reset-form').classList.toggle('hidden', form !== 'reset');
+}
+
+$('#forgot-toggle').addEventListener('click', () => showRecoveryForm('forgot'));
+document.querySelectorAll('.auth-back').forEach((button) => {
+  button.addEventListener('click', () => showRecoveryForm(null));
+});
+
+$('#forgot-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const button = event.currentTarget.querySelector('button[type="submit"]');
+  const status = $('#forgot-status'); button.disabled = true;
+  status.className = 'auth-status'; status.textContent = 'Отправляю…';
+  try {
+    await api('/api/auth/password/forgot', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: $('#forgot-email').value })
+    });
+    status.classList.add('success');
+    status.textContent = 'Если аккаунт существует, письмо уже отправлено.';
+  } catch (error) { status.classList.add('error'); status.textContent = error.message; }
+  finally { button.disabled = false; }
+});
+
+$('#reset-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const button = event.currentTarget.querySelector('button[type="submit"]');
+  const status = $('#reset-status'); button.disabled = true;
+  try {
+    await api('/api/auth/password/reset', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: state.accountToken, password: $('#reset-password').value })
+    });
+    state.accountToken = null; history.replaceState({}, '', `${location.pathname}${location.search}`);
+    event.currentTarget.reset(); showRecoveryForm(null);
+    $('#login-status').className = 'auth-status success';
+    $('#login-status').textContent = 'Пароль изменён. Войдите заново.';
+  } catch (error) { status.className = 'auth-status error'; status.textContent = error.message; }
+  finally { button.disabled = false; }
+});
+
+$('#resend-verification').addEventListener('click', async (event) => {
+  const button = event.currentTarget; button.disabled = true;
+  try {
+    await api('/api/auth/verification/request', { method: 'POST' });
+    showToast('Письмо отправлено. Проверьте также папку «Спам».');
+  } catch (error) { showToast(error.message); }
+  finally { button.disabled = false; }
+});
+
+$('#change-password-button').addEventListener('click', () => $('#password-dialog').showModal());
+$('#password-dialog-cancel').addEventListener('click', () => $('#password-dialog').close());
+$('#change-password-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const status = $('#change-password-status');
+  try {
+    await api('/api/auth/password/change', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        current_password: $('#current-password').value,
+        new_password: $('#new-password').value
+      })
+    });
+    event.currentTarget.reset(); $('#password-dialog').close(); showToast('Пароль изменён.');
+  } catch (error) { status.className = 'auth-status error'; status.textContent = error.message; }
+});
+
+$('#logout-button').addEventListener('click', async () => {
+  const button = $('#logout-button'); button.disabled = true;
+  try { await api('/api/auth/logout', { method: 'POST' }); }
+  finally { localStorage.removeItem('ytLoaderImportJob'); showAuthentication(); button.disabled = false; }
+});
 
 function showOverlayFile(file) {
   if (state.previewUrl) URL.revokeObjectURL(state.previewUrl);
@@ -182,6 +445,7 @@ async function ensureOverlaysUploaded() {
 
 $('#channel-form').addEventListener('submit', async (event) => {
   event.preventDefault();
+  if (state.batchRunning) { showToast('Дождитесь завершения пакетной обработки.'); return; }
   const button = event.submitter; const status = $('#import-status');
   button.disabled = true; status.className = 'status'; status.textContent = 'Задание добавлено в очередь…';
   $('#results-section').classList.add('hidden');
@@ -205,9 +469,13 @@ $('#channel-form').addEventListener('submit', async (event) => {
 
 function renderItems(items, importId) {
   const container = $('#items'); container.replaceChildren();
+  state.itemCards = new Map(); state.batchRunning = false;
   $('#result-count').textContent = `${items.length} роликов · видео обрабатываются по одному`;
   for (const item of items) {
     const card = document.createElement('article'); card.className = 'item';
+    const selector = document.createElement('label'); selector.className = 'video-selector';
+    const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.className = 'video-select';
+    checkbox.setAttribute('aria-label', `Выбрать ролик ${item.title}`); selector.append(checkbox);
     const image = document.createElement('img'); image.className = 'thumb'; image.loading = 'lazy'; image.alt = ''; image.src = item.thumbnail || '';
     const info = document.createElement('div');
     const title = document.createElement('h3'); title.textContent = item.title;
@@ -219,20 +487,110 @@ function renderItems(items, importId) {
     const videoButton = document.createElement('button'); videoButton.className = 'primary'; videoButton.textContent = 'Подготовить видео';
     const metadata = document.createElement('a'); metadata.className = 'ghost'; metadata.textContent = 'Теги и описание'; metadata.href = `/api/imports/${importId}/${item.id}/metadata.txt`;
     const note = document.createElement('div'); note.className = 'job-note';
-    videoButton.addEventListener('click', () => startDownloadUrl(item.url, videoButton, note));
-    actions.append(videoButton, metadata, note); card.append(image, info, actions); container.append(card);
+    const record = { item, card, checkbox, videoButton, note, completed: false };
+    checkbox.addEventListener('change', () => { card.classList.toggle('selected', checkbox.checked); updateBatchSelection(); });
+    videoButton.addEventListener('click', async () => {
+      if (await startDownloadUrl(item.url, videoButton, note)) markVideoCompleted(record);
+    });
+    loadBilling().catch(() => {});
+    actions.append(videoButton, metadata, note); card.append(selector, image, info, actions); container.append(card);
+    state.itemCards.set(item.id, record);
   }
+  $('#batch-toolbar').classList.toggle('hidden', items.length === 0);
+  $('#batch-status').className = 'status hidden';
+  updateBatchSelection();
   $('#results-section').classList.remove('hidden');
 }
 
-function downloadPayload(url, logoTokens) {
+function selectableRecords() {
+  return [...state.itemCards.values()].filter((record) => !record.completed);
+}
+
+function selectedRecords() {
+  return selectableRecords().filter((record) => record.checkbox.checked);
+}
+
+function updateBatchSelection() {
+  const count = selectedRecords().length;
+  $('#selected-count').textContent = `Выбрано: ${count}`;
+  const button = $('#prepare-selected');
+  button.textContent = count ? `Подготовить выбранные · ${count}` : 'Подготовить выбранные';
+  button.disabled = state.batchRunning || count === 0;
+  $('#select-all-videos').disabled = state.batchRunning || selectableRecords().length === 0;
+  $('#clear-video-selection').disabled = state.batchRunning || count === 0;
+}
+
+function markVideoCompleted(record) {
+  record.completed = true; record.checkbox.checked = false; record.checkbox.disabled = true;
+  record.card.classList.remove('selected', 'processing'); record.card.classList.add('ready');
+  updateBatchSelection();
+}
+
+$('#select-all-videos').addEventListener('click', () => {
+  for (const record of selectableRecords()) { record.checkbox.checked = true; record.card.classList.add('selected'); }
+  updateBatchSelection();
+});
+
+$('#clear-video-selection').addEventListener('click', () => {
+  for (const record of selectableRecords()) { record.checkbox.checked = false; record.card.classList.remove('selected'); }
+  updateBatchSelection();
+});
+
+$('#prepare-selected').addEventListener('click', async () => {
+  const records = selectedRecords(); if (!records.length || state.batchRunning) return;
+  const status = $('#batch-status'); state.batchRunning = true; status.className = 'status';
+  for (const record of selectableRecords()) { record.checkbox.disabled = true; record.videoButton.disabled = true; }
+  updateBatchSelection();
+  let completed = 0; let failed = 0;
+  try {
+    const batchSettings = currentDownloadSettings();
+    status.textContent = `Загружаю оверлеи и готовлю очередь из ${records.length} роликов…`;
+    const logoTokens = await ensureOverlaysUploaded();
+    for (let index = 0; index < records.length; index += 1) {
+      const record = records[index]; record.card.classList.add('processing');
+      status.textContent = `Обрабатывается ${index + 1} из ${records.length}: ${record.item.title}`;
+      const success = await startDownloadUrl(
+        record.item.url, record.videoButton, record.note, logoTokens, batchSettings
+      );
+      record.card.classList.remove('processing');
+      if (success) { completed += 1; markVideoCompleted(record); }
+      else { failed += 1; }
+    }
+    status.classList.toggle('error', failed > 0);
+    status.textContent = failed
+      ? `Очередь завершена: готово ${completed}, с ошибкой ${failed}. Ошибочные ролики можно выбрать повторно.`
+      : `Очередь завершена: готово ${completed} из ${records.length}. Скачайте файлы кнопками в карточках.`;
+  } catch (error) {
+    status.classList.add('error'); status.textContent = error.message;
+  } finally {
+    state.batchRunning = false;
+    for (const record of selectableRecords()) {
+      record.checkbox.disabled = false; record.videoButton.disabled = false;
+    }
+    updateBatchSelection();
+  }
+});
+
+function currentDownloadSettings() {
   return {
-    url, logo_tokens: logoTokens,
     opacity: Number($('#opacity').value), width_percent: Number($('#logo-width').value),
     position_x: Math.round(state.positionX), position_y: Math.round(state.positionY),
-    max_height: Number($('#resolution').value)
+    max_height: Number($('#resolution').value), metadata_mode: $('#metadata-mode').value
   };
 }
+
+function downloadPayload(url, logoTokens, settings = null) {
+  return { url, logo_tokens: logoTokens, ...(settings || currentDownloadSettings()) };
+}
+
+$('#metadata-mode').addEventListener('change', (event) => {
+  const help = {
+    none: 'Сохраняет метаданные, которые попадут в итоговый MP4.',
+    strip: 'Удаляет исходные поля без подмены устройства.',
+    synthetic: 'Удаляет исходные поля и записывает синтетический профиль Apple и дату. Без GPS и изменения кадров.'
+  };
+  $('#metadata-mode-help').textContent = help[event.target.value] || help.strip;
+});
 
 function showReadyDownload(job, oldButton, note) {
   const overlayCount = Number(job.result?.overlay_count || 0);
@@ -241,9 +599,13 @@ function showReadyDownload(job, oldButton, note) {
   const downloadButton = document.createElement('button');
   downloadButton.className = 'primary'; downloadButton.textContent = readyLabel;
   oldButton.replaceWith(downloadButton);
+  const modeLabel = {
+    none: 'метаданные сохранены', strip: 'метаданные очищены',
+    synthetic: 'метаданные заменены синтетическим профилем'
+  }[job.result?.metadata_mode] || 'метаданные обработаны';
   note.textContent = overlayCount > 1
     ? `Готово ${overlayCount} вариантов. В ZIP каждый оверлей лежит в своей папке.`
-    : 'Видео готово. Таймер удаления запустится при скачивании.';
+    : `Видео готово, ${modeLabel}. Таймер удаления запустится при скачивании.`;
 
   const markDeleted = (message = 'Видео удалено') => {
     downloadButton.disabled = true; downloadButton.textContent = 'Файл удалён';
@@ -307,21 +669,24 @@ function showReadyDownload(job, oldButton, note) {
   });
 }
 
-async function startDownloadUrl(url, button, note) {
+async function startDownloadUrl(url, button, note, uploadedLogoTokens = null, downloadSettings = null) {
   button.disabled = true; note.textContent = 'Подготовка задания…';
   try {
-    const logoTokens = await ensureOverlaysUploaded();
+    const logoTokens = uploadedLogoTokens || await ensureOverlaysUploaded();
     const created = await api('/api/videos/download', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(downloadPayload(url, logoTokens))
+      body: JSON.stringify(downloadPayload(url, logoTokens, downloadSettings))
     });
+    loadBilling().catch(() => {});
     const job = await pollJob(created.id, (current) => { note.textContent = current.message || current.status; });
     showReadyDownload(job, button, note);
-  } catch (error) { note.textContent = error.message; button.disabled = false; }
+    return true;
+  } catch (error) { note.textContent = error.message; button.disabled = false; return false; }
 }
 
 $('#direct-video-form').addEventListener('submit', async (event) => {
   event.preventDefault();
+  if (state.batchRunning) { showToast('Дождитесь завершения пакетной обработки.'); return; }
   const submitButton = event.submitter; const box = $('#direct-video-actions');
   const buttons = $('#direct-video-buttons'); const note = $('#direct-video-note');
   box.classList.remove('hidden'); buttons.replaceChildren();
@@ -332,11 +697,18 @@ $('#direct-video-form').addEventListener('submit', async (event) => {
   submitButton.disabled = false;
 });
 
-api('/api/health').catch(() => { $('#health').innerHTML = '<i style="background:#ff6b7d"></i> Сервер недоступен'; });
+api('/api/health').then((health) => {
+  if (health.status !== 'ok') $('#health').innerHTML = '<i style="background:#e0a93b"></i> База данных недоступна';
+}).catch(() => { $('#health').innerHTML = '<i style="background:#ff6b7d"></i> Сервер недоступен'; });
 
 async function resumeImport() {
   const queryJob = new URLSearchParams(location.search).get('job');
-  const id = queryJob || localStorage.getItem('ytLoaderImportJob');
+  let id = queryJob || localStorage.getItem('ytLoaderImportJob');
+  if (!id) {
+    const jobs = await api('/api/jobs?kind=import&limit=1');
+    id = jobs[0]?.id || null;
+    if (id) localStorage.setItem('ytLoaderImportJob', id);
+  }
   if (!id) return;
   const status = $('#import-status'); status.className = 'status'; status.textContent = 'Восстанавливаю последнее задание…';
   try {
@@ -344,7 +716,53 @@ async function resumeImport() {
     if (job.kind !== 'import') return;
     const items = await api(job.items_url); state.importId = id; renderItems(items, id);
     $('#csv-link').href = job.csv_url; status.textContent = `Готово: найдено ${items.length} Shorts`;
-  } catch (error) { status.classList.add('error'); status.textContent = error.message; }
+  } catch (error) {
+    if (error.status === 404 && !queryJob) {
+      localStorage.removeItem('ytLoaderImportJob');
+      const jobs = await api('/api/jobs?kind=import&limit=1');
+      if (jobs[0]?.id && jobs[0].id !== id) {
+        localStorage.setItem('ytLoaderImportJob', jobs[0].id);
+        return resumeImport();
+      }
+    }
+    status.classList.add('error'); status.textContent = error.message;
+  }
 }
 
-resumeImport();
+async function bootstrapAuth() {
+  try {
+    const config = await api('/api/auth/config');
+    state.authConfig = config;
+    $('#register-form').classList.toggle('hidden', !config.registration_enabled);
+    $('#forgot-toggle').classList.toggle('hidden', !config.password_reset_enabled);
+  } catch (_) {}
+  const fragment = new URLSearchParams(location.hash.slice(1));
+  const verificationToken = fragment.get('verify');
+  const resetToken = fragment.get('reset');
+  if (verificationToken) {
+    try {
+      await api('/api/auth/verification/confirm', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: verificationToken })
+      });
+      history.replaceState({}, '', `${location.pathname}${location.search}`);
+      showToast('Email подтверждён.');
+    } catch (error) {
+      showAuthentication(); $('#login-status').className = 'auth-status error';
+      $('#login-status').textContent = error.message; return;
+    }
+  } else if (resetToken) {
+    state.accountToken = resetToken; showAuthentication(); showRecoveryForm('reset'); return;
+  }
+  try {
+    showAuthenticated(await api('/api/auth/me'));
+  } catch (error) {
+    showAuthentication();
+    if (error.status && error.status !== 401) {
+      $('#login-status').className = 'auth-status error';
+      $('#login-status').textContent = error.message;
+    }
+  }
+}
+
+bootstrapAuth();

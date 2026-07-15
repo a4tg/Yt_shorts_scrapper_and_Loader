@@ -1,5 +1,6 @@
 __pycache__/
 *.pyc
+.venv/
 cookies/
 for_cut/
 cut_result/
@@ -8,3 +9,6 @@ server_data/
 .agents/
 .codex/
 .env
+.env.*
+!.env.example
+backups/

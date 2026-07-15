@@ -1,4 +1,61 @@
+x-app-environment: &app-environment
+  DATABASE_URL: postgresql+psycopg://yt_loader:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/yt_loader
+  FFMPEG_PRESET: ${FFMPEG_PRESET:-veryfast}
+  FFMPEG_CRF: ${FFMPEG_CRF:-22}
+  YT_LOADER_RETENTION_HOURS: ${YT_LOADER_RETENTION_HOURS:-24}
+  YT_LOADER_AFTER_DOWNLOAD_MINUTES: ${YT_LOADER_AFTER_DOWNLOAD_MINUTES:-15}
+  YT_LOADER_READY_HOURS: ${YT_LOADER_READY_HOURS:-24}
+  YT_LOADER_SECURE_COOKIES: ${YT_LOADER_SECURE_COOKIES:-true}
+  YT_LOADER_ALLOWED_HOSTS: ${YT_LOADER_ALLOWED_HOSTS:-}
+  YT_LOADER_ENABLE_API_DOCS: ${YT_LOADER_ENABLE_API_DOCS:-false}
+  YT_LOADER_SESSION_DAYS: ${YT_LOADER_SESSION_DAYS:-14}
+  YT_LOADER_ALLOW_REGISTRATION: ${YT_LOADER_ALLOW_REGISTRATION:-true}
+  YT_LOADER_SIGNUP_CREDITS: ${YT_LOADER_SIGNUP_CREDITS:-5}
+  YT_LOADER_JOB_LEASE_SECONDS: ${YT_LOADER_JOB_LEASE_SECONDS:-120}
+  YT_LOADER_JOB_POLL_SECONDS: ${YT_LOADER_JOB_POLL_SECONDS:-0.5}
+  YOUTUBE_COOKIES: /cookies/www.youtube.com_cookies.txt
+
 services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: yt_loader
+      POSTGRES_USER: yt_loader
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yt_loader -d yt_loader"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - backend
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  migrate:
+    build: .
+    restart: "no"
+    command: ["alembic", "upgrade", "head"]
+    environment: *app-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backend
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
   yt-loader:
     build: .
     container_name: yt-loader
@@ -6,14 +63,59 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     environment:
+      <<: *app-environment
+      YT_LOADER_LEGACY_BASIC_AUTH: ${YT_LOADER_LEGACY_BASIC_AUTH:-false}
       YT_LOADER_USERNAME: ${YT_LOADER_USERNAME:-admin}
-      YT_LOADER_PASSWORD: ${YT_LOADER_PASSWORD:?Set YT_LOADER_PASSWORD in .env}
-      FFMPEG_PRESET: ${FFMPEG_PRESET:-veryfast}
-      FFMPEG_CRF: ${FFMPEG_CRF:-22}
-      YT_LOADER_RETENTION_HOURS: ${YT_LOADER_RETENTION_HOURS:-24}
-      YT_LOADER_AFTER_DOWNLOAD_MINUTES: ${YT_LOADER_AFTER_DOWNLOAD_MINUTES:-15}
-      YT_LOADER_READY_HOURS: ${YT_LOADER_READY_HOURS:-24}
-      YOUTUBE_COOKIES: /cookies/www.youtube.com_cookies.txt
+      YT_LOADER_PASSWORD: ${YT_LOADER_PASSWORD:-}
+      YT_LOADER_PUBLIC_BASE_URL: ${YT_LOADER_PUBLIC_BASE_URL:-}
+      YT_LOADER_REQUIRE_EMAIL_VERIFICATION: ${YT_LOADER_REQUIRE_EMAIL_VERIFICATION:-true}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURITY: ${SMTP_SECURITY:-starttls}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
+      YT_LOADER_RENEWAL_INTERVAL_SECONDS: ${YT_LOADER_RENEWAL_INTERVAL_SECONDS:-3600}
+      YT_LOADER_WEBHOOK_RETENTION_DAYS: ${YT_LOADER_WEBHOOK_RETENTION_DAYS:-90}
+      YOOKASSA_SHOP_ID: ${YOOKASSA_SHOP_ID:-}
+      YOOKASSA_SECRET_KEY: ${YOOKASSA_SECRET_KEY:-}
+      YOOKASSA_WEBHOOK_ENFORCE_IP: ${YOOKASSA_WEBHOOK_ENFORCE_IP:-true}
+      YOOKASSA_RECEIPT_ENABLED: ${YOOKASSA_RECEIPT_ENABLED:-false}
+      YOOKASSA_VAT_CODE: ${YOOKASSA_VAT_CODE:-1}
     volumes:
       - ./server_data:/data
       - ./cookies:/cookies
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - backend
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 256
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  postgres_data:
+
+networks:
+  backend:

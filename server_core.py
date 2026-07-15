@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import parse_qs, urlparse
 
+from media_metadata import metadata_movflags, metadata_output_args, process_video_metadata
+
 
 BASE_DIR = Path(__file__).resolve().parent
 VIDEO_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{11}$")
@@ -237,6 +239,7 @@ def overlay_logo_cpu(
     position_x: int,
     position_y: int,
     log: Callable[[str], None],
+    metadata_mode: str = "strip",
 ) -> None:
     width = max(16, round(probe_width(video_path) * width_percent / 100))
     logo_input = build_overlay_input_args(logo_path)
@@ -249,7 +252,8 @@ def overlay_logo_cpu(
         "-map", "[v]", "-map", "0:a?", "-c:v", "libx264",
         "-preset", os.getenv("FFMPEG_PRESET", "veryfast"),
         "-crf", os.getenv("FFMPEG_CRF", "22"), "-c:a", "copy",
-        "-movflags", "+faststart", "-shortest", str(temp_path),
+        *metadata_output_args(metadata_mode, str(video_path)),
+        "-movflags", metadata_movflags(metadata_mode), "-shortest", str(temp_path),
     ]
     log("Накладываю логотип на CPU…")
     result = subprocess.run(
@@ -278,6 +282,7 @@ def create_overlay_archive(
     position_x: int,
     position_y: int,
     log: Callable[[str], None],
+    metadata_mode: str = "strip",
 ) -> list[str]:
     """Create one processed variant per overlay and bundle them into a fast ZIP."""
     variants_dir = source_path.parent / "overlay_variants"
@@ -312,7 +317,7 @@ def create_overlay_archive(
             log(f"Оверлей {index}/{len(overlays)}: {display_name}")
             overlay_logo_cpu(
                 variant_path, overlay_path, opacity, width_percent,
-                position_x, position_y, log,
+                position_x, position_y, log, metadata_mode,
             )
 
         with zipfile.ZipFile(temp_archive, "w", compression=zipfile.ZIP_STORED) as archive:
@@ -354,6 +359,7 @@ def download_short(
     position_y: int,
     max_height: int,
     log: Callable[[str], None],
+    metadata_mode: str = "strip",
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     normalized_url = normalize_video_url(url)
@@ -405,6 +411,10 @@ def download_short(
     if logo_path:
         overlay_logo_cpu(
             downloaded, logo_path, opacity, width_percent,
-            position_x, position_y, log,
+            position_x, position_y, log, metadata_mode,
         )
+    elif metadata_mode != "none" and not process_video_metadata(
+        downloaded, resolve_tool("ffmpeg"), metadata_mode, log, CREATE_NO_WINDOW,
+    ):
+        raise RuntimeError("FFmpeg не смог обработать метаданные видео")
     return downloaded

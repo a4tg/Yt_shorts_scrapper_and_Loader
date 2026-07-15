@@ -10,7 +10,9 @@ RUN apt-get update \
 COPY requirements-server.txt ./
 RUN pip install --no-cache-dir -r requirements-server.txt
 
-COPY server.py server_core.py ./
+COPY server.py server_core.py media_metadata.py database.py saas_models.py job_queue.py auth_service.py auth_routes.py email_service.py billing_service.py billing_routes.py payment_service.py payment_routes.py yookassa_client.py manage_users.py ./
+COPY alembic.ini ./
+COPY migrations ./migrations
 COPY web ./web
 
 RUN useradd --create-home --uid 10001 appuser \

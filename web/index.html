@@ -7,17 +7,95 @@
   <link rel="stylesheet" href="/assets/style.css">
   <link rel="stylesheet" href="/assets/direct-video.css">
   <link rel="stylesheet" href="/assets/overlay-editor.css">
+  <link rel="stylesheet" href="/assets/metadata.css">
+  <link rel="stylesheet" href="/assets/batch.css">
+  <link rel="stylesheet" href="/assets/auth.css">
+  <link rel="stylesheet" href="/assets/billing.css">
 </head>
 <body>
-  <main class="shell">
+  <section id="auth-screen" class="auth-shell">
+    <div class="auth-brand">
+      <p class="eyebrow">Личный медиасервис</p>
+      <h1>YT Shorts Loader</h1>
+      <p>Подготовка Shorts, оверлеи и метаданные в защищённом рабочем пространстве.</p>
+    </div>
+    <div class="auth-grid">
+      <form id="login-form" class="auth-card">
+        <h2>Вход</h2>
+        <p>Вернитесь к своим заданиям и готовым видео.</p>
+        <label><span>Email</span><input id="login-email" type="email" autocomplete="email" required></label>
+        <label><span>Пароль</span><input id="login-password" type="password" autocomplete="current-password" minlength="10" maxlength="128" required></label>
+        <button class="primary" type="submit">Войти</button>
+        <button id="forgot-toggle" class="text-button" type="button">Не помню пароль</button>
+        <div id="login-status" class="auth-status" aria-live="polite"></div>
+      </form>
+      <form id="register-form" class="auth-card">
+        <h2>Создать аккаунт</h2>
+        <p>Пароль должен содержать не менее 10 символов.</p>
+        <label><span>Имя</span><input id="register-name" type="text" autocomplete="name" maxlength="120"></label>
+        <label><span>Email</span><input id="register-email" type="email" autocomplete="email" required></label>
+        <label><span>Пароль</span><input id="register-password" type="password" autocomplete="new-password" minlength="10" maxlength="128" required></label>
+        <button class="primary" type="submit">Зарегистрироваться</button>
+        <div id="register-status" class="auth-status" aria-live="polite"></div>
+      </form>
+      <form id="forgot-form" class="auth-card hidden">
+        <h2>Восстановить пароль</h2>
+        <p>Если аккаунт существует, мы отправим одноразовую ссылку на его email.</p>
+        <label><span>Email</span><input id="forgot-email" type="email" autocomplete="email" required></label>
+        <button class="primary" type="submit">Отправить ссылку</button>
+        <button class="text-button auth-back" type="button">Вернуться ко входу</button>
+        <div id="forgot-status" class="auth-status" aria-live="polite"></div>
+      </form>
+      <form id="reset-form" class="auth-card hidden">
+        <h2>Новый пароль</h2>
+        <p>Ссылка одноразовая. После смены пароля все старые сессии будут закрыты.</p>
+        <label><span>Новый пароль</span><input id="reset-password" type="password" autocomplete="new-password" minlength="10" maxlength="128" required></label>
+        <button class="primary" type="submit">Сохранить пароль</button>
+        <div id="reset-status" class="auth-status" aria-live="polite"></div>
+      </form>
+    </div>
+  </section>
+
+  <main id="app-shell" class="shell hidden">
     <header class="hero">
       <div>
         <p class="eyebrow">Собственный медиасервис</p>
         <h1>YT Shorts Loader</h1>
         <p class="lead">Соберите Shorts канала, отдельно выгрузите метаданные и подготовьте видео с логотипом.</p>
       </div>
-      <span class="health" id="health"><i></i> Сервер доступен</span>
+      <div class="account-bar">
+        <span class="health" id="health"><i></i> Сервер доступен</span>
+        <div class="account-summary">
+          <span id="account-email"></span>
+          <span id="account-credits" class="credit-badge">0 кредитов</span>
+          <button id="change-password-button" class="ghost" type="button">Сменить пароль</button>
+          <button id="logout-button" class="ghost" type="button">Выйти</button>
+        </div>
+      </div>
     </header>
+
+    <section id="verification-banner" class="verification-banner hidden" aria-live="polite">
+      <div><strong>Подтвердите email</strong><span>До подтверждения обработка видео и оплата недоступны.</span></div>
+      <button id="resend-verification" class="secondary" type="button">Отправить письмо ещё раз</button>
+    </section>
+
+    <section class="panel billing-panel">
+      <div class="section-title billing-title">
+        <span class="step">₽</span>
+        <div><h2>Тариф и кредиты</h2><p id="billing-plan-name">Загружаю данные тарифа…</p></div>
+      </div>
+      <div class="credit-summary">
+        <div><span>Доступно</span><strong id="billing-available">—</strong></div>
+        <div><span>Зарезервировано</span><strong id="billing-reserved">—</strong></div>
+        <div><span>Общий баланс</span><strong id="billing-balance">—</strong></div>
+      </div>
+      <div id="billing-plans" class="plan-grid" aria-live="polite"></div>
+      <button id="billing-subscription-action" class="ghost hidden" type="button"></button>
+      <details class="ledger-box">
+        <summary>Последние операции</summary>
+        <div id="billing-ledger" class="ledger-list"></div>
+      </details>
+    </section>
 
     <section class="panel import-panel">
       <div class="section-title">
@@ -53,6 +131,15 @@
         <label><span>Непрозрачность</span><div class="range-row"><input id="opacity" type="range" min="5" max="100" value="35"><output id="opacity-value">35%</output></div></label>
         <label><span>Ширина оверлея</span><div class="range-row"><input id="logo-width" type="range" min="5" max="80" value="22"><output id="width-value">22%</output></div></label>
         <label><span>Разрешение</span><select id="resolution"><option value="720">720p</option><option value="1080" selected>1080p</option><option value="1440">1440p</option><option value="2160">2160p</option></select></label>
+        <label>
+          <span>Метаданные</span>
+          <select id="metadata-mode">
+            <option value="none">Без очистки</option>
+            <option value="strip" selected>Стандартная очистка</option>
+            <option value="synthetic">Экспериментальная подмена</option>
+          </select>
+          <small id="metadata-mode-help">Удаляет исходные поля без подмены устройства.</small>
+        </label>
       </div>
       <div class="overlay-editor">
         <div class="editor-description">
@@ -100,9 +187,28 @@
         <div class="section-title compact"><span class="step">3</span><div><h2>Shorts канала</h2><p id="result-count"></p></div></div>
         <a id="csv-link" class="secondary" href="#">Скачать общий CSV</a>
       </div>
+      <div id="batch-toolbar" class="batch-toolbar hidden">
+        <div class="batch-selection">
+          <strong id="selected-count">Выбрано: 0</strong>
+          <button id="select-all-videos" class="ghost" type="button">Выбрать все</button>
+          <button id="clear-video-selection" class="ghost" type="button">Снять выбор</button>
+        </div>
+        <button id="prepare-selected" class="primary" type="button" disabled>Подготовить выбранные</button>
+      </div>
+      <div id="batch-status" class="status hidden" aria-live="polite"></div>
       <div id="items" class="items"></div>
     </section>
   </main>
+
+  <dialog id="password-dialog" class="account-dialog">
+    <form id="change-password-form" method="dialog">
+      <h2>Сменить пароль</h2>
+      <label><span>Текущий пароль</span><input id="current-password" type="password" autocomplete="current-password" required></label>
+      <label><span>Новый пароль</span><input id="new-password" type="password" autocomplete="new-password" minlength="10" maxlength="128" required></label>
+      <div class="dialog-actions"><button id="password-dialog-cancel" class="ghost" type="button">Отмена</button><button class="primary" type="submit">Сохранить</button></div>
+      <div id="change-password-status" class="auth-status" aria-live="polite"></div>
+    </form>
+  </dialog>
   <div id="toast" class="toast hidden"></div>
   <script src="/assets/app.js" defer></script>
 </body>
