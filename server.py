@@ -106,7 +106,7 @@ class DownloadRequest(BaseModel):
     logo_token: str | None = None
     logo_tokens: list[str] = Field(default_factory=list, max_length=10)
     opacity: int = Field(default=35, ge=5, le=100)
-    width_percent: int = Field(default=22, ge=5, le=80)
+    width_percent: int = Field(default=22, ge=5, le=100)
     position_x: int = Field(default=50, ge=0, le=100)
     position_y: int = Field(default=96, ge=0, le=100)
     max_height: int = Field(default=1080)

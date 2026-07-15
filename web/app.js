@@ -477,7 +477,7 @@ overlayObject.addEventListener('pointermove', (event) => {
   if (editorGesture.mode === 'resize') {
     const width = clamp(
       editorGesture.startWidth + (event.clientX - editorGesture.startX) / stageRect.width * 100,
-      5, 80
+      5, 100
     );
     $('#logo-width').value = Math.round(width); $('#width-value').textContent = `${Math.round(width)}%`;
   } else {

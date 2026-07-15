@@ -158,6 +158,17 @@ class ConstructorPayloadTests(unittest.TestCase):
                 position_x=101,
             )
 
+        full_width = server.DownloadRequest(
+            url="https://youtu.be/abcdefghijk",
+            width_percent=100,
+        )
+        self.assertEqual(full_width.width_percent, 100)
+        with self.assertRaises(ValidationError):
+            server.DownloadRequest(
+                url="https://youtu.be/abcdefghijk",
+                width_percent=101,
+            )
+
     def test_api_forwards_constructor_position_to_worker(self) -> None:
         client, user_id = authenticated_client()
         with patch.object(

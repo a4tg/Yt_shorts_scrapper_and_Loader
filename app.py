@@ -665,7 +665,7 @@ class DownloaderApp:
         self.logo_width_spinbox = ttk.Spinbox(
             logo_settings_frame,
             from_=5,
-            to=80,
+            to=100,
             increment=1,
             textvariable=self.logo_width_var,
             width=5,
@@ -831,7 +831,7 @@ class DownloaderApp:
         self.overlay_canvas.delete("preview")
         try:
             opacity = max(5, min(int(self.logo_opacity_var.get()), 100))
-            width_percent = max(5, min(int(self.logo_width_var.get()), 80))
+            width_percent = max(5, min(int(self.logo_width_var.get()), 100))
             position_x = max(0, min(int(self.logo_position_x_var.get()), 100))
             position_y = max(0, min(int(self.logo_position_y_var.get()), 100))
         except (tk.TclError, ValueError):
@@ -921,7 +921,7 @@ class DownloaderApp:
                 float(gesture["start_width"])
                 + (event.x - float(gesture["start_x"])) / self.overlay_canvas_width * 100
             )
-            self.logo_width_var.set(max(5, min(width, 80)))
+            self.logo_width_var.set(max(5, min(width, 100)))
             return
 
         left, top, right, bottom = bounds
@@ -1131,7 +1131,7 @@ class DownloaderApp:
         logo_paths = list(self.logo_paths)
         try:
             logo_opacity = max(5, min(int(self.logo_opacity_var.get()), 100))
-            logo_width = max(5, min(int(self.logo_width_var.get()), 80))
+            logo_width = max(5, min(int(self.logo_width_var.get()), 100))
             logo_position_x = max(0, min(int(self.logo_position_x_var.get()), 100))
             logo_position_y = max(0, min(int(self.logo_position_y_var.get()), 100))
         except (tk.TclError, ValueError):

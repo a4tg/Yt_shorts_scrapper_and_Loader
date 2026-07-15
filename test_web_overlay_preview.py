@@ -23,6 +23,13 @@ class WebOverlayPreviewTests(unittest.TestCase):
         self.assertIn("result.preview_url", script)
         self.assertIn("state.logoUploads", script)
 
+    def test_overlay_can_fill_the_entire_video_width(self) -> None:
+        html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
+        script = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn('id="logo-width" type="range" min="5" max="100"', html)
+        self.assertIn("5, 100", script)
+
 
 if __name__ == "__main__":
     unittest.main()
