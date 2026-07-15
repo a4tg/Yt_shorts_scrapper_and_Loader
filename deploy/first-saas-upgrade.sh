@@ -106,6 +106,6 @@ done
 echo "$health"
 docker compose exec -T yt-loader alembic current
 docker compose exec -T yt-loader python manage_users.py audit-payments
-docker compose exec -T yt-loader python manage_users.py audit-credits
+docker compose exec -T yt-loader python manage_users.py audit-credits --allow-empty
 docker compose ps
 echo "First SaaS upgrade completed. Legacy backup: $backup_dir"

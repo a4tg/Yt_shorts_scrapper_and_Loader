@@ -77,7 +77,7 @@ def add_credits(email_value: str, amount: int, reason: str) -> int:
     return 0
 
 
-def audit_credits(email_value: str | None) -> int:
+def audit_credits(email_value: str | None, *, allow_empty: bool = False) -> int:
     if not check_database():
         print("База или миграции недоступны. Сначала выполни: alembic upgrade head", file=sys.stderr)
         return 1
@@ -92,6 +92,9 @@ def audit_credits(email_value: str | None) -> int:
             statement = statement.where(User.email == email)
         users = db.scalars(statement).all()
         if not users:
+            if allow_empty:
+                print("Пользователей пока нет; расхождений кредитного журнала нет.")
+                return 0
             print("Пользователи не найдены.", file=sys.stderr)
             return 1
         mismatches = 0
@@ -171,6 +174,11 @@ def main() -> int:
     grant_parser.add_argument("--reason", default="Ручное начисление администратором")
     audit_parser = subparsers.add_parser("audit-credits", help="Сверить баланс с журналом")
     audit_parser.add_argument("--email")
+    audit_parser.add_argument(
+        "--allow-empty",
+        action="store_true",
+        help="Считать пустую базу корректной при первом развёртывании",
+    )
     subparsers.add_parser(
         "audit-payments", help="Сверить успешные платежи с начислениями кредитов"
     )
@@ -181,7 +189,7 @@ def main() -> int:
         if args.command == "grant-credits":
             return add_credits(args.email, args.amount, args.reason)
         if args.command == "audit-credits":
-            return audit_credits(args.email)
+            return audit_credits(args.email, allow_empty=args.allow_empty)
         if args.command == "audit-payments":
             return audit_payments()
     except OperationalError as exc:

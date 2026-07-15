@@ -25,6 +25,7 @@ class FirstSaasUpgradeScriptTests(unittest.TestCase):
         self.assertNotIn("echo $postgres_password", source)
         self.assertNotIn("set -x", source)
         self.assertIn("docker compose config --quiet", source)
+        self.assertIn("audit-credits --allow-empty", source)
 
 
 if __name__ == "__main__":
