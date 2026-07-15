@@ -2,6 +2,7 @@ import base64
 import json
 import os
 import queue
+import re
 import secrets
 import shutil
 import threading
@@ -18,6 +19,7 @@ from starlette.background import BackgroundTask
 
 from server_core import (
     BASE_DIR,
+    create_overlay_archive,
     download_short,
     is_supported_overlay,
     normalize_channel_shorts_url,
@@ -76,8 +78,11 @@ class ChannelRequest(BaseModel):
 class DownloadRequest(BaseModel):
     url: str = Field(min_length=10, max_length=500)
     logo_token: str | None = None
+    logo_tokens: list[str] = Field(default_factory=list, max_length=10)
     opacity: int = Field(default=35, ge=5, le=100)
     width_percent: int = Field(default=22, ge=5, le=80)
+    position_x: int = Field(default=50, ge=0, le=100)
+    position_y: int = Field(default=96, ge=0, le=100)
     max_height: int = Field(default=1080)
 
 
@@ -211,13 +216,40 @@ class JobManager:
                     )
                     result = {"count": count}
                 elif kind == "download":
-                    logo_path = Path(str(args["logo_path"])) if args.get("logo_path") else None
-                    video_path = download_short(
-                        str(args["url"]), VIDEOS_DIR / job_id, logo_path,
-                        int(args["opacity"]), int(args["width_percent"]),
-                        int(args["max_height"]), lambda text: self._log(job_id, text),
+                    overlay_items = list(args.get("overlays") or [])
+                    output_dir = VIDEOS_DIR / job_id
+                    log = lambda text: self._log(job_id, text)
+                    single_path = (
+                        Path(str(dict(overlay_items[0])["path"]))
+                        if len(overlay_items) == 1 else None
                     )
-                    result = {"filename": video_path.name}
+                    video_path = download_short(
+                        str(args["url"]), output_dir, single_path,
+                        int(args["opacity"]), int(args["width_percent"]),
+                        int(args["position_x"]), int(args["position_y"]),
+                        int(args["max_height"]), log,
+                    )
+                    overlay_count = len(overlay_items)
+                    result = {"filename": video_path.name, "overlay_count": overlay_count}
+                    if overlay_count > 1:
+                        archive_path = output_dir / "overlay_variants.zip"
+                        folders = create_overlay_archive(
+                            video_path,
+                            [
+                                (Path(str(dict(item)["path"])), str(dict(item)["name"]))
+                                for item in overlay_items
+                            ],
+                            archive_path,
+                            int(args["opacity"]), int(args["width_percent"]),
+                            int(args["position_x"]), int(args["position_y"]), log,
+                        )
+                        video_path.unlink(missing_ok=True)
+                        result = {
+                            "filename": archive_path.name,
+                            "overlay_count": overlay_count,
+                            "folders": folders,
+                            "format": "zip",
+                        }
                 else:
                     raise RuntimeError("Неизвестный тип задания")
                 ready_expires_at = (
@@ -334,7 +366,10 @@ async def upload_logo(file: UploadFile) -> dict[str, str]:
     if len(content) > MAX_OVERLAY_BYTES:
         raise HTTPException(413, f"Оверлей больше {MAX_OVERLAY_BYTES // 1024 // 1024} МБ")
     token = uuid.uuid4().hex
-    overlay_path = LOGOS_DIR / f"{token}{suffix}"
+    original_name = Path(file.filename or f"overlay{suffix}").name
+    safe_stem = re.sub(r'[^\w.-]+', "_", Path(original_name).stem, flags=re.UNICODE).strip(" ._")
+    safe_stem = (safe_stem or "overlay")[:60]
+    overlay_path = LOGOS_DIR / f"{token}_{safe_stem}{suffix}"
     overlay_path.write_bytes(content)
     if not is_supported_overlay(overlay_path):
         overlay_path.unlink(missing_ok=True)
@@ -343,7 +378,23 @@ async def upload_logo(file: UploadFile) -> dict[str, str]:
             "FFmpeg не смог прочитать файл. Выбери изображение или анимацию/видео "
             "в поддерживаемом формате.",
         )
-    return {"token": token}
+    return {"token": token, "name": original_name}
+
+
+def resolve_overlay_token(token: str, index: int) -> tuple[Path, str]:
+    try:
+        uuid.UUID(hex=token)
+    except ValueError as exc:
+        raise HTTPException(400, "Некорректный оверлей") from exc
+    overlay_path = next(
+        (path for path in LOGOS_DIR.glob(f"{token}*") if path.is_file()),
+        None,
+    )
+    if not overlay_path:
+        raise HTTPException(404, "Оверлей не найден")
+    prefix = f"{token}_"
+    display_name = overlay_path.name[len(prefix):] if overlay_path.name.startswith(prefix) else f"overlay_{index}{overlay_path.suffix}"
+    return overlay_path, display_name
 
 
 @app.post("/api/videos/download", status_code=202)
@@ -354,22 +405,24 @@ def create_download(payload: DownloadRequest) -> dict[str, object]:
         raise HTTPException(400, str(exc)) from exc
     if payload.max_height not in {720, 1080, 1440, 2160}:
         raise HTTPException(400, "Некорректное разрешение")
-    logo_path: Path | None = None
-    if payload.logo_token:
-        try:
-            uuid.UUID(hex=payload.logo_token)
-        except ValueError as exc:
-            raise HTTPException(400, "Некорректный логотип") from exc
-        logo_path = next(iter(LOGOS_DIR.glob(f"{payload.logo_token}.*")), None)
-        if not logo_path:
-            raise HTTPException(404, "Логотип не найден")
+    tokens = list(dict.fromkeys(
+        ([payload.logo_token] if payload.logo_token else []) + payload.logo_tokens
+    ))
+    if len(tokens) > 10:
+        raise HTTPException(400, "За одно задание можно выбрать не более 10 оверлеев")
+    overlays = []
+    for index, token in enumerate(tokens, start=1):
+        overlay_path, display_name = resolve_overlay_token(token, index)
+        overlays.append({"path": str(overlay_path), "name": display_name})
     return manager.create(
         "download",
         {
             "url": url,
-            "logo_path": str(logo_path) if logo_path else None,
+            "overlays": overlays,
             "opacity": payload.opacity,
             "width_percent": payload.width_percent,
+            "position_x": payload.position_x,
+            "position_y": payload.position_y,
             "max_height": payload.max_height,
         },
     )
@@ -395,7 +448,8 @@ def download_result(job_id: str) -> FileResponse:
     if not filename or not path.is_file() or path.parent != (VIDEOS_DIR / job_id):
         raise HTTPException(404, "Видео не найдено")
     background = None if job.get("delete_at") else BackgroundTask(manager.start_download_timer, job_id)
-    return FileResponse(path, filename=filename, media_type="video/mp4", background=background)
+    media_type = "application/zip" if path.suffix.lower() == ".zip" else "video/mp4"
+    return FileResponse(path, filename=filename, media_type=media_type, background=background)
 
 
 @app.post("/api/videos/{job_id}/download-ticket")

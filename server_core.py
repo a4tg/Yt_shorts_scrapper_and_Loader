@@ -4,6 +4,7 @@ import os
 import re
 import shutil
 import subprocess
+import zipfile
 from pathlib import Path
 from typing import Callable
 from urllib.parse import parse_qs, urlparse
@@ -211,23 +212,40 @@ def is_supported_overlay(overlay_path: Path) -> bool:
     return result.returncode == 0 and result.stdout.strip() == "video"
 
 
+def build_overlay_filter(
+    width: int,
+    opacity: int,
+    position_x: int = 50,
+    position_y: int = 96,
+) -> str:
+    """Build a resolution-independent overlay using the available free space."""
+    alpha = max(0.05, min(opacity / 100, 1.0))
+    x_ratio = max(0, min(position_x, 100)) / 100
+    y_ratio = max(0, min(position_y, 100)) / 100
+    return (
+        f"[1:v]scale={max(16, width)}:-1,format=rgba,colorchannelmixer=aa={alpha:.2f}[logo];"
+        f"[0:v][logo]overlay=x=(W-w)*{x_ratio:.2f}:y=(H-h)*{y_ratio:.2f}:"
+        "shortest=1,format=yuv420p[v]"
+    )
+
+
 def overlay_logo_cpu(
     video_path: Path,
     logo_path: Path,
     opacity: int,
     width_percent: int,
+    position_x: int,
+    position_y: int,
     log: Callable[[str], None],
 ) -> None:
     width = max(16, round(probe_width(video_path) * width_percent / 100))
-    alpha = max(0.05, min(opacity / 100, 1.0))
     logo_input = build_overlay_input_args(logo_path)
     temp_path = video_path.with_name(f"{video_path.stem}.watermark.tmp.mp4")
     command = [
         resolve_tool("ffmpeg"), "-y", "-hide_banner", "-loglevel", "warning",
         "-i", str(video_path), *logo_input,
         "-filter_complex",
-        f"[1:v]scale={width}:-1,format=rgba,colorchannelmixer=aa={alpha:.2f}[logo];"
-        "[0:v][logo]overlay=(W-w)/2:H-h-H*0.03:shortest=1,format=yuv420p[v]",
+        build_overlay_filter(width, opacity, position_x, position_y),
         "-map", "[v]", "-map", "0:a?", "-c:v", "libx264",
         "-preset", os.getenv("FFMPEG_PRESET", "veryfast"),
         "-crf", os.getenv("FFMPEG_CRF", "22"), "-c:a", "copy",
@@ -249,6 +267,63 @@ def overlay_logo_cpu(
     finally:
         if temp_path.exists():
             temp_path.unlink()
+
+
+def create_overlay_archive(
+    source_path: Path,
+    overlays: list[tuple[Path, str]],
+    archive_path: Path,
+    opacity: int,
+    width_percent: int,
+    position_x: int,
+    position_y: int,
+    log: Callable[[str], None],
+) -> list[str]:
+    """Create one processed variant per overlay and bundle them into a fast ZIP."""
+    variants_dir = source_path.parent / "overlay_variants"
+    shutil.rmtree(variants_dir, ignore_errors=True)
+    variants_dir.mkdir(parents=True, exist_ok=True)
+    folder_names: list[str] = []
+    used_names: set[str] = set()
+    temp_archive = archive_path.with_suffix(".tmp.zip")
+    try:
+        for index, (overlay_path, display_name) in enumerate(overlays, start=1):
+            base_name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", Path(display_name).stem).strip(" .")
+            if not base_name:
+                base_name = f"overlay_{index}"
+            if base_name.upper() in {
+                "CON", "PRN", "AUX", "NUL",
+                *(f"COM{number}" for number in range(1, 10)),
+                *(f"LPT{number}" for number in range(1, 10)),
+            }:
+                base_name = f"{base_name}_overlay"
+            folder_name = base_name
+            suffix = 2
+            while folder_name.casefold() in used_names:
+                folder_name = f"{base_name}_{suffix}"
+                suffix += 1
+            used_names.add(folder_name.casefold())
+            folder_names.append(folder_name)
+
+            variant_dir = variants_dir / folder_name
+            variant_dir.mkdir()
+            variant_path = variant_dir / source_path.name
+            shutil.copy2(source_path, variant_path)
+            log(f"Оверлей {index}/{len(overlays)}: {display_name}")
+            overlay_logo_cpu(
+                variant_path, overlay_path, opacity, width_percent,
+                position_x, position_y, log,
+            )
+
+        with zipfile.ZipFile(temp_archive, "w", compression=zipfile.ZIP_STORED) as archive:
+            for folder_name in folder_names:
+                variant_path = variants_dir / folder_name / source_path.name
+                archive.write(variant_path, arcname=f"{folder_name}/{source_path.name}")
+        temp_archive.replace(archive_path)
+        return folder_names
+    finally:
+        shutil.rmtree(variants_dir, ignore_errors=True)
+        temp_archive.unlink(missing_ok=True)
 
 
 def find_downloaded_video(
@@ -275,6 +350,8 @@ def download_short(
     logo_path: Path | None,
     opacity: int,
     width_percent: int,
+    position_x: int,
+    position_y: int,
     max_height: int,
     log: Callable[[str], None],
 ) -> Path:
@@ -326,5 +403,8 @@ def download_short(
         )
     log(f"Видео сохранено: {downloaded.name}")
     if logo_path:
-        overlay_logo_cpu(downloaded, logo_path, opacity, width_percent, log)
+        overlay_logo_cpu(
+            downloaded, logo_path, opacity, width_percent,
+            position_x, position_y, log,
+        )
     return downloaded

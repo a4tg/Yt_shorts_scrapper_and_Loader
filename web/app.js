@@ -1,5 +1,8 @@
 const $ = (selector) => document.querySelector(selector);
-const state = { importId: null, logoToken: null, logoFileKey: null };
+const state = {
+  importId: null, overlayFiles: [], logoTokens: new Map(), activeOverlayIndex: 0,
+  previewUrl: null, positionX: 50, positionY: 96
+};
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function showToast(text) {
@@ -27,22 +30,154 @@ async function pollJob(id, onUpdate) {
   }
 }
 
-$('#opacity').addEventListener('input', (e) => $('#opacity-value').textContent = `${e.target.value}%`);
-$('#logo-width').addEventListener('input', (e) => $('#width-value').textContent = `${e.target.value}%`);
+function clamp(value, minimum, maximum) { return Math.min(maximum, Math.max(minimum, value)); }
+
+function updateOverlayPreview() {
+  const stage = $('#video-stage'); const overlay = $('#overlay-object');
+  if (overlay.classList.contains('hidden')) return;
+  const width = Number($('#logo-width').value);
+  overlay.style.width = `${width}%`;
+  overlay.style.opacity = Number($('#opacity').value) / 100;
+  requestAnimationFrame(() => {
+    const maxLeft = Math.max(0, stage.clientWidth - overlay.offsetWidth);
+    const maxTop = Math.max(0, stage.clientHeight - overlay.offsetHeight);
+    overlay.style.left = `${maxLeft * state.positionX / 100}px`;
+    overlay.style.top = `${maxTop * state.positionY / 100}px`;
+  });
+  $('#position-x-value').textContent = `${Math.round(state.positionX)}%`;
+  $('#position-y-value').textContent = `${Math.round(state.positionY)}%`;
+  $('#editor-width-value').textContent = `${width}%`;
+}
+
+function showOverlayFile(file) {
+  if (state.previewUrl) URL.revokeObjectURL(state.previewUrl);
+  state.previewUrl = URL.createObjectURL(file);
+  const extension = file.name.split('.').pop()?.toLowerCase();
+  const videoExtensions = new Set(['mov', 'mp4', 'm4v', 'webm', 'mkv', 'avi', 'mpeg', 'mpg']);
+  const media = file.type.startsWith('video/') || videoExtensions.has(extension)
+    ? document.createElement('video') : document.createElement('img');
+  media.src = state.previewUrl;
+  if (media instanceof HTMLVideoElement) {
+    media.muted = true; media.autoplay = true; media.loop = true; media.playsInline = true;
+    media.addEventListener('loadeddata', () => { media.play().catch(() => {}); updateOverlayPreview(); });
+  } else {
+    media.alt = ''; media.addEventListener('load', updateOverlayPreview);
+  }
+  $('#overlay-media').replaceChildren(media);
+  $('#overlay-object').classList.remove('hidden');
+  $('#stage-placeholder').classList.add('hidden');
+  updateOverlayPreview();
+}
+
+function renderOverlayFileList() {
+  const container = $('#overlay-file-list'); container.replaceChildren();
+  container.classList.toggle('hidden', !state.overlayFiles.length);
+  state.overlayFiles.forEach((file, index) => {
+    const button = document.createElement('button'); button.type = 'button';
+    button.textContent = file.name; button.title = file.name;
+    button.classList.toggle('active', index === state.activeOverlayIndex);
+    button.addEventListener('click', () => {
+      state.activeOverlayIndex = index; showOverlayFile(file); renderOverlayFileList();
+    });
+    container.append(button);
+  });
+}
+
+function clearOverlayPreview() {
+  if (state.previewUrl) URL.revokeObjectURL(state.previewUrl);
+  state.previewUrl = null; $('#overlay-media').replaceChildren();
+  $('#overlay-object').classList.add('hidden'); $('#stage-placeholder').classList.remove('hidden');
+}
+
+$('#opacity').addEventListener('input', (e) => {
+  $('#opacity-value').textContent = `${e.target.value}%`; updateOverlayPreview();
+});
+$('#logo-width').addEventListener('input', (e) => {
+  $('#width-value').textContent = `${e.target.value}%`; updateOverlayPreview();
+});
 $('#logo-file').addEventListener('change', (e) => {
-  const file = e.target.files[0]; $('#logo-name').textContent = file ? file.name : 'Без оверлея';
-  state.logoToken = null; state.logoFileKey = null;
+  const files = Array.from(e.target.files);
+  if (files.length > 10) {
+    showToast('Можно выбрать не более 10 оверлеев'); e.target.value = '';
+    state.overlayFiles = []; state.logoTokens.clear(); renderOverlayFileList(); clearOverlayPreview();
+    $('#logo-name').textContent = 'Без оверлея'; return;
+  }
+  state.overlayFiles = files; state.logoTokens.clear(); state.activeOverlayIndex = 0;
+  $('#logo-name').textContent = files.length ? `Выбрано: ${files.length}` : 'Без оверлея';
+  renderOverlayFileList();
+  if (files[0]) showOverlayFile(files[0]);
+  else clearOverlayPreview();
 });
 
-async function ensureLogoUploaded() {
-  const file = $('#logo-file').files[0];
-  if (!file) return null;
-  const key = `${file.name}:${file.size}:${file.lastModified}`;
-  if (state.logoToken && state.logoFileKey === key) return state.logoToken;
-  const form = new FormData(); form.append('file', file);
-  showToast('Загружаю оверлей…');
-  const result = await api('/api/logos', { method: 'POST', body: form });
-  state.logoToken = result.token; state.logoFileKey = key; return result.token;
+$('#reset-overlay').addEventListener('click', () => {
+  state.positionX = 50; state.positionY = 96; $('#logo-width').value = 22;
+  $('#width-value').textContent = '22%'; updateOverlayPreview();
+});
+
+const overlayObject = $('#overlay-object'); const videoStage = $('#video-stage');
+let editorGesture = null;
+overlayObject.addEventListener('pointerdown', (event) => {
+  const overlayRect = overlayObject.getBoundingClientRect();
+  editorGesture = {
+    pointerId: event.pointerId,
+    mode: event.target.classList.contains('resize-handle') ? 'resize' : 'move',
+    offsetX: event.clientX - overlayRect.left,
+    offsetY: event.clientY - overlayRect.top,
+    startX: event.clientX,
+    startWidth: Number($('#logo-width').value)
+  };
+  overlayObject.setPointerCapture(event.pointerId); event.preventDefault();
+});
+overlayObject.addEventListener('pointermove', (event) => {
+  if (!editorGesture || editorGesture.pointerId !== event.pointerId) return;
+  const stageRect = videoStage.getBoundingClientRect();
+  if (editorGesture.mode === 'resize') {
+    const width = clamp(
+      editorGesture.startWidth + (event.clientX - editorGesture.startX) / stageRect.width * 100,
+      5, 80
+    );
+    $('#logo-width').value = Math.round(width); $('#width-value').textContent = `${Math.round(width)}%`;
+  } else {
+    const maxLeft = Math.max(0, stageRect.width - overlayObject.offsetWidth);
+    const maxTop = Math.max(0, stageRect.height - overlayObject.offsetHeight);
+    const left = clamp(event.clientX - stageRect.left - editorGesture.offsetX, 0, maxLeft);
+    const top = clamp(event.clientY - stageRect.top - editorGesture.offsetY, 0, maxTop);
+    state.positionX = maxLeft ? left / maxLeft * 100 : 0;
+    state.positionY = maxTop ? top / maxTop * 100 : 0;
+  }
+  updateOverlayPreview();
+});
+const finishEditorGesture = (event) => {
+  if (editorGesture?.pointerId === event.pointerId) editorGesture = null;
+};
+overlayObject.addEventListener('pointerup', finishEditorGesture);
+overlayObject.addEventListener('pointercancel', finishEditorGesture);
+overlayObject.addEventListener('keydown', (event) => {
+  const step = event.shiftKey ? 5 : 1;
+  if (event.key === 'ArrowLeft') state.positionX = clamp(state.positionX - step, 0, 100);
+  else if (event.key === 'ArrowRight') state.positionX = clamp(state.positionX + step, 0, 100);
+  else if (event.key === 'ArrowUp') state.positionY = clamp(state.positionY - step, 0, 100);
+  else if (event.key === 'ArrowDown') state.positionY = clamp(state.positionY + step, 0, 100);
+  else return;
+  event.preventDefault(); updateOverlayPreview();
+});
+new ResizeObserver(updateOverlayPreview).observe(videoStage);
+
+async function ensureOverlaysUploaded() {
+  const tokens = [];
+  for (let index = 0; index < state.overlayFiles.length; index += 1) {
+    const file = state.overlayFiles[index];
+    const key = `${file.name}:${file.size}:${file.lastModified}`;
+    let token = state.logoTokens.get(key);
+    if (!token) {
+      const form = new FormData(); form.append('file', file);
+      showToast(`Загружаю оверлей ${index + 1}/${state.overlayFiles.length}…`);
+      const result = await api('/api/logos', { method: 'POST', body: form });
+      token = result.token; state.logoTokens.set(key, token);
+    }
+    tokens.push(token);
+  }
+  return tokens;
 }
 
 $('#channel-form').addEventListener('submit', async (event) => {
@@ -90,19 +225,25 @@ function renderItems(items, importId) {
   $('#results-section').classList.remove('hidden');
 }
 
-function downloadPayload(url, logoToken) {
+function downloadPayload(url, logoTokens) {
   return {
-    url, logo_token: logoToken,
+    url, logo_tokens: logoTokens,
     opacity: Number($('#opacity').value), width_percent: Number($('#logo-width').value),
+    position_x: Math.round(state.positionX), position_y: Math.round(state.positionY),
     max_height: Number($('#resolution').value)
   };
 }
 
 function showReadyDownload(job, oldButton, note) {
+  const overlayCount = Number(job.result?.overlay_count || 0);
+  const readyLabel = overlayCount > 1 ? `Скачать ZIP · ${overlayCount} вариантов` : 'Скачать MP4';
+  const repeatLabel = overlayCount > 1 ? 'Скачать ZIP ещё раз' : 'Скачать ещё раз';
   const downloadButton = document.createElement('button');
-  downloadButton.className = 'primary'; downloadButton.textContent = 'Скачать MP4';
+  downloadButton.className = 'primary'; downloadButton.textContent = readyLabel;
   oldButton.replaceWith(downloadButton);
-  note.textContent = 'Видео готово. Таймер удаления запустится при скачивании.';
+  note.textContent = overlayCount > 1
+    ? `Готово ${overlayCount} вариантов. В ZIP каждый оверлей лежит в своей папке.`
+    : 'Видео готово. Таймер удаления запустится при скачивании.';
 
   const markDeleted = (message = 'Видео удалено') => {
     downloadButton.disabled = true; downloadButton.textContent = 'Файл удалён';
@@ -137,14 +278,14 @@ function showReadyDownload(job, oldButton, note) {
 
   const waitForCompletedTransfer = async (ticket) => {
     if (ticket.delete_at) {
-      downloadButton.textContent = 'Скачать ещё раз'; downloadButton.disabled = false;
+      downloadButton.textContent = repeatLabel; downloadButton.disabled = false;
       startCountdown(ticket); return;
     }
     while (true) {
       const current = await api(`/api/jobs/${job.id}`);
       if (current.status === 'deleted') { markDeleted(current.message); return; }
       if (current.delete_at) {
-        downloadButton.textContent = 'Скачать ещё раз'; downloadButton.disabled = false;
+        downloadButton.textContent = repeatLabel; downloadButton.disabled = false;
         startCountdown({ ...ticket, delete_at: current.delete_at }); return;
       }
       await sleep(1000);
@@ -169,10 +310,10 @@ function showReadyDownload(job, oldButton, note) {
 async function startDownloadUrl(url, button, note) {
   button.disabled = true; note.textContent = 'Подготовка задания…';
   try {
-    const logoToken = await ensureLogoUploaded();
+    const logoTokens = await ensureOverlaysUploaded();
     const created = await api('/api/videos/download', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(downloadPayload(url, logoToken))
+      body: JSON.stringify(downloadPayload(url, logoTokens))
     });
     const job = await pollJob(created.id, (current) => { note.textContent = current.message || current.status; });
     showReadyDownload(job, button, note);

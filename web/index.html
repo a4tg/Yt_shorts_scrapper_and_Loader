@@ -6,6 +6,7 @@
   <title>YT Shorts Loader</title>
   <link rel="stylesheet" href="/assets/style.css">
   <link rel="stylesheet" href="/assets/direct-video.css">
+  <link rel="stylesheet" href="/assets/overlay-editor.css">
 </head>
 <body>
   <main class="shell">
@@ -45,13 +46,38 @@
       </div>
       <div class="settings-grid">
         <label class="file-control">
-          <span>Изображение или анимация <small>до 100 МБ</small></span>
-          <input id="logo-file" type="file" accept="image/*,video/*,.apng,.m4v,.mkv">
+          <span>Оверлеи <small>до 10 файлов, по 100 МБ</small></span>
+          <input id="logo-file" type="file" accept="image/*,video/*,.apng,.m4v,.mkv" multiple>
           <b id="logo-name">Без оверлея</b>
         </label>
         <label><span>Непрозрачность</span><div class="range-row"><input id="opacity" type="range" min="5" max="100" value="35"><output id="opacity-value">35%</output></div></label>
-        <label><span>Ширина оверлея</span><div class="range-row"><input id="logo-width" type="range" min="5" max="60" value="22"><output id="width-value">22%</output></div></label>
+        <label><span>Ширина оверлея</span><div class="range-row"><input id="logo-width" type="range" min="5" max="80" value="22"><output id="width-value">22%</output></div></label>
         <label><span>Разрешение</span><select id="resolution"><option value="720">720p</option><option value="1080" selected>1080p</option><option value="1440">1440p</option><option value="2160">2160p</option></select></label>
+      </div>
+      <div class="overlay-editor">
+        <div class="editor-description">
+          <span class="editor-badge">LIVE</span>
+          <h3>Конструктор оверлея</h3>
+          <p>Перетащите баннер по кадру. Потяните за маркер в правом нижнем углу, чтобы изменить размер.</p>
+          <div id="overlay-file-list" class="overlay-file-list hidden" aria-label="Выбранные оверлеи"></div>
+          <div class="editor-values" aria-live="polite">
+            <span>X <b id="position-x-value">50%</b></span>
+            <span>Y <b id="position-y-value">96%</b></span>
+            <span>Ширина <b id="editor-width-value">22%</b></span>
+          </div>
+          <button id="reset-overlay" class="ghost" type="button">Сбросить позицию</button>
+        </div>
+        <div id="video-stage" class="video-stage" aria-label="Предпросмотр вертикального видео">
+          <div class="stage-safe-zone"></div>
+          <div id="stage-placeholder" class="stage-placeholder">
+            <span>9:16</span>
+            <small>Выберите оверлей выше</small>
+          </div>
+          <div id="overlay-object" class="overlay-object hidden" tabindex="0" role="img" aria-label="Перемещаемый оверлей">
+            <div id="overlay-media" class="overlay-media"></div>
+            <span class="resize-handle" title="Изменить размер" aria-hidden="true"></span>
+          </div>
+        </div>
       </div>
       <div class="direct-video">
         <div>

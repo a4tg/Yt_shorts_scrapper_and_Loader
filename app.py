@@ -1,3 +1,4 @@
+import io
 import queue
 import re
 import shutil
@@ -9,6 +10,8 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from typing import Callable
 from urllib.parse import parse_qs, urlparse
+
+from PIL import Image, ImageTk, UnidentifiedImageError
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -175,13 +178,22 @@ def find_media_tool(name: str) -> str | None:
     return shutil.which(name)
 
 
-def build_logo_filter(video_width: int, opacity: int, width_percent: int) -> str:
+def build_logo_filter(
+    video_width: int,
+    opacity: int,
+    width_percent: int,
+    position_x: int = 50,
+    position_y: int = 96,
+) -> str:
     logo_width = max(16, round(video_width * width_percent / 100))
     alpha = max(0.05, min(opacity / 100, 1.0))
+    x_ratio = max(0, min(position_x, 100)) / 100
+    y_ratio = max(0, min(position_y, 100)) / 100
     return (
         f"[1:v]scale={logo_width}:-1,format=rgba,"
         f"colorchannelmixer=aa={alpha:.2f}[logo];"
-        "[0:v][logo]overlay=(W-w)/2:H-h-H*0.03:format=auto:shortest=1,"
+        f"[0:v][logo]overlay=x=(W-w)*{x_ratio:.2f}:y=(H-h)*{y_ratio:.2f}:"
+        "shortest=1,"
         "format=yuv420p[v]"
     )
 
@@ -245,6 +257,37 @@ def is_supported_overlay(overlay_path: Path, ffprobe_path: str) -> bool:
     return result.returncode == 0 and result.stdout.strip() == "video"
 
 
+def load_overlay_preview(overlay_path: Path) -> Image.Image | None:
+    """Load the first visual frame with Pillow, falling back to FFmpeg for video."""
+    try:
+        with Image.open(overlay_path) as source:
+            source.seek(0)
+            preview = source.convert("RGBA")
+    except (OSError, UnidentifiedImageError):
+        ffmpeg_path = find_media_tool("ffmpeg")
+        if not ffmpeg_path:
+            return None
+        result = subprocess.run(
+            [
+                ffmpeg_path, "-hide_banner", "-loglevel", "error",
+                "-i", str(overlay_path), "-frames:v", "1",
+                "-f", "image2pipe", "-vcodec", "png", "pipe:1",
+            ],
+            capture_output=True,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        if result.returncode != 0 or not result.stdout:
+            return None
+        try:
+            with Image.open(io.BytesIO(result.stdout)) as source:
+                preview = source.convert("RGBA")
+        except (OSError, UnidentifiedImageError):
+            return None
+
+    preview.thumbnail((900, 1600), Image.Resampling.LANCZOS)
+    return preview
+
+
 def probe_video_width(video_path: Path, ffprobe_path: str) -> int:
     result = subprocess.run(
         [
@@ -294,6 +337,8 @@ def overlay_logo(
     opacity: int,
     width_percent: int,
     log: Callable[[str], None],
+    position_x: int = 50,
+    position_y: int = 96,
 ) -> bool:
     ffmpeg_path = find_media_tool("ffmpeg")
     ffprobe_path = find_media_tool("ffprobe")
@@ -319,7 +364,9 @@ def overlay_logo(
         str(video_path),
         *logo_input,
         "-filter_complex",
-        build_logo_filter(video_width, opacity, width_percent),
+        build_logo_filter(
+            video_width, opacity, width_percent, position_x, position_y,
+        ),
         "-map",
         "[v]",
         "-map",
@@ -367,6 +414,8 @@ def create_logo_variants(
     opacity: int,
     width_percent: int,
     log: Callable[[str], None],
+    position_x: int = 50,
+    position_y: int = 96,
 ) -> list[Path]:
     """Create one processed copy per logo in a folder named after that logo."""
     completed_paths: list[Path] = []
@@ -387,7 +436,10 @@ def create_logo_variants(
             log(f"Не удалось создать копию для {logo_path.name}: {exc}")
             continue
 
-        if overlay_logo(variant_path, logo_path, opacity, width_percent, log):
+        if overlay_logo(
+            variant_path, logo_path, opacity, width_percent, log,
+            position_x, position_y,
+        ):
             completed_paths.append(variant_path)
         else:
             try:
@@ -406,6 +458,8 @@ def create_logo_variants_batch(
     width_percent: int,
     log: Callable[[str], None],
     progress: Callable[[int, int], None],
+    position_x: int = 50,
+    position_y: int = 96,
 ) -> int:
     """Process downloaded sources only after phase one has fully completed."""
     fully_processed = 0
@@ -423,6 +477,8 @@ def create_logo_variants_batch(
             opacity,
             width_percent,
             log,
+            position_x,
+            position_y,
         )
         if len(completed_variants) == len(logo_paths):
             source_path.unlink()
@@ -443,7 +499,8 @@ class DownloaderApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("YT Loader")
-        self.root.geometry("900x860")
+        self.root.geometry("1050x940")
+        self.root.minsize(900, 760)
 
         self.log_queue: queue.Queue[str | tuple[str, object]] = queue.Queue()
         self.worker: threading.Thread | None = None
@@ -454,9 +511,22 @@ class DownloaderApp:
         self.logo_paths: list[Path] = []
         self.logo_opacity_var = tk.IntVar(value=35)
         self.logo_width_var = tk.IntVar(value=22)
+        self.logo_position_x_var = tk.IntVar(value=50)
+        self.logo_position_y_var = tk.IntVar(value=96)
+        self.overlay_preview_source: Image.Image | None = None
+        self.overlay_preview_photo: ImageTk.PhotoImage | None = None
+        self.overlay_editor_gesture: dict[str, float | str] | None = None
         self.status_var = tk.StringVar(value="Готово к загрузке")
 
         self._build_ui()
+        for variable in (
+            self.logo_opacity_var,
+            self.logo_width_var,
+            self.logo_position_x_var,
+            self.logo_position_y_var,
+        ):
+            variable.trace_add("write", self._on_overlay_setting_changed)
+        self._redraw_overlay_editor()
         self.root.after(150, self._flush_log_queue)
 
     def _build_ui(self) -> None:
@@ -523,7 +593,7 @@ class DownloaderApp:
             links_toolbar, text="Очистить", command=self.clear_urls
         ).pack(side="left", padx=(8, 0))
 
-        self.urls_text = tk.Text(links_frame, wrap="word", height=14, font=("Consolas", 10))
+        self.urls_text = tk.Text(links_frame, wrap="word", height=8, font=("Consolas", 10))
         self.urls_text.pack(fill="both", expand=True)
         self._bind_paste_shortcuts(self.urls_text)
 
@@ -538,10 +608,20 @@ class DownloaderApp:
         )
         logo_frame.pack(fill="x", pady=(16, 0))
 
-        logo_file_frame = ttk.Frame(logo_frame)
+        logo_body = ttk.Frame(logo_frame)
+        logo_body.pack(fill="x")
+        logo_controls = ttk.Frame(logo_body)
+        logo_controls.pack(side="left", fill="both", expand=True)
+        editor_frame = ttk.LabelFrame(
+            logo_body, text="Конструктор 9:16", padding=10
+        )
+        editor_frame.pack(side="right", padx=(18, 0), anchor="n")
+
+        logo_file_frame = ttk.Frame(logo_controls)
         logo_file_frame.pack(fill="x")
         self.logo_listbox = tk.Listbox(logo_file_frame, height=3, exportselection=False)
         self.logo_listbox.pack(side="left", fill="x", expand=True)
+        self.logo_listbox.bind("<<ListboxSelect>>", self._select_overlay_preview)
         self.logo_choose_button = ttk.Button(
             logo_file_frame,
             text="Выбрать оверлеи",
@@ -555,7 +635,7 @@ class DownloaderApp:
         )
         self.logo_clear_button.pack(side="left", padx=(8, 0))
 
-        logo_settings_frame = ttk.Frame(logo_frame)
+        logo_settings_frame = ttk.Frame(logo_controls)
         logo_settings_frame.pack(fill="x", pady=(8, 0))
         ttk.Label(logo_settings_frame, text="Непрозрачность, %:").pack(side="left")
         self.logo_opacity_spinbox = ttk.Spinbox(
@@ -579,8 +659,9 @@ class DownloaderApp:
         self.logo_width_spinbox.pack(side="left", padx=(6, 0))
         ttk.Label(
             logo_settings_frame,
-            text="Логотип будет по центру снизу с небольшим отступом.",
+            text="Позиция и размер берутся из конструктора справа.",
         ).pack(side="left", padx=(18, 0))
+        self._build_overlay_editor(editor_frame)
 
         options_frame = ttk.LabelFrame(frame, text="Параметры", padding=12)
         options_frame.pack(fill="x", pady=(16, 0))
@@ -619,7 +700,7 @@ class DownloaderApp:
         log_frame.pack(fill="both", expand=True, pady=(16, 0))
 
         self.log_text = tk.Text(
-            log_frame, wrap="word", height=14, state="disabled", font=("Consolas", 10)
+            log_frame, wrap="word", height=8, state="disabled", font=("Consolas", 10)
         )
         self.log_text.pack(fill="both", expand=True)
 
@@ -645,10 +726,211 @@ class DownloaderApp:
             self.logo_listbox.delete(0, "end")
             for logo_path in self.logo_paths:
                 self.logo_listbox.insert("end", logo_path.name)
+            self.logo_listbox.selection_set(0)
+            self._load_selected_overlay_preview(0)
 
     def clear_logos(self) -> None:
         self.logo_paths.clear()
         self.logo_listbox.delete(0, "end")
+        self.overlay_preview_source = None
+        self._redraw_overlay_editor()
+
+    def _build_overlay_editor(self, parent: ttk.LabelFrame) -> None:
+        self.overlay_canvas_width = 180
+        self.overlay_canvas_height = 320
+        self.overlay_canvas = tk.Canvas(
+            parent,
+            width=self.overlay_canvas_width,
+            height=self.overlay_canvas_height,
+            bg="#101722",
+            highlightthickness=1,
+            highlightbackground="#53647a",
+            cursor="hand2",
+            takefocus=True,
+        )
+        self.overlay_canvas.pack()
+        for x in range(45, self.overlay_canvas_width, 45):
+            self.overlay_canvas.create_line(
+                x, 0, x, self.overlay_canvas_height, fill="#1d2938"
+            )
+        for y in range(40, self.overlay_canvas_height, 40):
+            self.overlay_canvas.create_line(
+                0, y, self.overlay_canvas_width, y, fill="#1d2938"
+            )
+        self.overlay_canvas.create_rectangle(
+            5, 5, self.overlay_canvas_width - 5, self.overlay_canvas_height - 5,
+            outline="#3b4c65", dash=(4, 4),
+        )
+        self.overlay_canvas.create_line(
+            0, self.overlay_canvas_height // 2,
+            self.overlay_canvas_width, self.overlay_canvas_height // 2,
+            fill="#4d477d", dash=(3, 5),
+        )
+        self.overlay_canvas.bind("<ButtonPress-1>", self._overlay_canvas_press)
+        self.overlay_canvas.bind("<B1-Motion>", self._overlay_canvas_motion)
+        self.overlay_canvas.bind("<ButtonRelease-1>", self._overlay_canvas_release)
+        self.overlay_canvas.bind("<KeyPress>", self._overlay_canvas_key)
+
+        self.overlay_position_label = ttk.Label(parent, anchor="center")
+        self.overlay_position_label.pack(fill="x", pady=(7, 5))
+        self.overlay_reset_button = ttk.Button(
+            parent, text="Сбросить позицию", command=self._reset_overlay_position
+        )
+        self.overlay_reset_button.pack(fill="x")
+        ttk.Label(
+            parent,
+            text="Тяни оверлей или его маркер.\n"
+                 "Стрелки: 1%, Shift+стрелки: 5%.",
+            justify="center",
+        ).pack(pady=(6, 0))
+
+    def _select_overlay_preview(self, _event: tk.Event | None = None) -> None:
+        selection = self.logo_listbox.curselection()
+        if selection:
+            self._load_selected_overlay_preview(int(selection[0]))
+
+    def _load_selected_overlay_preview(self, index: int) -> None:
+        if not 0 <= index < len(self.logo_paths):
+            return
+        self.overlay_preview_source = load_overlay_preview(self.logo_paths[index])
+        if self.overlay_preview_source is None:
+            self._log(f"Не удалось показать предпросмот: {self.logo_paths[index].name}")
+        self._redraw_overlay_editor()
+
+    def _on_overlay_setting_changed(self, *_args: object) -> None:
+        if hasattr(self, "overlay_canvas"):
+            self._redraw_overlay_editor()
+
+    def _redraw_overlay_editor(self) -> None:
+        if not hasattr(self, "overlay_canvas"):
+            return
+        self.overlay_canvas.delete("preview")
+        try:
+            opacity = max(5, min(int(self.logo_opacity_var.get()), 100))
+            width_percent = max(5, min(int(self.logo_width_var.get()), 80))
+            position_x = max(0, min(int(self.logo_position_x_var.get()), 100))
+            position_y = max(0, min(int(self.logo_position_y_var.get()), 100))
+        except (tk.TclError, ValueError):
+            return
+
+        self.overlay_position_label.config(
+            text=f"X {position_x}%   Y {position_y}%   Ширина {width_percent}%"
+        )
+        if self.overlay_preview_source is None:
+            self.overlay_canvas.create_text(
+                self.overlay_canvas_width // 2,
+                self.overlay_canvas_height // 2 - 12,
+                text="9:16",
+                fill="#8494aa",
+                font=("Segoe UI", 20, "bold"),
+                tags="preview",
+            )
+            self.overlay_canvas.create_text(
+                self.overlay_canvas_width // 2,
+                self.overlay_canvas_height // 2 + 18,
+                text="Выбери оверлей",
+                fill="#718198",
+                tags="preview",
+            )
+            self.overlay_preview_bounds = None
+            return
+
+        display_width = max(9, round(self.overlay_canvas_width * width_percent / 100))
+        ratio = self.overlay_preview_source.height / max(1, self.overlay_preview_source.width)
+        display_height = max(1, round(display_width * ratio))
+        rendered = self.overlay_preview_source.resize(
+            (display_width, display_height), Image.Resampling.LANCZOS
+        )
+        alpha = rendered.getchannel("A").point(
+            lambda value: round(value * opacity / 100)
+        )
+        rendered.putalpha(alpha)
+        self.overlay_preview_photo = ImageTk.PhotoImage(rendered)
+
+        max_left = max(0, self.overlay_canvas_width - display_width)
+        max_top = max(0, self.overlay_canvas_height - display_height)
+        left = round(max_left * position_x / 100)
+        top = round(max_top * position_y / 100)
+        right = left + display_width
+        bottom = top + display_height
+        self.overlay_preview_bounds = (left, top, right, bottom)
+        self.overlay_canvas.create_image(
+            left, top, image=self.overlay_preview_photo, anchor="nw", tags="preview"
+        )
+        self.overlay_canvas.create_rectangle(
+            left, top, right, bottom, outline="#a598ff", width=2, tags="preview"
+        )
+        handle_x = min(self.overlay_canvas_width - 7, right)
+        handle_y = min(self.overlay_canvas_height - 7, bottom)
+        self.overlay_canvas.create_oval(
+            handle_x - 7, handle_y - 7, handle_x + 7, handle_y + 7,
+            fill="#7c6cff", outline="white", width=2,
+            tags=("preview", "resize_handle"),
+        )
+
+    def _overlay_canvas_press(self, event: tk.Event) -> None:
+        self.overlay_canvas.focus_set()
+        bounds = getattr(self, "overlay_preview_bounds", None)
+        if not bounds:
+            return
+        left, top, right, bottom = bounds
+        handle_x = min(self.overlay_canvas_width - 7, right)
+        handle_y = min(self.overlay_canvas_height - 7, bottom)
+        resize = abs(event.x - handle_x) <= 13 and abs(event.y - handle_y) <= 13
+        if not resize and not (left <= event.x <= right and top <= event.y <= bottom):
+            return
+        self.overlay_editor_gesture = {
+            "mode": "resize" if resize else "move",
+            "offset_x": event.x - left,
+            "offset_y": event.y - top,
+            "start_x": event.x,
+            "start_width": int(self.logo_width_var.get()),
+        }
+
+    def _overlay_canvas_motion(self, event: tk.Event) -> None:
+        gesture = self.overlay_editor_gesture
+        bounds = getattr(self, "overlay_preview_bounds", None)
+        if not gesture or not bounds:
+            return
+        if gesture["mode"] == "resize":
+            width = round(
+                float(gesture["start_width"])
+                + (event.x - float(gesture["start_x"])) / self.overlay_canvas_width * 100
+            )
+            self.logo_width_var.set(max(5, min(width, 80)))
+            return
+
+        left, top, right, bottom = bounds
+        display_width = right - left
+        display_height = bottom - top
+        max_left = max(0, self.overlay_canvas_width - display_width)
+        max_top = max(0, self.overlay_canvas_height - display_height)
+        new_left = max(0, min(event.x - float(gesture["offset_x"]), max_left))
+        new_top = max(0, min(event.y - float(gesture["offset_y"]), max_top))
+        self.logo_position_x_var.set(round(new_left / max_left * 100) if max_left else 0)
+        self.logo_position_y_var.set(round(new_top / max_top * 100) if max_top else 0)
+
+    def _overlay_canvas_release(self, _event: tk.Event) -> None:
+        self.overlay_editor_gesture = None
+
+    def _overlay_canvas_key(self, event: tk.Event) -> str | None:
+        step = 5 if event.state & 0x0001 else 1
+        if event.keysym == "Left":
+            self.logo_position_x_var.set(max(0, self.logo_position_x_var.get() - step))
+        elif event.keysym == "Right":
+            self.logo_position_x_var.set(min(100, self.logo_position_x_var.get() + step))
+        elif event.keysym == "Up":
+            self.logo_position_y_var.set(max(0, self.logo_position_y_var.get() - step))
+        elif event.keysym == "Down":
+            self.logo_position_y_var.set(min(100, self.logo_position_y_var.get() + step))
+        else:
+            return None
+        return "break"
+
+    def _reset_overlay_position(self) -> None:
+        self.logo_position_x_var.set(50)
+        self.logo_position_y_var.set(96)
+        self.logo_width_var.set(22)
 
     def _bind_paste_shortcuts(self, widget: tk.Widget) -> None:
         widget.bind("<Control-KeyPress>", self._handle_control_key)
@@ -823,8 +1105,13 @@ class DownloaderApp:
         try:
             logo_opacity = max(5, min(int(self.logo_opacity_var.get()), 100))
             logo_width = max(5, min(int(self.logo_width_var.get()), 80))
+            logo_position_x = max(0, min(int(self.logo_position_x_var.get()), 100))
+            logo_position_y = max(0, min(int(self.logo_position_y_var.get()), 100))
         except (tk.TclError, ValueError):
-            messagebox.showwarning("Параметры логотипа", "Проверь прозрачность и размер логотипа.")
+            messagebox.showwarning(
+                "Параметры оверлея",
+                "Проверь прозрачность, размер и позицию оверлея.",
+            )
             return
 
         if not urls:
@@ -868,7 +1155,10 @@ class DownloaderApp:
 
         self.worker = threading.Thread(
             target=self._download_worker,
-            args=(urls, output_dir, max_height, logo_paths, logo_opacity, logo_width),
+            args=(
+                urls, output_dir, max_height, logo_paths, logo_opacity, logo_width,
+                logo_position_x, logo_position_y,
+            ),
             daemon=True,
         )
         self.worker.start()
@@ -881,6 +1171,8 @@ class DownloaderApp:
         logo_paths: list[Path],
         logo_opacity: int,
         logo_width: int,
+        logo_position_x: int,
+        logo_position_y: int,
     ) -> None:
         success_count = 0
         rate_limit_index: int | None = None
@@ -1020,6 +1312,8 @@ class DownloaderApp:
                 lambda current, total: self.log_queue.put(
                     f"__PHASE__:Создание вариантов: {current}/{total}"
                 ),
+                logo_position_x,
+                logo_position_y,
             )
             self._log(
                 f"Пакетная обработка завершена: {fully_processed}/"
@@ -1165,8 +1459,10 @@ class DownloaderApp:
             self.logo_listbox,
             self.logo_opacity_spinbox,
             self.logo_width_spinbox,
+            self.overlay_reset_button,
         ):
             control.config(state=state)
+        self.overlay_canvas.config(state=state)
 
 
 def main() -> None:

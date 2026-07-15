@@ -18,6 +18,7 @@ from app import (
     normalize_channel_shorts_url,
     is_supported_overlay,
 )
+from server_core import build_overlay_filter as build_server_overlay_filter
 
 
 class NormalizeChannelShortsUrlTests(unittest.TestCase):
@@ -145,8 +146,22 @@ class LogoOverlayTests(unittest.TestCase):
 
         self.assertIn("scale=238:-1", overlay_filter)
         self.assertIn("colorchannelmixer=aa=0.35", overlay_filter)
-        self.assertIn("overlay=(W-w)/2:H-h-H*0.03", overlay_filter)
+        self.assertIn("overlay=x=(W-w)*0.50:y=(H-h)*0.96", overlay_filter)
         self.assertIn("shortest=1", overlay_filter)
+
+    def test_builds_overlay_filter_from_constructor_position(self) -> None:
+        overlay_filter = build_logo_filter(
+            1000, opacity=60, width_percent=40, position_x=15, position_y=70,
+        )
+
+        self.assertIn("scale=400:-1", overlay_filter)
+        self.assertIn("overlay=x=(W-w)*0.15:y=(H-h)*0.70", overlay_filter)
+
+    def test_desktop_and_web_build_the_same_overlay_filter(self) -> None:
+        self.assertEqual(
+            build_logo_filter(1080, 45, 31, position_x=12, position_y=78),
+            build_server_overlay_filter(335, 45, position_x=12, position_y=78),
+        )
 
     def test_clamps_opacity(self) -> None:
         self.assertIn("aa=1.00", build_logo_filter(1000, opacity=200, width_percent=20))
@@ -188,6 +203,28 @@ class LogoOverlayTests(unittest.TestCase):
             )
             self.assertTrue(all(path.read_bytes() == b"video" for path in completed))
             self.assertEqual(overlay_mock.call_count, 2)
+
+    def test_variants_forward_constructor_position(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source_path = root / "source.mp4"
+            source_path.write_bytes(b"video")
+            logo_path = root / "banner.png"
+            logo_path.write_bytes(b"png")
+
+            with patch("app.overlay_logo", return_value=True) as overlay_mock:
+                create_logo_variants(
+                    source_path,
+                    root / "result",
+                    [logo_path],
+                    opacity=45,
+                    width_percent=35,
+                    log=lambda _message: None,
+                    position_x=12,
+                    position_y=78,
+                )
+
+        self.assertEqual(overlay_mock.call_args.args[-2:], (12, 78))
 
     def test_batch_deletes_only_fully_processed_sources(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

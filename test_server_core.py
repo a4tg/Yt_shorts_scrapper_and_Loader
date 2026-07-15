@@ -1,11 +1,14 @@
 import json
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import Mock, patch
 
 from server_core import (
+    build_overlay_filter,
     build_overlay_input_args,
+    create_overlay_archive,
     find_downloaded_video,
     is_supported_overlay,
     normalize_channel_shorts_url,
@@ -75,6 +78,37 @@ class DownloadResultTests(unittest.TestCase):
 
 
 class OverlayMediaTests(unittest.TestCase):
+    def test_creates_one_zip_folder_per_overlay(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "source.mp4"
+            source.write_bytes(b"video")
+            overlays = [(root / "one.png", "promo.png"), (root / "two.gif", "promo.gif")]
+            for overlay_path, _name in overlays:
+                overlay_path.write_bytes(b"overlay")
+            archive_path = root / "variants.zip"
+
+            with patch("server_core.overlay_logo_cpu") as overlay_mock:
+                folders = create_overlay_archive(
+                    source, overlays, archive_path,
+                    opacity=35, width_percent=22, position_x=50, position_y=96,
+                    log=lambda _message: None,
+                )
+
+            with zipfile.ZipFile(archive_path) as archive:
+                names = archive.namelist()
+
+        self.assertEqual(folders, ["promo", "promo_2"])
+        self.assertEqual(names, ["promo/source.mp4", "promo_2/source.mp4"])
+        self.assertEqual(overlay_mock.call_count, 2)
+
+    def test_overlay_filter_uses_constructor_position(self) -> None:
+        overlay_filter = build_overlay_filter(240, 35, position_x=75, position_y=20)
+
+        self.assertIn("scale=240:-1", overlay_filter)
+        self.assertIn("colorchannelmixer=aa=0.35", overlay_filter)
+        self.assertIn("overlay=x=(W-w)*0.75:y=(H-h)*0.20", overlay_filter)
+
     def test_video_overlay_is_looped(self) -> None:
         self.assertEqual(
             build_overlay_input_args(Path("overlay.mov")),
