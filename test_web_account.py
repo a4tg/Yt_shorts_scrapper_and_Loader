@@ -25,6 +25,8 @@ class WebAccountTests(unittest.TestCase):
         self.assertIn("location.hash.slice(1)", script)
         self.assertIn("syncPasswordRecoveryAvailability", script)
         self.assertNotIn("classList.toggle('hidden', !config.password_reset_enabled)", script)
+        self.assertNotIn("event.currentTarget.reset()", script)
+        self.assertNotIn("finally { event.currentTarget.disabled", script)
         self.assertIn("support@allasplanned.ru", script)
 
 

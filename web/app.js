@@ -1200,7 +1200,8 @@ $('#forgot-form').addEventListener('submit', async (event) => {
 
 $('#reset-form').addEventListener('submit', async (event) => {
   event.preventDefault();
-  const button = event.currentTarget.querySelector('button[type="submit"]');
+  const form = event.currentTarget;
+  const button = form.querySelector('button[type="submit"]');
   const status = $('#reset-status'); button.disabled = true;
   try {
     await api('/api/auth/password/reset', {
@@ -1208,7 +1209,7 @@ $('#reset-form').addEventListener('submit', async (event) => {
       body: JSON.stringify({ token: state.accountToken, password: $('#reset-password').value })
     });
     state.accountToken = null; history.replaceState({}, '', `${location.pathname}${location.search}`);
-    event.currentTarget.reset(); showRecoveryForm(null);
+    form.reset(); showRecoveryForm(null);
     $('#login-status').className = 'auth-status success';
     $('#login-status').textContent = 'Пароль изменён. Войдите заново.';
   } catch (error) { status.className = 'auth-status error'; status.textContent = error.message; }
@@ -1228,6 +1229,7 @@ $('#change-password-button').addEventListener('click', () => $('#password-dialog
 $('#password-dialog-cancel').addEventListener('click', () => $('#password-dialog').close());
 $('#change-password-form').addEventListener('submit', async (event) => {
   event.preventDefault();
+  const form = event.currentTarget;
   const status = $('#change-password-status');
   try {
     await api('/api/auth/password/change', {
@@ -1237,7 +1239,7 @@ $('#change-password-form').addEventListener('submit', async (event) => {
         new_password: $('#new-password').value
       })
     });
-    event.currentTarget.reset(); $('#password-dialog').close(); showToast('Пароль изменён.');
+    form.reset(); $('#password-dialog').close(); showToast('Пароль изменён.');
   } catch (error) { status.className = 'auth-status error'; status.textContent = error.message; }
 });
 
@@ -1890,13 +1892,14 @@ $('#project-form').addEventListener('submit', async (event) => {
 });
 
 $('#add-member-form').addEventListener('submit', async (event) => {
-  event.preventDefault(); const button = event.submitter; button.disabled = true;
+  event.preventDefault(); const form = event.currentTarget;
+  const button = event.submitter; button.disabled = true;
   try {
     const member = await api(`/api/workspaces/${state.currentWorkspaceId}/members`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: $('#member-email').value.trim(), role: $('#member-role').value })
     });
-    state.workspaceMembers.push(member); renderWorkspaceMembers(); event.target.reset();
+    state.workspaceMembers.push(member); renderWorkspaceMembers(); form.reset();
     showToast('Участник добавлен в команду.');
   } catch (error) { showWorkspaceError(error); }
   finally { button.disabled = false; }
@@ -1913,7 +1916,7 @@ $('#add-approval-stage').addEventListener('click', () => {
 });
 
 $('#save-workflow-button').addEventListener('click', async (event) => {
-  const status = $('#workflow-status'); event.currentTarget.disabled = true;
+  const button = event.currentTarget; const status = $('#workflow-status'); button.disabled = true;
   status.className = 'status'; status.textContent = 'Сохраняю процесс…';
   try {
     const payload = workflowPayload();
@@ -1924,7 +1927,7 @@ $('#save-workflow-button').addEventListener('click', async (event) => {
     status.textContent = 'Процесс согласования сохранён.';
     await loadApprovalWorkflow();
   } catch (error) { status.classList.add('error'); status.textContent = error.message; }
-  finally { event.currentTarget.disabled = false; }
+  finally { button.disabled = false; }
 });
 
 $('#create-content-button').addEventListener('click', () => openContentEditor().catch(showWorkspaceError));
