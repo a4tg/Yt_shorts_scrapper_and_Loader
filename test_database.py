@@ -34,7 +34,8 @@ EXPECTED_TABLES = {
         "approval_stages",
         "content_items",
         "content_revisions",
-        "content_attachments",
+    "content_attachments",
+    "project_folders",
 }
 
 

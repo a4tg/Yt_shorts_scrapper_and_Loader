@@ -115,8 +115,10 @@ def test_ai_clips_endpoint_accepts_project_video_attachment() -> None:
     try:
         with server.SessionLocal() as db:
             attachment = ContentAttachment(
-                content_item_id=created.json()["id"], uploaded_by_user_id=client.get("/api/auth/me").json()["id"],
-                original_name="source.mp4", storage_path=str(target.resolve()), mime_type="video/mp4", size_bytes=5,
+                project_id=project, content_item_id=created.json()["id"],
+                uploaded_by_user_id=client.get("/api/auth/me").json()["id"],
+                original_name="source.mp4", storage_path=str(target.resolve()), mime_type="video/mp4",
+                source_type="upload", size_bytes=5,
             )
             db.add(attachment); db.commit(); attachment_id = attachment.id
         result = client.post(

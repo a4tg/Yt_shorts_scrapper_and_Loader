@@ -202,12 +202,34 @@ class ContentRevision(Base):
     )
 
 
+class ProjectFolder(TimestampMixin, Base):
+    __tablename__ = "project_folders"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    parent_id: Mapped[str | None] = mapped_column(
+        ForeignKey("project_folders.id", ondelete="CASCADE"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_by_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+
+
 class ContentAttachment(Base):
     __tablename__ = "content_attachments"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    content_item_id: Mapped[str] = mapped_column(
-        ForeignKey("content_items.id", ondelete="CASCADE"), nullable=False, index=True
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    folder_id: Mapped[str | None] = mapped_column(
+        ForeignKey("project_folders.id", ondelete="SET NULL"), index=True
+    )
+    content_item_id: Mapped[str | None] = mapped_column(
+        ForeignKey("content_items.id", ondelete="SET NULL"), index=True
     )
     uploaded_by_user_id: Mapped[str] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
@@ -215,6 +237,7 @@ class ContentAttachment(Base):
     original_name: Mapped[str] = mapped_column(String(255), nullable=False)
     storage_path: Mapped[str] = mapped_column(String(1000), nullable=False, unique=True)
     mime_type: Mapped[str | None] = mapped_column(String(160))
+    source_type: Mapped[str] = mapped_column(String(24), nullable=False, default="upload", index=True)
     size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), index=True

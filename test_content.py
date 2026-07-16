@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 import content_routes
 import server
 from auth_service import attempt_limiter
+from saas_models import Job
 
 
 PASSWORD = "correct horse battery staple"
@@ -184,6 +185,75 @@ def test_content_attachment_rejects_unsupported_and_disguised_files(tmp_path, mo
     assert disguised.status_code == 415
     assert client.get(f"/api/projects/{project['id']}/library").json() == []
     assert not list(tmp_path.rglob("*.part"))
+
+
+def test_project_folders_direct_upload_rename_and_move(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(content_routes, "CONTENT_DIR", tmp_path)
+    client, _ = register_user()
+    _, project = current_project(client)
+    parent = client.post(
+        f"/api/projects/{project['id']}/folders",
+        headers=csrf(client), json={"name": "Кампания"},
+    )
+    assert parent.status_code == 201, parent.text
+    child = client.post(
+        f"/api/projects/{project['id']}/folders",
+        headers=csrf(client), json={"name": "Исходники", "parent_id": parent.json()["id"]},
+    )
+    assert child.status_code == 201, child.text
+
+    uploaded = client.post(
+        f"/api/projects/{project['id']}/files",
+        headers=csrf(client), data={"folder_id": child.json()["id"]},
+        files={"file": ("brief.pdf", b"%PDF-1.7\nproject brief", "application/pdf")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    assert uploaded.json()["folder_id"] == child.json()["id"]
+    assert uploaded.json()["content_item_id"] is None
+
+    renamed = client.patch(
+        f"/api/project-files/{uploaded.json()['id']}",
+        headers=csrf(client), json={"name": "Главный бриф.pdf", "folder_id": None},
+    )
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["name"] == "Главный бриф.pdf"
+    assert renamed.json()["folder_id"] is None
+    assert client.patch(
+        f"/api/project-files/{uploaded.json()['id']}",
+        headers=csrf(client), json={"name": "Главный бриф.exe"},
+    ).status_code == 400
+
+    assert client.delete(f"/api/project-folders/{child.json()['id']}", headers=csrf(client)).status_code == 204
+    assert client.delete(f"/api/project-folders/{parent.json()['id']}", headers=csrf(client)).status_code == 204
+    library = client.get(f"/api/projects/{project['id']}/library").json()
+    assert library[0]["name"] == "Главный бриф.pdf"
+    assert library[0]["content_title"] is None
+
+
+def test_save_ai_text_result_as_named_project_file(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(content_routes, "CONTENT_DIR", tmp_path)
+    client, user = register_user()
+    workspace, project = current_project(client)
+    job_id = str(uuid.uuid4())
+    with server.SessionLocal() as db:
+        db.add(Job(
+            id=job_id, user_id=user["id"], workspace_id=workspace["id"], project_id=project["id"],
+            kind="ai_text", status="done", request_payload={},
+            result_payload={"text": "# Готовая публикация\n\nТекст от AI"},
+            credits_reserved=0, credits_spent=0,
+        ))
+        db.commit()
+
+    saved = client.post(
+        f"/api/jobs/{job_id}/save-to-project",
+        headers=csrf(client), json={"name": "Публикация для запуска.md"},
+    )
+    assert saved.status_code == 201, saved.text
+    assert saved.json()["source_type"] == "ai"
+    assert saved.json()["name"] == "Публикация для запуска.md"
+    downloaded = client.get(saved.json()["download_url"])
+    assert downloaded.status_code == 200
+    assert "Текст от AI" in downloaded.text
 
 
 def test_imported_video_can_be_linked_once_to_the_content_plan() -> None:

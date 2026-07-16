@@ -590,8 +590,7 @@ def create_ai_clips(payload: AIClipsRequest, request: Request) -> dict[str, obje
     with SessionLocal() as db:
         require_plan_capacity(db, str(request.state.user.id), "clips_per_job", 0, increment=payload.count)
         attachment = db.get(ContentAttachment, payload.attachment_id)
-        item = db.get(ContentItem, attachment.content_item_id) if attachment else None
-        if item is None or item.project_id != project_id:
+        if attachment is None or attachment.project_id != project_id:
             raise HTTPException(404, "Видео не найдено в медиатеке проекта.")
         source_path = Path(attachment.storage_path).resolve()
         content_root = CONTENT_DIR.resolve()

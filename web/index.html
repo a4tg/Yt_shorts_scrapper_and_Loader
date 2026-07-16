@@ -200,7 +200,10 @@
     </section>
     <section class="workspace-page hidden" data-page="library">
       <section class="content-workspace panel">
-        <div class="content-heading"><div><p class="eyebrow">Файлы проекта</p><h2>Медиатека</h2><p>Все вложения из карточек контента с защищённым скачиванием.</p></div><button id="refresh-library-button" class="ghost" type="button">Обновить</button></div>
+        <div class="content-heading"><div><p class="eyebrow">Файловое пространство проекта</p><h2>Медиатека</h2><p>Исходники, документы и AI-результаты — в понятной структуре папок.</p></div><div class="library-heading-actions"><button id="create-library-folder" class="ghost" type="button">+ Папка</button><label class="primary library-upload-button">Загрузить<input id="library-file-input" type="file" multiple accept="image/*,video/*,audio/*,.pdf,.docx,.xlsx,.pptx,.odt,.ods,.odp,.rtf,.txt,.md,.csv,.tsv,.json,.srt,.vtt"></label></div></div>
+        <div class="library-toolbar"><div id="library-breadcrumbs" class="library-breadcrumbs"></div><input id="library-search" type="search" placeholder="Найти файл или папку" aria-label="Поиск в медиатеке"><button id="refresh-library-button" class="icon-button" type="button" title="Обновить" aria-label="Обновить медиатеку">↻</button></div>
+        <div id="library-dropzone" class="library-dropzone" tabindex="0" role="button"><span>⇧</span><div><strong>Перетащите файлы прямо в эту папку</strong><small>Проверим формат и покажем прогресс загрузки</small></div></div>
+        <div id="library-upload-progress" class="content-upload-progress hidden" aria-live="polite"><div><span>Загрузка</span><b>0%</b></div><progress max="100" value="0"></progress></div>
         <div id="library-summary" class="library-summary"></div>
         <div id="library-grid" class="library-grid" aria-live="polite"></div>
       </section>
@@ -224,7 +227,7 @@
           <label><span>Дополнительный контекст</span><textarea id="ai-text-context" rows="3" maxlength="30000" placeholder="ЦА, тональность, факты, ограничения"></textarea></label>
           <button class="primary" type="submit">Создать · 1 кредит</button>
           <div id="ai-text-status" class="status hidden" aria-live="polite"></div>
-          <div id="ai-text-result" class="ai-result hidden"><div><b>Результат</b><button id="ai-copy-text" class="text-button" type="button">Копировать</button></div><textarea readonly rows="12" aria-label="Сгенерированный текст"></textarea></div>
+          <div id="ai-text-result" class="ai-result hidden"><div><b>Результат</b><span><button id="ai-copy-text" class="text-button" type="button">Копировать</button><button class="text-button" type="button" data-save-ai="text">Сохранить в проект</button></span></div><textarea readonly rows="12" aria-label="Сгенерированный текст"></textarea></div>
         </form>
         <form id="ai-image-form" class="panel ai-card">
           <div class="ai-card-title"><span>▧</span><div><h3>Изображение</h3><p>Квадрат, вертикаль или горизонталь</p></div></div>
@@ -232,7 +235,7 @@
           <label><span>Формат</span><select id="ai-image-size"><option value="1024x1024">Квадрат 1:1</option><option value="1024x1536">Вертикальный 2:3</option><option value="1536x1024">Горизонтальный 3:2</option></select></label>
           <button class="primary" type="submit">Создать · 5 кредитов</button>
           <div id="ai-image-status" class="status hidden" aria-live="polite"></div>
-          <div id="ai-image-result" class="ai-image-result hidden"><img alt="Сгенерированное изображение" decoding="async"><a class="primary" href="#">Скачать PNG</a></div>
+          <div id="ai-image-result" class="ai-image-result hidden"><img alt="Сгенерированное изображение" decoding="async"><div><a class="primary" href="#">Скачать PNG</a><button class="ghost" type="button" data-save-ai="image">Сохранить в проект</button></div></div>
         </form>
         <form id="ai-clips-form" class="panel ai-card ai-clips-card">
           <div class="ai-card-title"><span>▶</span><div><h3>Нарезка на клипы</h3><p>Расшифровка, поиск моментов и вертикальный рендер</p></div></div>
@@ -240,7 +243,7 @@
           <div class="ai-inline-fields"><label><span>Клипов</span><input id="ai-clip-count" type="number" min="1" max="5" value="1"></label><label><span>От, сек.</span><input id="ai-clip-min" type="number" min="10" max="120" value="20"></label><label><span>До, сек.</span><input id="ai-clip-max" type="number" min="15" max="180" value="60"></label></div>
           <button class="primary" type="submit">Найти и нарезать</button>
           <div id="ai-clips-status" class="status hidden" aria-live="polite"></div>
-          <a id="ai-clips-download" class="primary hidden" href="#">Скачать ZIP с клипами</a>
+          <div id="ai-clips-actions" class="ai-result-actions hidden"><a id="ai-clips-download" class="primary" href="#">Скачать ZIP с клипами</a><button class="ghost" type="button" data-save-ai="clips">Сохранить в проект</button></div>
         </form>
       </div>
     </section>
@@ -398,6 +401,26 @@
       <label><span>Цвет проекта</span><input id="project-color-input" type="color" value="#7c6cff"></label>
       <div class="dialog-actions"><button class="ghost dialog-cancel" type="button">Отмена</button><button class="primary" type="submit">Создать</button></div>
       <div id="project-dialog-status" class="auth-status" aria-live="polite"></div>
+    </form>
+  </dialog>
+  <dialog id="library-file-dialog" class="account-dialog workspace-dialog">
+    <form id="library-file-form" method="dialog">
+      <h2>Настроить файл</h2>
+      <input id="library-file-id" type="hidden">
+      <label><span>Название с расширением</span><input id="library-file-name" type="text" maxlength="255" required></label>
+      <label><span>Папка</span><select id="library-file-folder"></select></label>
+      <div class="dialog-actions"><button id="library-file-delete" class="danger" type="button">Удалить</button><span></span><button class="ghost dialog-cancel" type="button">Отмена</button><button class="primary" type="submit">Сохранить</button></div>
+      <div id="library-file-status" class="auth-status" aria-live="polite"></div>
+    </form>
+  </dialog>
+  <dialog id="ai-save-dialog" class="account-dialog workspace-dialog">
+    <form id="ai-save-form" method="dialog">
+      <h2>Сохранить AI-результат</h2>
+      <input id="ai-save-job-id" type="hidden">
+      <label><span>Название файла</span><input id="ai-save-name" type="text" maxlength="255" required></label>
+      <label><span>Папка проекта</span><select id="ai-save-folder"></select></label>
+      <div class="dialog-actions"><button class="ghost dialog-cancel" type="button">Отмена</button><button class="primary" type="submit">Сохранить</button></div>
+      <div id="ai-save-status" class="auth-status" aria-live="polite"></div>
     </form>
   </dialog>
 

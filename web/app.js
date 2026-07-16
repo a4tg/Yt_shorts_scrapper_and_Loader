@@ -7,7 +7,8 @@ const state = {
   paymentResumed: false, authConfig: {}, accountToken: null, currentPage: 'dashboard',
   workspaces: [], currentWorkspaceId: null, projects: [], currentProjectId: null,
   workspaceMembers: [], approvalWorkflow: null, contentItems: [], contentView: 'board',
-  libraryItems: [], editingContentId: null, aiConfig: null, adminLoaded: false
+  libraryItems: [], libraryFolders: [], currentLibraryFolderId: null,
+  editingContentId: null, aiConfig: null, aiResultJobs: {}, adminLoaded: false
 };
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -293,6 +294,7 @@ async function activateWorkspace(workspaceId) {
   const storedProject = localStorage.getItem(`allAsPlannedProject:${workspace.id}`);
   state.currentProjectId = projects.some((project) => project.id === storedProject)
     ? storedProject : projects.find((project) => project.status === 'active')?.id || projects[0]?.id || null;
+  state.currentLibraryFolderId = null;
   renderWorkspaceProjects(); renderWorkspaceMembers();
   if (state.currentPage === 'approvals' && state.currentProjectId) await loadApprovalWorkflow();
   if (['content', 'documents'].includes(state.currentPage) && state.currentProjectId) await loadContent();
@@ -304,6 +306,7 @@ async function activateWorkspace(workspaceId) {
 function selectProject(projectId) {
   if (!state.projects.some((project) => project.id === projectId)) return;
   state.currentProjectId = projectId;
+  state.currentLibraryFolderId = null;
   localStorage.setItem(`allAsPlannedProject:${state.currentWorkspaceId}`, projectId);
   renderWorkspaceProjects();
   if (state.currentPage === 'approvals') loadApprovalWorkflow().catch(showWorkspaceError);
@@ -794,32 +797,191 @@ async function loadContent() {
 
 function renderLibrary() {
   const container = $('#library-grid'); container.replaceChildren();
+  const editable = canEditContent();
+  $('#create-library-folder').disabled = !editable; $('#library-file-input').disabled = !editable;
+  $('#library-dropzone').setAttribute('aria-disabled', editable ? 'false' : 'true');
   const total = state.libraryItems.reduce((sum, item) => sum + Number(item.size_bytes || 0), 0);
-  $('#library-summary').textContent = `${state.libraryItems.length} файлов · ${humanFileSize(total)}`;
-  if (!state.libraryItems.length) {
+  const query = $('#library-search').value.trim().toLocaleLowerCase('ru-RU');
+  const currentFolder = state.libraryFolders.find((folder) => folder.id === state.currentLibraryFolderId) || null;
+  const visibleFolders = state.libraryFolders.filter((folder) => {
+    if (query) return folder.name.toLocaleLowerCase('ru-RU').includes(query);
+    return folder.parent_id === (currentFolder?.id || null);
+  });
+  const visibleFiles = state.libraryItems.filter((item) => {
+    if (query) return item.name.toLocaleLowerCase('ru-RU').includes(query)
+      || (item.content_title || '').toLocaleLowerCase('ru-RU').includes(query);
+    return item.folder_id === (currentFolder?.id || null);
+  });
+  $('#library-summary').textContent = `${state.libraryItems.length} файлов · ${state.libraryFolders.length} папок · ${humanFileSize(total)}`;
+  renderLibraryBreadcrumbs();
+  if (!visibleFiles.length && !visibleFolders.length) {
     container.append(createBrandedEmptyState(
-      'Медиатека ждёт материалы',
-      'Прикрепите файл к карточке контента — он автоматически появится здесь.'
+      query ? 'Ничего не найдено' : 'Эта папка пока пустая',
+      query ? 'Попробуйте изменить запрос.' : 'Перетащите сюда материалы или создайте вложенную папку.'
     )); return;
   }
-  for (const item of state.libraryItems) {
+  for (const folder of visibleFolders) {
+    const card = document.createElement('article'); card.className = 'library-card library-folder-card';
+    const open = document.createElement('button'); open.type = 'button'; open.className = 'library-card-main';
+    const icon = document.createElement('span'); icon.className = 'library-file-icon folder'; icon.textContent = '⌑';
+    const title = document.createElement('h3'); title.textContent = folder.name;
+    const meta = document.createElement('p');
+    const childCount = state.libraryFolders.filter((item) => item.parent_id === folder.id).length;
+    const fileCount = state.libraryItems.filter((item) => item.folder_id === folder.id).length;
+    meta.textContent = `${fileCount} файлов · ${childCount} папок`;
+    open.append(icon, title, meta);
+    open.addEventListener('click', () => { state.currentLibraryFolderId = folder.id; $('#library-search').value = ''; renderLibrary(); });
+    const actions = document.createElement('footer');
+    const rename = document.createElement('button'); rename.className = 'text-button'; rename.type = 'button'; rename.textContent = 'Переименовать';
+    rename.addEventListener('click', () => renameLibraryFolder(folder));
+    const remove = document.createElement('button'); remove.className = 'text-button danger-text'; remove.type = 'button'; remove.textContent = 'Удалить';
+    remove.addEventListener('click', () => deleteLibraryFolder(folder));
+    if (editable) actions.append(rename, remove); card.append(open, actions); container.append(card);
+  }
+  for (const item of visibleFiles) {
     const card = document.createElement('article'); card.className = 'library-card';
-    const icon = document.createElement('span'); icon.className = 'library-file-icon';
-    icon.textContent = (item.name.split('.').pop() || 'FILE').slice(0, 4).toUpperCase();
+    let icon;
+    if ((item.mime_type || '').startsWith('image/')) {
+      icon = document.createElement('img'); icon.className = 'library-preview'; icon.src = item.download_url; icon.alt = '';
+    } else {
+      icon = document.createElement('span'); icon.className = 'library-file-icon';
+      icon.textContent = (item.name.split('.').pop() || 'FILE').slice(0, 4).toUpperCase();
+    }
     const title = document.createElement('h3'); title.textContent = item.name;
-    const context = document.createElement('p'); context.textContent = item.content_title;
+    const context = document.createElement('p');
+    context.textContent = item.source_type === 'ai' ? '✦ Создано AI' : (item.content_title || 'Файл проекта');
     const footer = document.createElement('footer');
     const size = document.createElement('span'); size.textContent = humanFileSize(item.size_bytes);
     const link = document.createElement('a'); link.className = 'ghost'; link.href = item.download_url;
-    link.textContent = 'Скачать'; footer.append(size, link); card.append(icon, title, context, footer);
+    link.textContent = 'Скачать';
+    const settings = document.createElement('button'); settings.className = 'text-button'; settings.type = 'button'; settings.textContent = '•••';
+    settings.setAttribute('aria-label', `Настроить файл ${item.name}`); settings.addEventListener('click', () => openLibraryFileDialog(item));
+    footer.append(size, link); if (editable) footer.append(settings); card.append(icon, title, context, footer);
     container.append(card);
+  }
+}
+
+function folderPath(folderId) {
+  const result = []; let cursor = state.libraryFolders.find((folder) => folder.id === folderId);
+  while (cursor) { result.unshift(cursor); cursor = state.libraryFolders.find((folder) => folder.id === cursor.parent_id); }
+  return result;
+}
+
+function renderLibraryBreadcrumbs() {
+  const container = $('#library-breadcrumbs'); container.replaceChildren();
+  const root = document.createElement('button'); root.type = 'button'; root.textContent = 'Все файлы';
+  root.className = state.currentLibraryFolderId ? 'text-button' : 'text-button active';
+  root.addEventListener('click', () => { state.currentLibraryFolderId = null; renderLibrary(); }); container.append(root);
+  for (const folder of folderPath(state.currentLibraryFolderId)) {
+    const separator = document.createElement('span'); separator.textContent = '/';
+    const button = document.createElement('button'); button.type = 'button'; button.className = 'text-button'; button.textContent = folder.name;
+    if (folder.id === state.currentLibraryFolderId) button.classList.add('active');
+    button.addEventListener('click', () => { state.currentLibraryFolderId = folder.id; renderLibrary(); });
+    container.append(separator, button);
   }
 }
 
 async function loadLibrary() {
   if (!state.currentProjectId) return;
-  state.libraryItems = await api(`/api/projects/${state.currentProjectId}/library`);
+  [state.libraryItems, state.libraryFolders] = await Promise.all([
+    api(`/api/projects/${state.currentProjectId}/library`),
+    api(`/api/projects/${state.currentProjectId}/folders`)
+  ]);
+  if (state.currentLibraryFolderId && !state.libraryFolders.some((folder) => folder.id === state.currentLibraryFolderId)) {
+    state.currentLibraryFolderId = null;
+  }
   renderLibrary();
+}
+
+async function createLibraryFolder() {
+  if (!state.currentProjectId || !canEditContent()) return;
+  const name = prompt('Название новой папки');
+  if (!name?.trim()) return;
+  try {
+    await api(`/api/projects/${state.currentProjectId}/folders`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name.trim(), parent_id: state.currentLibraryFolderId })
+    });
+    await loadLibrary(); showToast(`Папка «${name.trim()}» создана.`);
+  } catch (error) { showWorkspaceError(error); }
+}
+
+async function renameLibraryFolder(folder) {
+  const name = prompt('Новое название папки', folder.name);
+  if (!name?.trim() || name.trim() === folder.name) return;
+  try {
+    await api(`/api/project-folders/${folder.id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() })
+    });
+    await loadLibrary(); showToast('Папка переименована.');
+  } catch (error) { showWorkspaceError(error); }
+}
+
+async function deleteLibraryFolder(folder) {
+  if (!confirm(`Удалить пустую папку «${folder.name}»?`)) return;
+  try {
+    await api(`/api/project-folders/${folder.id}`, { method: 'DELETE' });
+    if (state.currentLibraryFolderId === folder.id) state.currentLibraryFolderId = folder.parent_id;
+    await loadLibrary(); showToast('Папка удалена.');
+  } catch (error) { showWorkspaceError(error); }
+}
+
+function populateLibraryFolderSelect(select, selectedId = null) {
+  select.replaceChildren();
+  const root = document.createElement('option'); root.value = ''; root.textContent = 'Без папки'; select.append(root);
+  const appendChildren = (parentId, depth) => {
+    for (const folder of state.libraryFolders.filter((item) => item.parent_id === parentId)) {
+      const option = document.createElement('option'); option.value = folder.id;
+      option.textContent = `${'— '.repeat(depth)}${folder.name}`; select.append(option); appendChildren(folder.id, depth + 1);
+    }
+  };
+  appendChildren(null, 0); select.value = selectedId || '';
+}
+
+function openLibraryFileDialog(item) {
+  $('#library-file-id').value = item.id; $('#library-file-name').value = item.name;
+  populateLibraryFolderSelect($('#library-file-folder'), item.folder_id);
+  $('#library-file-status').textContent = ''; $('#library-file-dialog').showModal();
+}
+
+function uploadProjectFile(file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest(); const form = new FormData(); form.append('file', file);
+    if (state.currentLibraryFolderId) form.append('folder_id', state.currentLibraryFolderId);
+    request.open('POST', `/api/projects/${state.currentProjectId}/files`); request.withCredentials = true;
+    const csrfToken = readCookie('yt_loader_csrf'); if (csrfToken) request.setRequestHeader('X-CSRF-Token', csrfToken);
+    request.upload.addEventListener('progress', (event) => { if (event.lengthComputable) onProgress(event.loaded / event.total); });
+    request.addEventListener('load', () => {
+      let body = null; try { body = JSON.parse(request.responseText); } catch (_) {}
+      if (request.status >= 200 && request.status < 300) resolve(body);
+      else reject(new Error(body?.detail || `Ошибка ${request.status}`));
+    });
+    request.addEventListener('error', () => reject(new Error('Не удалось загрузить файл.')));
+    request.send(form);
+  });
+}
+
+async function uploadLibraryFiles(fileList) {
+  const files = [...fileList]; if (!files.length || !canEditContent()) return;
+  for (const file of files) {
+    const extension = file.name.split('.').pop()?.toLowerCase() || '';
+    if (!supportedProjectFileExtensions.has(extension) || !file.size || file.size > 250 * 1024 * 1024) {
+      showWorkspaceError(new Error(`Файл «${file.name}» не соответствует допустимым форматам или размеру.`)); return;
+    }
+  }
+  const panel = $('#library-upload-progress'); const progress = panel.querySelector('progress');
+  const label = panel.querySelector('span'); const value = panel.querySelector('b'); panel.classList.remove('hidden');
+  try {
+    for (let index = 0; index < files.length; index += 1) {
+      label.textContent = `Загрузка ${index + 1} из ${files.length} · ${files[index].name}`;
+      await uploadProjectFile(files[index], (fraction) => {
+        const percent = Math.round(((index + fraction) / files.length) * 100);
+        progress.value = percent; value.textContent = `${percent}%`;
+      });
+    }
+    await loadLibrary(); showToast(`Загружено файлов: ${files.length}.`);
+  } catch (error) { showWorkspaceError(error); }
+  finally { $('#library-file-input').value = ''; setTimeout(() => panel.classList.add('hidden'), 500); }
 }
 
 function setAIStatus(selector, message, isError = false) {
@@ -840,16 +1002,17 @@ function renderAIVideoOptions() {
   select.append(empty);
   for (const video of videos) {
     const option = document.createElement('option'); option.value = video.id;
-    option.textContent = `${video.content_title} · ${video.name}`; select.append(option);
+    option.textContent = `${video.content_title || 'Файл проекта'} · ${video.name}`; select.append(option);
   }
 }
 
 async function loadAIStudio() {
   if (!state.currentProjectId) return;
-  const [config, library] = await Promise.all([
-    api('/api/ai/config'), api(`/api/projects/${state.currentProjectId}/library`)
+  const [config, library, folders] = await Promise.all([
+    api('/api/ai/config'), api(`/api/projects/${state.currentProjectId}/library`),
+    api(`/api/projects/${state.currentProjectId}/folders`)
   ]);
-  state.aiConfig = config; state.libraryItems = library; renderAIVideoOptions();
+  state.aiConfig = config; state.libraryItems = library; state.libraryFolders = folders; renderAIVideoOptions();
   const badge = $('#ai-provider-status');
   badge.textContent = config.enabled ? `OpenAI подключён · ${config.text_model}` : 'AI не настроен на сервере';
   badge.classList.toggle('ready', config.enabled);
@@ -923,6 +1086,7 @@ function setContentFormEditable(editable) {
   $('#content-form').querySelector('button[type=submit]').disabled = !editable;
   $('#archive-content-button').disabled = !editable;
   $('#content-file-input').disabled = !editable;
+  $('#content-file-dropzone').setAttribute('aria-disabled', editable ? 'false' : 'true');
 }
 
 async function openContentEditor(itemId = null, defaultType = 'post', sourceElement = null) {
@@ -1933,6 +2097,43 @@ $('#save-workflow-button').addEventListener('click', async (event) => {
 $('#create-content-button').addEventListener('click', () => openContentEditor().catch(showWorkspaceError));
 $('#create-document-button').addEventListener('click', () => openContentEditor(null, 'document').catch(showWorkspaceError));
 $('#refresh-library-button').addEventListener('click', () => loadLibrary().catch(showWorkspaceError));
+$('#create-library-folder').addEventListener('click', createLibraryFolder);
+$('#library-search').addEventListener('input', renderLibrary);
+$('#library-file-input').addEventListener('change', (event) => uploadLibraryFiles(event.target.files));
+const libraryDropzone = $('#library-dropzone');
+libraryDropzone.addEventListener('click', () => { if (canEditContent()) $('#library-file-input').click(); });
+libraryDropzone.addEventListener('keydown', (event) => {
+  if (['Enter', ' '].includes(event.key) && canEditContent()) { event.preventDefault(); $('#library-file-input').click(); }
+});
+for (const eventName of ['dragenter', 'dragover']) {
+  libraryDropzone.addEventListener(eventName, (event) => { event.preventDefault(); libraryDropzone.classList.add('drag-active'); });
+}
+for (const eventName of ['dragleave', 'drop']) {
+  libraryDropzone.addEventListener(eventName, (event) => { event.preventDefault(); libraryDropzone.classList.remove('drag-active'); });
+}
+libraryDropzone.addEventListener('drop', (event) => uploadLibraryFiles(event.dataTransfer.files));
+
+$('#library-file-form').addEventListener('submit', async (event) => {
+  event.preventDefault(); const submit = event.submitter; submit.disabled = true;
+  const status = $('#library-file-status'); status.className = 'auth-status'; status.textContent = 'Сохраняю…';
+  try {
+    await api(`/api/project-files/${$('#library-file-id').value}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: $('#library-file-name').value.trim(), folder_id: $('#library-file-folder').value || null })
+    });
+    $('#library-file-dialog').close(); await loadLibrary(); showToast('Файл обновлён.');
+  } catch (error) { status.className = 'auth-status error'; status.textContent = error.message; }
+  finally { submit.disabled = false; }
+});
+
+$('#library-file-delete').addEventListener('click', async () => {
+  const id = $('#library-file-id').value; const name = $('#library-file-name').value;
+  if (!id || !confirm(`Удалить файл «${name}» без возможности восстановления?`)) return;
+  try {
+    await api(`/api/content-attachments/${id}`, { method: 'DELETE' });
+    $('#library-file-dialog').close(); await loadLibrary(); showToast('Файл удалён.');
+  } catch (error) { showWorkspaceError(error); }
+});
 
 $('#content-search').addEventListener('input', renderContent);
 $('#content-type-filter').addEventListener('change', renderContent);
@@ -2089,6 +2290,7 @@ $('#ai-text-form').addEventListener('submit', async (event) => {
       })
     });
     const done = await pollJob(job.id, (current) => setAIStatus('#ai-text-status', current.message || 'Генерирую…'));
+    state.aiResultJobs.text = done;
     $('#ai-text-result textarea').value = done.result.text;
     $('#ai-text-result').classList.remove('hidden'); setAIStatus('#ai-text-status', 'Текст готов.');
   } catch (error) { setAIStatus('#ai-text-status', error.message, true); }
@@ -2110,6 +2312,7 @@ $('#ai-image-form').addEventListener('submit', async (event) => {
       body: JSON.stringify({ project_id: state.currentProjectId, prompt: $('#ai-image-prompt').value.trim(), size: $('#ai-image-size').value })
     });
     const done = await pollJob(job.id, (current) => setAIStatus('#ai-image-status', current.message || 'Генерирую…'));
+    state.aiResultJobs.image = done;
     const url = await downloadableJobUrl(done); const image = $('#ai-image-result img');
     const [imageWidth, imageHeight] = $('#ai-image-size').value.split('x').map(Number);
     image.style.aspectRatio = `${imageWidth} / ${imageHeight}`;
@@ -2122,7 +2325,7 @@ $('#ai-image-form').addEventListener('submit', async (event) => {
 $('#ai-clips-form').addEventListener('submit', async (event) => {
   event.preventDefault(); const button = event.submitter; button.disabled = true;
   setAIStatus('#ai-clips-status', 'Ставлю обработку в очередь…');
-  $('#ai-clips-download').classList.add('hidden');
+  $('#ai-clips-actions').classList.add('hidden');
   try {
     const job = await api('/api/ai/clips', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -2133,11 +2336,37 @@ $('#ai-clips-form').addEventListener('submit', async (event) => {
       })
     });
     const done = await pollJob(job.id, (current) => setAIStatus('#ai-clips-status', current.message || 'Обрабатываю…'));
+    state.aiResultJobs.clips = done;
     const url = await downloadableJobUrl(done); const link = $('#ai-clips-download');
-    link.href = url; link.classList.remove('hidden');
+    link.href = url; $('#ai-clips-actions').classList.remove('hidden');
     setAIStatus('#ai-clips-status', `Готово клипов: ${done.result.count}.`);
   } catch (error) { setAIStatus('#ai-clips-status', error.message, true); }
   finally { button.disabled = !state.aiConfig?.enabled; }
+});
+
+document.querySelectorAll('[data-save-ai]').forEach((button) => {
+  button.addEventListener('click', () => {
+    const kind = button.dataset.saveAi; const job = state.aiResultJobs[kind];
+    if (!job) { showWorkspaceError(new Error('Сначала дождитесь готового AI-результата.')); return; }
+    const extension = { text: '.md', image: '.png', clips: '.zip' }[kind];
+    const base = { text: 'AI-текст', image: 'AI-изображение', clips: 'AI-клипы' }[kind];
+    $('#ai-save-job-id').value = job.id; $('#ai-save-name').value = `${base}-${new Date().toISOString().slice(0, 10)}${extension}`;
+    populateLibraryFolderSelect($('#ai-save-folder'), state.currentLibraryFolderId);
+    $('#ai-save-status').textContent = ''; $('#ai-save-dialog').showModal();
+  });
+});
+
+$('#ai-save-form').addEventListener('submit', async (event) => {
+  event.preventDefault(); const submit = event.submitter; submit.disabled = true;
+  const status = $('#ai-save-status'); status.className = 'auth-status'; status.textContent = 'Сохраняю в проект…';
+  try {
+    await api(`/api/jobs/${$('#ai-save-job-id').value}/save-to-project`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: $('#ai-save-name').value.trim(), folder_id: $('#ai-save-folder').value || null })
+    });
+    $('#ai-save-dialog').close(); await loadLibrary(); showToast('AI-результат сохранён в медиатеке.');
+  } catch (error) { status.className = 'auth-status error'; status.textContent = error.message; }
+  finally { submit.disabled = false; }
 });
 
 bootstrapAuth();

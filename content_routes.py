@@ -1,11 +1,12 @@
 import os
 import re
+import shutil
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
@@ -20,6 +21,9 @@ from saas_models import (
     ContentAttachment,
     ContentItem,
     ContentRevision,
+    Job,
+    JobFile,
+    ProjectFolder,
     User,
     WorkspaceMember,
 )
@@ -69,6 +73,26 @@ class ContentUpdate(BaseModel):
     status: Literal["active", "archived"] | None = None
 
 
+class FolderCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    parent_id: str | None = Field(default=None, max_length=36)
+
+
+class FolderUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    parent_id: str | None = Field(default=None, max_length=36)
+
+
+class ProjectFileUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    folder_id: str | None = Field(default=None, max_length=36)
+
+
+class SaveAIResult(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    folder_id: str | None = Field(default=None, max_length=36)
+
+
 def _project_access(db: Session, project_id: str, user_id: str):
     access = project_membership(db, project_id, user_id)
     if access is None:
@@ -98,6 +122,50 @@ def _normalize_tags(tags: list[str] | None) -> list[str]:
         if tag and tag.casefold() not in {value.casefold() for value in result}:
             result.append(tag)
     return result[:30]
+
+
+def _safe_display_name(value: str, *, max_length: int = 255) -> str:
+    name = "".join(character for character in value.strip() if ord(character) >= 32)[:max_length]
+    if not name or name in {".", ".."} or Path(name).name != name or "/" in name or "\\" in name:
+        raise HTTPException(400, "Некорректное имя файла или папки.")
+    return name
+
+
+def _folder_for_project(db: Session, project_id: str, folder_id: str | None) -> ProjectFolder | None:
+    if not folder_id:
+        return None
+    folder = db.get(ProjectFolder, folder_id)
+    if folder is None or folder.project_id != project_id:
+        raise HTTPException(400, "Папка не принадлежит выбранному проекту.")
+    return folder
+
+
+def _ensure_unique_folder_name(
+    db: Session, project_id: str, parent_id: str | None, name: str, *, exclude_id: str | None = None
+) -> None:
+    statement = select(ProjectFolder.id).where(
+        ProjectFolder.project_id == project_id,
+        ProjectFolder.parent_id.is_(None) if parent_id is None else ProjectFolder.parent_id == parent_id,
+        func.lower(ProjectFolder.name) == name.casefold(),
+    )
+    if exclude_id:
+        statement = statement.where(ProjectFolder.id != exclude_id)
+    if db.scalar(statement):
+        raise HTTPException(409, "Папка с таким названием уже существует здесь.")
+
+
+def _ensure_unique_file_name(
+    db: Session, project_id: str, folder_id: str | None, name: str, *, exclude_id: str | None = None
+) -> None:
+    statement = select(ContentAttachment.id).where(
+        ContentAttachment.project_id == project_id,
+        ContentAttachment.folder_id.is_(None) if folder_id is None else ContentAttachment.folder_id == folder_id,
+        func.lower(ContentAttachment.original_name) == name.casefold(),
+    )
+    if exclude_id:
+        statement = statement.where(ContentAttachment.id != exclude_id)
+    if db.scalar(statement):
+        raise HTTPException(409, "Файл с таким названием уже существует в этой папке.")
 
 
 def _stage_for_project(db: Session, project_id: str, stage_id: str | None) -> ApprovalStage | None:
@@ -140,9 +208,12 @@ def _check_stage_permission(member: WorkspaceMember, stage: ApprovalStage | None
 def _attachment_payload(attachment: ContentAttachment) -> dict[str, object]:
     return {
         "id": attachment.id,
+        "project_id": attachment.project_id,
+        "folder_id": attachment.folder_id,
         "content_item_id": attachment.content_item_id,
         "name": attachment.original_name,
         "mime_type": attachment.mime_type,
+        "source_type": attachment.source_type,
         "size_bytes": attachment.size_bytes,
         "created_at": attachment.created_at.isoformat(),
         "download_url": f"/api/content-attachments/{attachment.id}/download",
@@ -369,25 +440,26 @@ def list_revisions(
     } for revision, user in rows]
 
 
-@router.post("/content/{item_id}/attachments", status_code=201)
-async def upload_attachment(
-    item_id: str,
-    request: Request,
+async def _store_upload(
     file: UploadFile,
-    db: Session = Depends(get_db),
-) -> dict[str, object]:
-    item, member = _item_access(db, item_id, request.state.user.id)
-    _require_editor(member)
-    entitlement = require_entitlement(db, request.state.user.id)
+    *,
+    project_id: str,
+    user_id: str,
+    db: Session,
+    content_item_id: str | None = None,
+    folder_id: str | None = None,
+) -> ContentAttachment:
+    entitlement = require_entitlement(db, user_id)
     storage_limit = entitlement.limits.get("storage_mb", 0) * 1024 * 1024
     used_storage = db.scalar(
         select(func.coalesce(func.sum(ContentAttachment.size_bytes), 0)).where(
-            ContentAttachment.uploaded_by_user_id == request.state.user.id
+            ContentAttachment.uploaded_by_user_id == user_id
         )
     ) or 0
-    original_name = Path(file.filename or "file").name[:255]
+    original_name = _safe_display_name(Path(file.filename or "file").name)
+    _ensure_unique_file_name(db, project_id, folder_id, original_name)
     safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", original_name).strip("._") or "file"
-    directory = CONTENT_DIR / item.project_id / item.id
+    directory = CONTENT_DIR / project_id / "files"
     directory.mkdir(parents=True, exist_ok=True)
     token = uuid.uuid4().hex
     target = directory / f"{token}_{safe_name}"
@@ -419,15 +491,52 @@ async def upload_attachment(
     finally:
         await file.close()
     attachment = ContentAttachment(
-        content_item_id=item.id,
-        uploaded_by_user_id=request.state.user.id,
+        project_id=project_id,
+        folder_id=folder_id,
+        content_item_id=content_item_id,
+        uploaded_by_user_id=user_id,
         original_name=original_name,
         storage_path=str(target),
         mime_type=validated.mime_type,
+        source_type="upload",
         size_bytes=size,
     )
     db.add(attachment)
     db.commit()
+    return attachment
+
+
+@router.post("/content/{item_id}/attachments", status_code=201)
+async def upload_attachment(
+    item_id: str,
+    request: Request,
+    file: UploadFile,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    item, member = _item_access(db, item_id, request.state.user.id)
+    _require_editor(member)
+    attachment = await _store_upload(
+        file, project_id=item.project_id, user_id=request.state.user.id,
+        db=db, content_item_id=item.id,
+    )
+    return _attachment_payload(attachment)
+
+
+@router.post("/projects/{project_id}/files", status_code=201)
+async def upload_project_file(
+    project_id: str,
+    request: Request,
+    file: UploadFile,
+    folder_id: str | None = Form(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    _, member = _project_access(db, project_id, request.state.user.id)
+    _require_editor(member)
+    folder = _folder_for_project(db, project_id, folder_id)
+    attachment = await _store_upload(
+        file, project_id=project_id, user_id=request.state.user.id,
+        db=db, folder_id=folder.id if folder else None,
+    )
     return _attachment_payload(attachment)
 
 
@@ -435,8 +544,10 @@ def _attachment_access(db: Session, attachment_id: str, user_id: str):
     attachment = db.get(ContentAttachment, attachment_id)
     if attachment is None:
         raise HTTPException(404, "Файл не найден")
-    item, member = _item_access(db, attachment.content_item_id, user_id)
-    return attachment, item, member
+    access = project_membership(db, attachment.project_id, user_id)
+    if access is None:
+        raise HTTPException(404, "Файл не найден")
+    return attachment, access[0], access[1]
 
 
 @router.get("/content-attachments/{attachment_id}/download")
@@ -462,6 +573,116 @@ def delete_attachment(
     path.unlink(missing_ok=True)
 
 
+@router.patch("/project-files/{attachment_id}")
+def update_project_file(
+    attachment_id: str,
+    payload: ProjectFileUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    attachment, _, member = _attachment_access(db, attachment_id, request.state.user.id)
+    _require_editor(member)
+    values = payload.model_dump(exclude_unset=True)
+    target_folder_id = attachment.folder_id
+    if "folder_id" in values:
+        folder = _folder_for_project(db, attachment.project_id, values["folder_id"])
+        target_folder_id = folder.id if folder else None
+    target_name = attachment.original_name
+    if "name" in values:
+        target_name = _safe_display_name(values["name"])
+        if Path(target_name).suffix.lower() != Path(attachment.original_name).suffix.lower():
+            raise HTTPException(400, "При переименовании нельзя менять формат файла.")
+    _ensure_unique_file_name(
+        db, attachment.project_id, target_folder_id, target_name, exclude_id=attachment.id
+    )
+    attachment.original_name = target_name
+    attachment.folder_id = target_folder_id
+    db.commit()
+    return _attachment_payload(attachment)
+
+
+@router.get("/projects/{project_id}/folders")
+def list_project_folders(
+    project_id: str, request: Request, db: Session = Depends(get_db)
+) -> list[dict[str, object]]:
+    _project_access(db, project_id, request.state.user.id)
+    folders = db.scalars(
+        select(ProjectFolder).where(ProjectFolder.project_id == project_id).order_by(ProjectFolder.name)
+    ).all()
+    return [{
+        "id": folder.id, "project_id": folder.project_id, "parent_id": folder.parent_id,
+        "name": folder.name, "created_at": folder.created_at.isoformat(),
+    } for folder in folders]
+
+
+@router.post("/projects/{project_id}/folders", status_code=201)
+def create_project_folder(
+    project_id: str,
+    payload: FolderCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    _, member = _project_access(db, project_id, request.state.user.id)
+    _require_editor(member)
+    parent = _folder_for_project(db, project_id, payload.parent_id)
+    name = _safe_display_name(payload.name, max_length=120)
+    _ensure_unique_folder_name(db, project_id, parent.id if parent else None, name)
+    folder = ProjectFolder(
+        project_id=project_id, parent_id=parent.id if parent else None,
+        name=name, created_by_user_id=request.state.user.id,
+    )
+    db.add(folder)
+    db.commit()
+    return {"id": folder.id, "project_id": project_id, "parent_id": folder.parent_id, "name": folder.name}
+
+
+@router.patch("/project-folders/{folder_id}")
+def update_project_folder(
+    folder_id: str,
+    payload: FolderUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    folder = db.get(ProjectFolder, folder_id)
+    if folder is None:
+        raise HTTPException(404, "Папка не найдена")
+    _, member = _project_access(db, folder.project_id, request.state.user.id)
+    _require_editor(member)
+    values = payload.model_dump(exclude_unset=True)
+    parent_id = folder.parent_id
+    if "parent_id" in values:
+        parent = _folder_for_project(db, folder.project_id, values["parent_id"])
+        parent_id = parent.id if parent else None
+        cursor = parent
+        while cursor is not None:
+            if cursor.id == folder.id:
+                raise HTTPException(400, "Нельзя переместить папку внутрь самой себя.")
+            cursor = db.get(ProjectFolder, cursor.parent_id) if cursor.parent_id else None
+    name = _safe_display_name(values.get("name", folder.name), max_length=120)
+    _ensure_unique_folder_name(db, folder.project_id, parent_id, name, exclude_id=folder.id)
+    folder.name = name
+    folder.parent_id = parent_id
+    db.commit()
+    return {"id": folder.id, "project_id": folder.project_id, "parent_id": folder.parent_id, "name": folder.name}
+
+
+@router.delete("/project-folders/{folder_id}", status_code=204)
+def delete_project_folder(
+    folder_id: str, request: Request, db: Session = Depends(get_db)
+) -> None:
+    folder = db.get(ProjectFolder, folder_id)
+    if folder is None:
+        raise HTTPException(404, "Папка не найдена")
+    _, member = _project_access(db, folder.project_id, request.state.user.id)
+    _require_editor(member)
+    has_children = db.scalar(select(ProjectFolder.id).where(ProjectFolder.parent_id == folder.id))
+    has_files = db.scalar(select(ContentAttachment.id).where(ContentAttachment.folder_id == folder.id))
+    if has_children or has_files:
+        raise HTTPException(409, "Сначала переместите или удалите содержимое папки.")
+    db.delete(folder)
+    db.commit()
+
+
 @router.get("/projects/{project_id}/library")
 def project_library(
     project_id: str, request: Request, db: Session = Depends(get_db)
@@ -469,13 +690,79 @@ def project_library(
     _project_access(db, project_id, request.state.user.id)
     rows = db.execute(
         select(ContentAttachment, ContentItem)
-        .join(ContentItem, ContentItem.id == ContentAttachment.content_item_id)
-        .where(ContentItem.project_id == project_id, ContentItem.status == "active")
+        .outerjoin(ContentItem, ContentItem.id == ContentAttachment.content_item_id)
+        .where(
+            ContentAttachment.project_id == project_id,
+            or_(ContentItem.id.is_(None), ContentItem.status == "active"),
+        )
         .order_by(ContentAttachment.created_at.desc())
     ).all()
     result = []
     for attachment, item in rows:
         payload = _attachment_payload(attachment)
-        payload.update({"content_title": item.title, "content_type": item.item_type})
+        payload.update({
+            "content_title": item.title if item else None,
+            "content_type": item.item_type if item else None,
+        })
         result.append(payload)
     return result
+
+
+@router.post("/jobs/{job_id}/save-to-project", status_code=201)
+def save_ai_result_to_project(
+    job_id: str,
+    payload: SaveAIResult,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    job = db.get(Job, job_id)
+    if job is None or job.user_id != request.state.user.id or job.status != "done":
+        raise HTTPException(404, "Готовый AI-результат не найден.")
+    if job.kind not in {"ai_text", "ai_image", "ai_clips"} or not job.project_id:
+        raise HTTPException(400, "Этот результат нельзя сохранить в проект.")
+    _, member = _project_access(db, job.project_id, request.state.user.id)
+    _require_editor(member)
+    folder = _folder_for_project(db, job.project_id, payload.folder_id)
+    name = _safe_display_name(payload.name)
+    expected_extension = {"ai_text": {".md", ".txt"}, "ai_image": {".png"}, "ai_clips": {".zip"}}[job.kind]
+    if Path(name).suffix.lower() not in expected_extension:
+        allowed = " или ".join(sorted(expected_extension))
+        raise HTTPException(400, f"Для этого AI-результата требуется расширение {allowed}.")
+    target_folder_id = folder.id if folder else None
+    _ensure_unique_file_name(db, job.project_id, target_folder_id, name)
+    directory = CONTENT_DIR / job.project_id / "files"
+    directory.mkdir(parents=True, exist_ok=True)
+    safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("._") or "ai-result"
+    target = directory / f"{uuid.uuid4().hex}_{safe_name}"
+    if job.kind == "ai_text":
+        text = str((job.result_payload or {}).get("text") or "")
+        target.write_text(text, encoding="utf-8")
+        mime_type = "text/markdown" if target.suffix.lower() == ".md" else "text/plain"
+    else:
+        job_file = db.scalar(
+            select(JobFile).where(JobFile.job_id == job.id, JobFile.deleted_at.is_(None)).order_by(JobFile.created_at)
+        )
+        source = Path(job_file.storage_path).resolve() if job_file else None
+        if source is None or not source.is_file():
+            raise HTTPException(404, "Файл AI-результата уже недоступен.")
+        shutil.copy2(source, target)
+        mime_type = job_file.mime_type or ("image/png" if job.kind == "ai_image" else "application/zip")
+    entitlement = require_entitlement(db, request.state.user.id)
+    storage_limit = entitlement.limits.get("storage_mb", 0) * 1024 * 1024
+    used_storage = db.scalar(
+        select(func.coalesce(func.sum(ContentAttachment.size_bytes), 0)).where(
+            ContentAttachment.uploaded_by_user_id == request.state.user.id
+        )
+    ) or 0
+    if storage_limit and int(used_storage) + target.stat().st_size > storage_limit:
+        target.unlink(missing_ok=True)
+        raise HTTPException(413, "AI-результат не помещается в лимит хранилища текущего тарифа.")
+    attachment = ContentAttachment(
+        project_id=job.project_id, folder_id=target_folder_id, content_item_id=None,
+        uploaded_by_user_id=request.state.user.id, original_name=name,
+        storage_path=str(target), mime_type=mime_type, source_type="ai",
+        size_bytes=target.stat().st_size,
+    )
+    db.add(attachment)
+    db.commit()
+    return _attachment_payload(attachment)
