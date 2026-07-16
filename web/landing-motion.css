@@ -17,7 +17,7 @@ body::before {
   background:
     radial-gradient(540px circle at var(--pointer-x) var(--pointer-y), rgba(128, 109, 255, .15), transparent 62%),
     radial-gradient(420px circle at 12% 72%, rgba(64, 217, 160, .055), transparent 68%);
-  transition: opacity .3s ease;
+  transition: opacity var(--motion-duration-base) ease;
 }
 
 body::after {
@@ -48,7 +48,7 @@ footer {
   max-width: none;
   padding-inline: max(24px, calc((100vw - 1152px) / 2));
   border-bottom: 1px solid transparent;
-  transition: height .25s ease, border-color .25s ease, background .25s ease, box-shadow .25s ease;
+  transition: height var(--motion-duration-base) var(--motion-ease-standard), border-color var(--motion-duration-base) ease, background var(--motion-duration-base) ease, box-shadow var(--motion-duration-base) ease;
 }
 
 .landing-header.is-scrolled {
@@ -60,7 +60,7 @@ footer {
 }
 
 .landing-brand span {
-  transition: transform .35s cubic-bezier(.2, .8, .2, 1), filter .35s ease;
+  transition: transform var(--motion-duration-base) var(--motion-ease-enter), filter var(--motion-duration-base) ease;
 }
 
 .landing-brand:hover span {
@@ -110,7 +110,7 @@ footer {
 }
 
 .mock-columns article {
-  transition: border-color .25s ease, background .25s ease, transform .25s ease, box-shadow .25s ease;
+  transition: border-color var(--motion-duration-base) ease, background var(--motion-duration-base) ease, transform var(--motion-duration-base) var(--motion-ease-enter), box-shadow var(--motion-duration-base) ease;
 }
 
 .mock-columns article:hover {
@@ -139,7 +139,7 @@ footer {
 .feature-grid article,
 .price-grid article,
 .faq details {
-  transition: transform .3s cubic-bezier(.2, .8, .2, 1), border-color .3s ease, box-shadow .3s ease, background .3s ease;
+  transition: transform var(--motion-duration-base) var(--motion-ease-enter), border-color var(--motion-duration-base) ease, box-shadow var(--motion-duration-base) ease, background var(--motion-duration-base) ease;
 }
 
 .feature-grid article:hover,
@@ -162,7 +162,7 @@ footer {
   border: 1px solid rgba(128, 109, 255, .25);
   border-radius: 10px;
   background: rgba(128, 109, 255, .08);
-  transition: color .25s ease, border-color .25s ease, transform .25s ease;
+  transition: color var(--motion-duration-base) ease, border-color var(--motion-duration-base) ease, transform var(--motion-duration-base) var(--motion-ease-enter);
 }
 
 .feature-grid article:hover > b {
@@ -207,7 +207,7 @@ footer {
   position: relative;
   overflow: hidden;
   isolation: isolate;
-  transition: transform .22s ease, border-color .22s ease, box-shadow .22s ease, filter .22s ease;
+  transition: transform var(--motion-duration-fast) var(--motion-ease-standard), border-color var(--motion-duration-fast) ease, box-shadow var(--motion-duration-fast) ease, filter var(--motion-duration-fast) ease;
 }
 
 .button::after {
@@ -217,7 +217,7 @@ footer {
   content: "";
   background: linear-gradient(105deg, transparent 20%, rgba(255, 255, 255, .18), transparent 80%);
   transform: translateX(-130%);
-  transition: transform .55s ease;
+  transition: transform 550ms var(--motion-ease-standard);
 }
 
 .button:hover {
@@ -245,7 +245,7 @@ footer {
 }
 
 .faq summary {
-  transition: color .25s ease;
+  transition: color var(--motion-duration-base) ease;
 }
 
 .faq details[open] summary,
@@ -286,9 +286,9 @@ footer {
   translate: 0 28px;
   scale: .985;
   transition:
-    opacity .75s cubic-bezier(.2, .8, .2, 1) var(--reveal-delay, 0ms),
-    translate .75s cubic-bezier(.2, .8, .2, 1) var(--reveal-delay, 0ms),
-    scale .75s cubic-bezier(.2, .8, .2, 1) var(--reveal-delay, 0ms);
+    opacity var(--motion-duration-slow) var(--motion-ease-enter) var(--reveal-delay, 0ms),
+    translate var(--motion-duration-slow) var(--motion-ease-enter) var(--reveal-delay, 0ms),
+    scale var(--motion-duration-slow) var(--motion-ease-enter) var(--reveal-delay, 0ms);
 }
 
 .motion-ready .reveal-item.is-visible {

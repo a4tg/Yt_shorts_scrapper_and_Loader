@@ -1,15 +1,30 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-labelledby="title">
   <title id="title">All As Planned</title>
+  <style>
+    .mark-line { stroke-dasharray: 120; stroke-dashoffset: 120; animation: markDraw .8s cubic-bezier(.16,1,.3,1) forwards; }
+    .mark-line-accent { animation-delay: .18s; }
+    .mark-node { opacity: 0; transform: scale(.6); transform-box: fill-box; transform-origin: center; animation: markNode .42s cubic-bezier(.22,1.35,.36,1) forwards; }
+    .mark-node-1 { animation-delay: .1s; }
+    .mark-node-2 { animation-delay: .24s; }
+    .mark-node-3 { animation-delay: .55s; }
+    .mark-node-4 { animation-delay: .7s; }
+    @keyframes markDraw { to { stroke-dashoffset: 0; } }
+    @keyframes markNode { to { opacity: 1; transform: scale(1); } }
+    @media (prefers-reduced-motion: reduce) {
+      .mark-line { stroke-dashoffset: 0; animation: none; }
+      .mark-node { opacity: 1; transform: none; animation: none; }
+    }
+  </style>
   <defs>
     <linearGradient id="brand-accent" x1="20" y1="48" x2="86" y2="78" gradientUnits="userSpaceOnUse">
       <stop stop-color="#725cff"/>
       <stop offset="1" stop-color="#4633ef"/>
     </linearGradient>
   </defs>
-  <path d="M22 49 40 17 58 45" fill="none" stroke="#f7f8fb" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M22 49h22l17 29 23-36" fill="none" stroke="url(#brand-accent)" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="40" cy="17" r="7" fill="#101824" stroke="#f7f8fb" stroke-width="6"/>
-  <circle cx="22" cy="49" r="7" fill="#101824" stroke="#f7f8fb" stroke-width="6"/>
-  <circle cx="61" cy="78" r="7" fill="#101824" stroke="url(#brand-accent)" stroke-width="6"/>
-  <circle cx="84" cy="42" r="7" fill="#101824" stroke="url(#brand-accent)" stroke-width="6"/>
+  <path class="mark-line" d="M22 49 40 17 58 45" fill="none" stroke="#f7f8fb" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <path class="mark-line mark-line-accent" d="M22 49h22l17 29 23-36" fill="none" stroke="url(#brand-accent)" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle class="mark-node mark-node-1" cx="40" cy="17" r="7" fill="#101824" stroke="#f7f8fb" stroke-width="6"/>
+  <circle class="mark-node mark-node-2" cx="22" cy="49" r="7" fill="#101824" stroke="#f7f8fb" stroke-width="6"/>
+  <circle class="mark-node mark-node-3" cx="61" cy="78" r="7" fill="#101824" stroke="url(#brand-accent)" stroke-width="6"/>
+  <circle class="mark-node mark-node-4" cx="84" cy="42" r="7" fill="#101824" stroke="url(#brand-accent)" stroke-width="6"/>
 </svg>

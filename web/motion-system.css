@@ -1,0 +1,163 @@
+:root {
+  --motion-duration-instant: 90ms;
+  --motion-duration-fast: 180ms;
+  --motion-duration-base: 320ms;
+  --motion-duration-slow: 720ms;
+  --motion-duration-scene: 1100ms;
+  --motion-ease-standard: cubic-bezier(.2, .7, .2, 1);
+  --motion-ease-enter: cubic-bezier(.16, 1, .3, 1);
+  --motion-ease-exit: cubic-bezier(.7, 0, .84, 0);
+  --motion-ease-spring: cubic-bezier(.22, 1.35, .36, 1);
+  --motion-distance-sm: 8px;
+  --motion-distance-md: 20px;
+  --motion-distance-lg: 36px;
+  --motion-glow: 0 18px 50px rgba(92, 73, 232, .22);
+  --motion-pointer-x: 50vw;
+  --motion-pointer-y: 20vh;
+}
+
+html[data-motion="reduced"] {
+  scroll-behavior: auto;
+}
+
+html[data-motion="reduced"] *,
+html[data-motion="reduced"] *::before,
+html[data-motion="reduced"] *::after {
+  animation-duration: .01ms !important;
+  animation-iteration-count: 1 !important;
+  scroll-behavior: auto !important;
+  transition-duration: .01ms !important;
+}
+
+html.motion-paused *,
+html.motion-paused *::before,
+html.motion-paused *::after {
+  animation-play-state: paused !important;
+}
+
+:where(button, .button, a, [role="button"]) {
+  -webkit-tap-highlight-color: transparent;
+}
+
+:where(button, .button, [role="button"]):not(:disabled) {
+  transform-origin: 50% 55%;
+  transition:
+    translate var(--motion-duration-fast) var(--motion-ease-standard),
+    scale var(--motion-duration-fast) var(--motion-ease-standard),
+    filter var(--motion-duration-fast) ease,
+    box-shadow var(--motion-duration-fast) ease;
+}
+
+:where(button, .button, [role="button"]):not(:disabled):active {
+  scale: .975;
+}
+
+:where(button, .button, a, input, select, textarea, summary, [role="button"]):focus-visible {
+  outline: 2px solid var(--accent, #7c6cff);
+  outline: 2px solid color-mix(in srgb, var(--accent, #7c6cff) 82%, white);
+  outline-offset: 3px;
+  transition: outline-offset var(--motion-duration-fast) var(--motion-ease-standard);
+}
+
+.motion-surface {
+  transition:
+    translate var(--motion-duration-base) var(--motion-ease-enter),
+    border-color var(--motion-duration-base) ease,
+    background-color var(--motion-duration-base) ease,
+    box-shadow var(--motion-duration-base) ease;
+}
+
+.motion-surface:hover {
+  translate: 0 calc(var(--motion-distance-sm) * -1);
+  box-shadow: var(--motion-glow);
+}
+
+.motion-skeleton {
+  position: relative;
+  overflow: hidden;
+  color: transparent !important;
+  background: rgba(135, 149, 170, .1) !important;
+}
+
+.motion-skeleton::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  background: linear-gradient(105deg, transparent 20%, rgba(255, 255, 255, .1) 48%, transparent 78%);
+  transform: translateX(-120%);
+  animation: motionSkeleton 1.45s ease-in-out infinite;
+}
+
+.motion-feedback-success {
+  animation: motionSuccess var(--motion-duration-slow) var(--motion-ease-spring);
+}
+
+.motion-feedback-error {
+  animation: motionError 420ms var(--motion-ease-standard);
+}
+
+.toast:not(.hidden) {
+  animation: motionToastIn var(--motion-duration-base) var(--motion-ease-enter);
+}
+
+dialog[open] {
+  animation: motionDialogIn var(--motion-duration-base) var(--motion-ease-enter);
+}
+
+dialog::backdrop {
+  animation: motionBackdropIn var(--motion-duration-base) ease both;
+  backdrop-filter: blur(5px);
+}
+
+.health i {
+  animation: motionHealthPulse 2.4s ease-in-out infinite;
+}
+
+.workspace-logo,
+.auth-brand-mark {
+  transition: rotate var(--motion-duration-base) var(--motion-ease-spring), scale var(--motion-duration-base) var(--motion-ease-spring), filter var(--motion-duration-base) ease;
+}
+
+.workspace-brand:hover .workspace-logo,
+.auth-brand:hover .auth-brand-mark {
+  rotate: -4deg;
+  scale: 1.06;
+  filter: drop-shadow(0 12px 20px rgba(93, 140, 255, .38));
+}
+
+@keyframes motionSkeleton {
+  to { transform: translateX(120%); }
+}
+
+@keyframes motionSuccess {
+  0% { scale: 1; }
+  45% { scale: 1.045; filter: brightness(1.15); }
+  100% { scale: 1; }
+}
+
+@keyframes motionError {
+  0%, 100% { translate: 0; }
+  25% { translate: -5px 0; }
+  50% { translate: 4px 0; }
+  75% { translate: -2px 0; }
+}
+
+@keyframes motionToastIn {
+  from { opacity: 0; translate: 0 18px; scale: .96; }
+  to { opacity: 1; translate: 0 0; scale: 1; }
+}
+
+@keyframes motionDialogIn {
+  from { opacity: 0; translate: 0 16px; scale: .97; }
+  to { opacity: 1; translate: 0 0; scale: 1; }
+}
+
+@keyframes motionBackdropIn {
+  from { background: rgba(0, 0, 0, 0); }
+  to { background: rgba(0, 0, 0, .52); }
+}
+
+@keyframes motionHealthPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(54, 211, 153, 0); }
+  45% { box-shadow: 0 0 0 5px rgba(54, 211, 153, .12); }
+}
