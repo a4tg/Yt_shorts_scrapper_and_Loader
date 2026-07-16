@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-labelledby="title">
+  <title id="title">All As Planned</title>
+  <defs>
+    <linearGradient id="brand-accent" x1="20" y1="48" x2="86" y2="78" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#725cff"/>
+      <stop offset="1" stop-color="#4633ef"/>
+    </linearGradient>
+  </defs>
+  <path d="M22 49 40 17 58 45" fill="none" stroke="#f7f8fb" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M22 49h22l17 29 23-36" fill="none" stroke="url(#brand-accent)" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="40" cy="17" r="7" fill="#101824" stroke="#f7f8fb" stroke-width="6"/>
+  <circle cx="22" cy="49" r="7" fill="#101824" stroke="#f7f8fb" stroke-width="6"/>
+  <circle cx="61" cy="78" r="7" fill="#101824" stroke="url(#brand-accent)" stroke-width="6"/>
+  <circle cx="84" cy="42" r="7" fill="#101824" stroke="url(#brand-accent)" stroke-width="6"/>
+</svg>
