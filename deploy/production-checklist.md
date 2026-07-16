@@ -52,11 +52,13 @@ alembic check
 docker compose config --quiet
 docker compose ps
 curl -fsS https://YOUR_DOMAIN/api/health
+curl -fsS https://YOUR_DOMAIN/api/health/ready
+curl -fsS -H "Authorization: Bearer $YT_LOADER_METRICS_TOKEN" https://YOUR_DOMAIN/api/metrics
 docker compose exec yt-loader python manage_users.py audit-payments
 docker compose exec yt-loader python manage_users.py audit-credits
 ```
 
-Ожидаемая ревизия Alembic: `5dbe4a9120ef`. Health должен вернуть `status`, `database`
+Ожидаемая ревизия Alembic: `e0f1a2b3c4d5`. Readiness должен вернуть `status`, `database`
 и `workers` со значением `ok`.
 
 Для самого первого перехода со старой JSON/Basic Auth версии используй

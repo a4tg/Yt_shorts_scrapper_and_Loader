@@ -11,10 +11,13 @@ class WebBillingTests(unittest.TestCase):
         script = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
         self.assertIn('id="billing-available"', html)
         self.assertIn('id="billing-plans"', html)
+        self.assertIn('id="billing-entitlement"', html)
+        self.assertIn('id="billing-limits"', html)
         self.assertIn('/assets/billing.css', html)
         self.assertIn("api('/api/billing/summary')", script)
         self.assertIn("api('/api/billing/plans')", script)
         self.assertIn("api('/api/billing/ledger?limit=8')", script)
+        self.assertIn("summary.trial_expires_at", script)
 
 
 if __name__ == "__main__":

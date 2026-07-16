@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -20,11 +20,14 @@ from billing_service import (
     job_credit_cost,
     release_job_reservation,
     reserve_credits,
+    require_plan_capacity,
 )
 from saas_models import AccountToken, Job, JobFile, User, UserSession, WebhookEvent
+from observability import metrics
 
 
 TERMINAL_STATUSES = {"done", "error", "deleted"}
+DOWNLOADABLE_JOB_KINDS = {"download", "ai_image", "ai_clips"}
 
 
 def utc_now() -> datetime:
@@ -112,12 +115,21 @@ class DatabaseJobManager:
         # Before application lifespan starts there is nothing to supervise.
         return not self._threads or all(thread.is_alive() for thread in self._threads)
 
+    def queue_counts(self) -> dict[str, int]:
+        with self.session_factory() as db:
+            rows = db.execute(
+                select(Job.status, func.count(Job.id)).group_by(Job.status)
+            ).all()
+        return {str(status): int(count) for status, count in rows}
+
     @staticmethod
     def _public(job: Job) -> dict[str, object]:
         payload: dict[str, object] = {
             "id": job.id,
             "kind": job.kind,
             "owner_id": job.user_id,
+            "workspace_id": job.workspace_id,
+            "project_id": job.project_id,
             "status": job.status,
             "message": job.message or "",
             "created_at": iso(job.created_at),
@@ -149,13 +161,23 @@ class DatabaseJobManager:
         owner_id: str,
         *,
         job_id: str | None = None,
+        workspace_id: str | None = None,
+        project_id: str | None = None,
     ) -> dict[str, object]:
         with self.session_factory() as db, db.begin():
+            active_jobs = db.scalar(
+                select(func.count(Job.id)).where(
+                    Job.user_id == owner_id, Job.status.in_(["queued", "running"])
+                )
+            ) or 0
+            require_plan_capacity(db, owner_id, "active_jobs", int(active_jobs))
             cost = job_credit_cost(kind, args)
             reserve_credits(db, owner_id, cost)
             record = Job(
                 id=job_id or uuid.uuid4().hex,
                 user_id=owner_id,
+                workspace_id=workspace_id,
+                project_id=project_id,
                 kind=kind,
                 status="queued",
                 request_payload=dict(args),
@@ -179,13 +201,20 @@ class DatabaseJobManager:
         user_id: str,
         *,
         is_admin: bool = False,
+        workspace_ids: list[str] | None = None,
+        project_id: str | None = None,
         kind: str | None = None,
         limit: int = 50,
     ) -> list[dict[str, object]]:
         with self.session_factory() as db:
             statement = select(Job)
             if not is_admin:
-                statement = statement.where(Job.user_id == user_id)
+                access_filters = [Job.user_id == user_id]
+                if workspace_ids:
+                    access_filters.append(Job.workspace_id.in_(workspace_ids))
+                statement = statement.where(or_(*access_filters))
+            if project_id:
+                statement = statement.where(Job.project_id == project_id)
             if kind:
                 statement = statement.where(Job.kind == kind)
             records = db.scalars(
@@ -218,7 +247,7 @@ class DatabaseJobManager:
             record = db.scalar(select(Job).where(Job.id == job_id).with_for_update())
             if record is None:
                 raise KeyError(job_id)
-            if record.kind != "download" or record.status != "done":
+            if record.kind not in DOWNLOADABLE_JOB_KINDS or record.status != "done":
                 raise RuntimeError("Видео ещё не готово")
             if record.delete_at is None:
                 now = utc_now()
@@ -232,7 +261,7 @@ class DatabaseJobManager:
             record = db.scalar(select(Job).where(Job.id == job_id).with_for_update())
             if record is None:
                 raise KeyError(job_id)
-            if record.kind != "download" or record.status != "done":
+            if record.kind not in DOWNLOADABLE_JOB_KINDS or record.status != "done":
                 raise RuntimeError("Видео ещё не готово")
             record.download_ticket_at = utc_now()
             result = self._public(record)
@@ -243,7 +272,7 @@ class DatabaseJobManager:
             record = db.scalar(select(Job).where(Job.id == job_id).with_for_update())
             if record is None:
                 raise KeyError(job_id)
-            if record.kind != "download":
+            if record.kind not in DOWNLOADABLE_JOB_KINDS:
                 raise RuntimeError("Это не задание видео")
             if record.status in {"queued", "running"}:
                 raise RuntimeError("Нельзя удалить видео, пока оно обрабатывается")
@@ -396,6 +425,7 @@ class DatabaseJobManager:
                                 expires_at=processed.expires_at,
                             )
                         )
+        metrics.increment("jobs_completed_total")
 
     def _finish_error(self, job_id: str, error: Exception) -> None:
         message = str(error)[-1000:] or error.__class__.__name__
@@ -418,6 +448,7 @@ class DatabaseJobManager:
             record.finished_at = utc_now()
             record.worker_id = None
             record.lease_expires_at = None
+        metrics.increment("jobs_failed_total")
 
     def _worker(self) -> None:
         while not self._stop.is_set():

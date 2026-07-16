@@ -4,9 +4,52 @@ const state = {
   previewUrl: null, overlayPreviewUrls: new Map(), logoUploads: new Map(),
   sourceVideoId: null, positionX: 50, positionY: 96,
   itemCards: new Map(), batchRunning: false, currentUser: null, importResumed: false,
-  paymentResumed: false, authConfig: {}, accountToken: null
+  paymentResumed: false, authConfig: {}, accountToken: null, currentPage: 'dashboard',
+  workspaces: [], currentWorkspaceId: null, projects: [], currentProjectId: null,
+  workspaceMembers: [], approvalWorkflow: null, contentItems: [], contentView: 'board',
+  libraryItems: [], editingContentId: null, aiConfig: null, adminLoaded: false
 };
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const workspacePageTitles = {
+  dashboard: 'Обзор', content: 'Контент-план', documents: 'Документы',
+  library: 'Медиатека', video: 'Видео', approvals: 'Согласования',
+  ai: 'AI-помощник', billing: 'Тариф и кредиты', admin: 'Управление SaaS'
+};
+
+function workspacePageFromHash() {
+  if (!location.hash.startsWith('#/')) return null;
+  return location.hash.slice(2).split(/[/?]/, 1)[0] || null;
+}
+
+function showWorkspacePage(page, syncUrl = false) {
+  if (page === 'admin' && !state.currentUser?.is_admin) page = 'dashboard';
+  const target = document.querySelector(`[data-page="${page}"]`);
+  if (!target || !workspacePageTitles[page]) page = 'dashboard';
+  state.currentPage = page;
+  document.querySelectorAll('[data-page]').forEach((element) => {
+    element.classList.toggle('hidden', element.dataset.page !== page);
+  });
+  document.querySelectorAll('.workspace-nav-item[data-navigate]').forEach((element) => {
+    const active = element.dataset.navigate === page;
+    element.classList.toggle('active', active);
+    if (active) element.setAttribute('aria-current', 'page');
+    else element.removeAttribute('aria-current');
+  });
+  const title = $('#workspace-page-title');
+  if (title) title.textContent = workspacePageTitles[page];
+  document.title = `${workspacePageTitles[page]} · All As Planned`;
+  if (syncUrl && workspacePageFromHash() !== page) {
+    history.pushState({ page }, '', `${location.pathname}${location.search}#/${page}`);
+  }
+  if (page === 'approvals' && state.currentProjectId) loadApprovalWorkflow().catch(showWorkspaceError);
+  if (['content', 'documents'].includes(page) && state.currentProjectId) loadContent().catch(showWorkspaceError);
+  if (page === 'library' && state.currentProjectId) loadLibrary().catch(showWorkspaceError);
+  if (page === 'ai' && state.currentProjectId) loadAIStudio().catch(showWorkspaceError);
+  if (page === 'dashboard' && state.currentWorkspaceId) loadOnboarding().catch(() => {});
+  if (page === 'admin' && state.currentUser?.is_admin) loadAdmin().catch(showWorkspaceError);
+  window.scrollTo({ top: 0, behavior: 'instant' });
+}
 
 function showToast(text) {
   const toast = $('#toast'); toast.textContent = text; toast.classList.remove('hidden');
@@ -58,23 +101,46 @@ function youtubeVideoId(value) {
   return null;
 }
 
+function sourceThumbnailUrl(value) {
+  if (!value || value.startsWith('/') || value.startsWith('blob:') || value.startsWith('data:')) return value;
+  return `/api/sources/thumbnail?url=${encodeURIComponent(value)}`;
+}
+
 function showSourceVideo(url, thumbnail = '', title = '') {
   const videoId = youtubeVideoId(url);
-  if (!videoId || videoId.length !== 11) return;
-  state.sourceVideoId = videoId;
+  if ((!videoId || videoId.length !== 11) && !thumbnail) return;
+  state.sourceVideoId = videoId || url;
   const preview = $('#stage-video-preview');
-  preview.onerror = () => {
-    const fallback = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
-    if (preview.src !== fallback) preview.src = fallback;
-  };
-  preview.src = thumbnail || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+  delete preview.dataset.fallbackApplied;
+  preview.onerror = videoId ? () => {
+    const fallback = sourceThumbnailUrl(`https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`);
+    if (!preview.dataset.fallbackApplied) {
+      preview.dataset.fallbackApplied = 'true'; preview.src = fallback;
+    }
+  } : null;
+  preview.src = sourceThumbnailUrl(thumbnail || (videoId ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` : ''));
   preview.classList.remove('hidden');
   const player = $('#stage-video-player');
-  player.src = `https://www.youtube-nocookie.com/embed/${videoId}?playsinline=1&rel=0`;
-  player.classList.remove('hidden');
+  if (videoId) {
+    player.src = `https://www.youtube-nocookie.com/embed/${videoId}?playsinline=1&rel=0`;
+    player.classList.remove('hidden');
+  } else {
+    player.src = ''; player.classList.add('hidden');
+  }
   const label = $('#stage-video-label');
-  label.textContent = title || `YouTube · ${videoId}`; label.classList.remove('hidden');
+  label.textContent = title || (videoId ? `YouTube · ${videoId}` : 'Предпросмотр видео');
+  label.classList.remove('hidden');
   $('#stage-placeholder').classList.add('hidden');
+}
+
+async function showExternalSourcePreview(url) {
+  if (!url) return;
+  if (youtubeVideoId(url)) { showSourceVideo(url); return; }
+  const preview = await api(`/api/sources/preview?url=${encodeURIComponent(url)}`);
+  showSourceVideo(
+    preview.url, preview.thumbnail,
+    `${preview.platform.toUpperCase()} · ${preview.title}`
+  );
 }
 
 function updateOverlayPreview() {
@@ -107,12 +173,672 @@ function showAuthenticated(user) {
   $('#account-credits').textContent = `${user.credit_balance} кредитов`;
   $('#auth-screen').classList.add('hidden');
   $('#app-shell').classList.remove('hidden');
+  $('#admin-nav-button').classList.toggle('hidden', !user.is_admin);
+  showWorkspacePage(workspacePageFromHash() || state.currentPage);
   const needsVerification = state.authConfig.email_verification_required && !user.email_verified;
   $('#verification-banner').classList.toggle('hidden', !needsVerification);
   if (needsVerification) return;
+  loadWorkspaces().catch(showWorkspaceError);
   loadBilling().catch(() => {});
   if (!state.paymentResumed) { state.paymentResumed = true; resumePayment().catch(() => {}); }
   if (!state.importResumed) { state.importResumed = true; resumeImport(); }
+}
+
+const workspaceRoleLabels = {
+  owner: 'Владелец', admin: 'Администратор', editor: 'Редактор',
+  viewer: 'Наблюдатель', client: 'Клиент'
+};
+
+function showWorkspaceError(error) {
+  showToast(error?.message || 'Не удалось загрузить рабочее пространство.');
+}
+
+function currentWorkspace() {
+  return state.workspaces.find((workspace) => workspace.id === state.currentWorkspaceId) || null;
+}
+
+function currentProject() {
+  return state.projects.find((project) => project.id === state.currentProjectId) || null;
+}
+
+async function loadWorkspaces(preferredId = null) {
+  state.workspaces = await api('/api/workspaces');
+  const select = $('#workspace-select'); select.replaceChildren();
+  for (const workspace of state.workspaces) {
+    const option = document.createElement('option');
+    option.value = workspace.id; option.textContent = workspace.name; select.append(option);
+  }
+  const stored = preferredId || localStorage.getItem('allAsPlannedWorkspace');
+  const active = state.workspaces.find((workspace) => workspace.id === stored) || state.workspaces[0];
+  if (!active) return;
+  select.value = active.id;
+  await activateWorkspace(active.id);
+}
+
+async function activateWorkspace(workspaceId) {
+  const workspace = state.workspaces.find((item) => item.id === workspaceId);
+  if (!workspace) return;
+  state.currentWorkspaceId = workspace.id;
+  localStorage.setItem('allAsPlannedWorkspace', workspace.id);
+  $('#workspace-select').value = workspace.id;
+  $('#current-workspace-name').textContent = workspace.name;
+  $('#current-workspace-role').textContent = workspaceRoleLabels[workspace.role] || workspace.role;
+  const [projects, members] = await Promise.all([
+    api(`/api/workspaces/${workspace.id}/projects`),
+    api(`/api/workspaces/${workspace.id}/members`)
+  ]);
+  state.projects = projects; state.workspaceMembers = members;
+  const storedProject = localStorage.getItem(`allAsPlannedProject:${workspace.id}`);
+  state.currentProjectId = projects.some((project) => project.id === storedProject)
+    ? storedProject : projects.find((project) => project.status === 'active')?.id || projects[0]?.id || null;
+  renderWorkspaceProjects(); renderWorkspaceMembers();
+  if (state.currentPage === 'approvals' && state.currentProjectId) await loadApprovalWorkflow();
+  if (['content', 'documents'].includes(state.currentPage) && state.currentProjectId) await loadContent();
+  if (state.currentPage === 'library' && state.currentProjectId) await loadLibrary();
+  if (state.currentPage === 'ai' && state.currentProjectId) await loadAIStudio();
+  if (state.currentPage === 'dashboard') await loadOnboarding();
+}
+
+function selectProject(projectId) {
+  if (!state.projects.some((project) => project.id === projectId)) return;
+  state.currentProjectId = projectId;
+  localStorage.setItem(`allAsPlannedProject:${state.currentWorkspaceId}`, projectId);
+  renderWorkspaceProjects();
+  if (state.currentPage === 'approvals') loadApprovalWorkflow().catch(showWorkspaceError);
+  if (['content', 'documents'].includes(state.currentPage)) loadContent().catch(showWorkspaceError);
+  if (state.currentPage === 'library') loadLibrary().catch(showWorkspaceError);
+  if (state.currentPage === 'ai') loadAIStudio().catch(showWorkspaceError);
+  if (state.currentPage === 'dashboard') loadOnboarding().catch(() => {});
+}
+
+const onboardingStorageKey = 'allAsPlannedOnboardingV1';
+
+function renderOnboarding(steps) {
+  const panel = $('#onboarding-panel');
+  if (localStorage.getItem(onboardingStorageKey) === 'dismissed') {
+    panel.classList.add('hidden'); return;
+  }
+  panel.classList.remove('hidden');
+  const container = $('#onboarding-steps'); container.replaceChildren();
+  for (const [index, step] of steps.entries()) {
+    const button = document.createElement('button'); button.type = 'button';
+    button.className = `onboarding-step${step.done ? ' done' : ''}`;
+    button.dataset.navigate = step.page; button.disabled = step.done;
+    const marker = document.createElement('span'); marker.textContent = step.done ? '✓' : String(index + 1);
+    const title = document.createElement('strong'); title.textContent = step.title;
+    const detail = document.createElement('small'); detail.textContent = step.detail;
+    button.append(marker, title, detail); container.append(button);
+  }
+  if (steps.every((step) => step.done)) {
+    $('#dismiss-onboarding').textContent = 'Готово';
+  }
+}
+
+async function loadOnboarding() {
+  if (!state.currentWorkspaceId) return;
+  let content = []; let library = [];
+  if (state.currentProjectId) {
+    [content, library] = await Promise.all([
+      api(`/api/projects/${state.currentProjectId}/content`),
+      api(`/api/projects/${state.currentProjectId}/library`)
+    ]);
+  }
+  renderOnboarding([
+    { done: Boolean(state.currentProjectId), page: 'dashboard', title: 'Создайте проект', detail: 'Разделите работу по брендам или направлениям.' },
+    { done: content.length > 0, page: 'content', title: 'Добавьте материал', detail: 'Запланируйте первый пост, ролик или баннер.' },
+    { done: library.length > 0, page: 'library', title: 'Соберите медиатеку', detail: 'Прикрепите исходник к карточке контента.' },
+    { done: state.workspaceMembers.length > 1, page: 'dashboard', title: 'Пригласите команду', detail: 'Назначьте редактора, клиента или наблюдателя.' }
+  ]);
+}
+
+function adminDate(value) {
+  return value ? new Intl.DateTimeFormat('ru-RU', { dateStyle: 'medium' }).format(new Date(value)) : '—';
+}
+
+function adminMoney(amountMinor, currency = 'RUB') {
+  return new Intl.NumberFormat('ru-RU', { style: 'currency', currency, maximumFractionDigits: 0 }).format((amountMinor || 0) / 100);
+}
+
+function adminCell(text, className = '') {
+  const cell = document.createElement('td'); if (className) cell.className = className;
+  cell.textContent = text == null ? '—' : String(text); return cell;
+}
+
+function renderAdminOverview(overview) {
+  const cards = [
+    ['Пользователи', overview.users], ['Подтвердили email', overview.verified_users],
+    ['Рабочие пространства', overview.workspaces], ['Активные подписки', overview.active_subscriptions],
+    ['MRR', adminMoney(overview.mrr_minor)], ['Файлы', humanFileSize(overview.storage_bytes)]
+  ];
+  const container = $('#admin-stats'); container.replaceChildren();
+  for (const [label, value] of cards) {
+    const card = document.createElement('article'); card.className = 'admin-stat';
+    const caption = document.createElement('span'); caption.textContent = label;
+    const number = document.createElement('strong'); number.textContent = value;
+    card.append(caption, number); container.append(card);
+  }
+}
+
+function renderAdminUsers(users) {
+  $('#admin-users-count').textContent = `${users.length} последних`;
+  const body = $('#admin-users-body'); body.replaceChildren();
+  for (const user of users) {
+    const row = document.createElement('tr');
+    const identityCell = document.createElement('td'); const identity = document.createElement('div'); identity.className = 'admin-user';
+    const name = document.createElement('strong'); name.textContent = user.display_name || user.email;
+    const email = document.createElement('small'); email.textContent = user.email; identity.append(name, email); identityCell.append(identity);
+    const status = user.is_admin ? 'Администратор' : (user.email_verified ? user.subscription_status : 'Email не подтверждён');
+    row.append(identityCell, adminCell(user.plan_id), adminCell(user.credits), adminCell(status, 'admin-status'), adminCell(adminDate(user.created_at)));
+    body.append(row);
+  }
+}
+
+function renderAdminPayments(payments) {
+  $('#admin-payments-count').textContent = `${payments.length} последних`;
+  const body = $('#admin-payments-body'); body.replaceChildren();
+  if (!payments.length) {
+    const row = document.createElement('tr'); const empty = adminCell('Платежей пока нет.'); empty.colSpan = 5; row.append(empty); body.append(row); return;
+  }
+  for (const payment of payments) {
+    const row = document.createElement('tr');
+    row.append(adminCell(payment.email), adminCell(payment.plan_id), adminCell(adminMoney(payment.amount_minor, payment.currency)), adminCell(payment.status, 'admin-status'), adminCell(adminDate(payment.created_at)));
+    body.append(row);
+  }
+}
+
+async function loadAdmin(force = false) {
+  if (!state.currentUser?.is_admin || (state.adminLoaded && !force)) return;
+  const [overview, users, payments] = await Promise.all([
+    api('/api/admin/overview'), api('/api/admin/users?limit=100'), api('/api/admin/payments?limit=100')
+  ]);
+  renderAdminOverview(overview); renderAdminUsers(users); renderAdminPayments(payments);
+  state.adminLoaded = true;
+}
+
+function renderWorkspaceProjects() {
+  const container = $('#workspace-projects'); container.replaceChildren();
+  if (!state.projects.length) {
+    const empty = document.createElement('p'); empty.className = 'meta';
+    empty.textContent = 'В этом пространстве пока нет проектов.'; container.append(empty); return;
+  }
+  for (const project of state.projects) {
+    const card = document.createElement('article');
+    card.className = `project-card${project.id === state.currentProjectId ? ' active' : ''}`;
+    card.style.setProperty('--project-color', project.color);
+    card.tabIndex = 0; card.dataset.projectId = project.id;
+    const status = document.createElement('small');
+    status.textContent = project.status === 'active' ? 'Активный проект' : 'Архив';
+    const title = document.createElement('h3'); title.textContent = project.name;
+    const description = document.createElement('p');
+    description.textContent = project.description || 'Контент, документы и материалы проекта.';
+    const footer = document.createElement('footer');
+    const slug = document.createElement('span'); slug.textContent = project.slug;
+    const selected = document.createElement('span');
+    selected.textContent = project.id === state.currentProjectId ? 'Выбран' : 'Открыть';
+    footer.append(slug, selected); card.append(status, title, description, footer);
+    card.addEventListener('click', () => selectProject(project.id));
+    card.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); selectProject(project.id); }
+    });
+    container.append(card);
+  }
+}
+
+function renderWorkspaceMembers() {
+  const container = $('#workspace-members'); container.replaceChildren();
+  const workspace = currentWorkspace();
+  const canManage = ['owner', 'admin'].includes(workspace?.role);
+  $('#add-member-form').classList.toggle('hidden', !canManage);
+  for (const member of state.workspaceMembers) {
+    const row = document.createElement('div');
+    row.className = `member-row${member.role === 'owner' ? ' owner' : ''}`;
+    const identity = document.createElement('div');
+    const name = document.createElement('strong'); name.textContent = member.display_name || member.email;
+    const email = document.createElement('small'); email.textContent = member.email;
+    identity.append(name, email);
+    const role = document.createElement('select');
+    role.disabled = !canManage || member.role === 'owner';
+    for (const value of ['admin', 'editor', 'viewer', 'client']) {
+      const option = document.createElement('option'); option.value = value;
+      option.textContent = workspaceRoleLabels[value]; option.selected = member.role === value; role.append(option);
+    }
+    role.addEventListener('change', async () => {
+      try {
+        await api(`/api/workspaces/${state.currentWorkspaceId}/members/${member.id}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role: role.value })
+        });
+        member.role = role.value; showToast('Роль участника обновлена.');
+      } catch (error) { role.value = member.role; showWorkspaceError(error); }
+    });
+    const remove = document.createElement('button'); remove.className = 'ghost';
+    remove.type = 'button'; remove.textContent = 'Удалить';
+    remove.disabled = !canManage || member.role === 'owner';
+    remove.addEventListener('click', async () => {
+      if (!confirm(`Удалить ${member.email} из рабочего пространства?`)) return;
+      try {
+        await api(`/api/workspaces/${state.currentWorkspaceId}/members/${member.id}`, { method: 'DELETE' });
+        state.workspaceMembers = state.workspaceMembers.filter((item) => item.id !== member.id);
+        renderWorkspaceMembers(); showToast('Участник удалён.');
+      } catch (error) { showWorkspaceError(error); }
+    });
+    row.append(identity, role, remove); container.append(row);
+  }
+}
+
+function approvalStageRow(stage = {}) {
+  const row = document.createElement('div'); row.className = 'approval-stage-row'; row.draggable = true;
+  const grip = document.createElement('span'); grip.className = 'stage-grip'; grip.textContent = '⋮⋮';
+  const color = document.createElement('input'); color.type = 'color'; color.value = stage.color || '#7c6cff'; color.className = 'stage-color';
+  const name = document.createElement('input'); name.type = 'text'; name.maxLength = 120;
+  name.value = stage.name || ''; name.placeholder = 'Название этапа'; name.className = 'stage-name';
+  const role = document.createElement('select'); role.className = 'stage-role';
+  for (const [value, label] of [['', 'Любая роль'], ['editor', 'Редактор'], ['admin', 'Администратор'], ['client', 'Клиент'], ['viewer', 'Наблюдатель']]) {
+    const option = document.createElement('option'); option.value = value; option.textContent = label;
+    option.selected = (stage.required_role || '') === value; role.append(option);
+  }
+  const terminalLabel = document.createElement('label'); terminalLabel.className = 'stage-terminal';
+  const terminal = document.createElement('input'); terminal.type = 'checkbox'; terminal.checked = Boolean(stage.is_terminal); terminal.className = 'stage-is-terminal';
+  terminalLabel.append(terminal, document.createTextNode('Финальный'));
+  const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'remove-stage'; remove.textContent = 'Удалить';
+  remove.addEventListener('click', () => { if ($('#approval-stages').children.length > 2) row.remove(); else showToast('В процессе должно остаться минимум два этапа.'); });
+  row.addEventListener('dragstart', () => row.classList.add('dragging'));
+  row.addEventListener('dragend', () => row.classList.remove('dragging'));
+  row.addEventListener('dragover', (event) => {
+    event.preventDefault();
+    const dragging = $('#approval-stages').querySelector('.dragging');
+    if (dragging && dragging !== row) {
+      const box = row.getBoundingClientRect();
+      row.parentElement.insertBefore(dragging, event.clientY < box.top + box.height / 2 ? row : row.nextSibling);
+    }
+  });
+  row.append(grip, color, name, role, terminalLabel, remove); return row;
+}
+
+async function loadApprovalWorkflow() {
+  if (!state.currentProjectId) return;
+  const workflow = await api(`/api/projects/${state.currentProjectId}/approval-workflow`);
+  state.approvalWorkflow = workflow; $('#workflow-name').value = workflow.name;
+  const container = $('#approval-stages'); container.replaceChildren();
+  workflow.stages.forEach((stage) => container.append(approvalStageRow(stage)));
+  const workspace = currentWorkspace();
+  const canEdit = ['owner', 'admin', 'editor'].includes(workspace?.role);
+  $('#save-workflow-button').disabled = !canEdit; $('#add-approval-stage').disabled = !canEdit;
+  container.querySelectorAll('input,select,button').forEach((control) => { control.disabled = !canEdit; });
+}
+
+function workflowPayload() {
+  return {
+    name: $('#workflow-name').value.trim(),
+    stages: [...$('#approval-stages').children].map((row) => ({
+      name: row.querySelector('.stage-name').value.trim(),
+      color: row.querySelector('.stage-color').value,
+      required_role: row.querySelector('.stage-role').value || null,
+      is_terminal: row.querySelector('.stage-is-terminal').checked
+    }))
+  };
+}
+
+const contentTypeLabels = {
+  post: 'Пост', video: 'Видео', banner: 'Баннер', document: 'Документ',
+  campaign: 'Кампания', note: 'Заметка'
+};
+
+function canEditContent() {
+  return ['owner', 'admin', 'editor'].includes(currentWorkspace()?.role);
+}
+
+function humanFileSize(bytes) {
+  if (bytes < 1024) return `${bytes} Б`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} КБ`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} МБ`;
+}
+
+function contentDate(value, withTime = false) {
+  if (!value) return 'Без даты';
+  return new Intl.DateTimeFormat('ru-RU', withTime
+    ? { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }
+    : { day: '2-digit', month: 'short' }).format(new Date(value));
+}
+
+function filteredContentItems() {
+  const query = ($('#content-search').value || '').trim().toLocaleLowerCase('ru');
+  const type = $('#content-type-filter').value;
+  return state.contentItems.filter((item) => {
+    if (type && item.item_type !== type) return false;
+    if (!query) return true;
+    return `${item.title} ${(item.tags || []).join(' ')} ${item.channel || ''}`
+      .toLocaleLowerCase('ru').includes(query);
+  });
+}
+
+function contentCard(item) {
+  const card = document.createElement('article'); card.className = 'content-card';
+  card.tabIndex = 0; card.draggable = canEditContent(); card.dataset.contentId = item.id;
+  const top = document.createElement('div'); top.className = 'content-card-top';
+  const kind = document.createElement('span'); kind.className = 'content-kind';
+  kind.textContent = contentTypeLabels[item.item_type] || item.item_type;
+  const priority = document.createElement('span'); priority.className = `priority-dot ${item.priority}`;
+  priority.title = `Приоритет: ${item.priority}`; top.append(kind, priority);
+  const title = document.createElement('h4'); title.textContent = item.title;
+  const tags = document.createElement('div'); tags.className = 'content-card-tags';
+  tags.textContent = (item.tags || []).map((tag) => `#${tag}`).join(' ') || item.channel || 'Без тегов';
+  const footer = document.createElement('footer'); footer.className = 'content-card-footer';
+  const date = document.createElement('span'); date.textContent = contentDate(item.planned_at, true);
+  const owner = document.createElement('span'); owner.textContent = item.assignee?.name || 'Не назначен';
+  footer.append(date, owner); card.append(top, title, tags, footer);
+  const open = () => openContentEditor(item.id).catch(showWorkspaceError);
+  card.addEventListener('click', open);
+  card.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') open();
+  });
+  card.addEventListener('dragstart', (event) => {
+    event.dataTransfer.setData('text/content-id', item.id); card.classList.add('dragging');
+  });
+  card.addEventListener('dragend', () => card.classList.remove('dragging'));
+  return card;
+}
+
+function renderContentStats() {
+  const container = $('#content-stats'); container.replaceChildren();
+  const now = Date.now();
+  const numbers = [
+    ['Всего материалов', state.contentItems.length],
+    ['Запланировано', state.contentItems.filter((item) => item.planned_at).length],
+    ['Без ответственного', state.contentItems.filter((item) => !item.assignee).length],
+    ['Просрочено', state.contentItems.filter((item) => item.due_at && new Date(item.due_at).getTime() < now).length]
+  ];
+  for (const [label, value] of numbers) {
+    const card = document.createElement('div'); card.className = 'content-stat';
+    const caption = document.createElement('span'); caption.textContent = label;
+    const number = document.createElement('strong'); number.textContent = value;
+    card.append(caption, number); container.append(card);
+  }
+}
+
+async function moveContentToStage(itemId, stageId) {
+  try {
+    await api(`/api/content/${itemId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stage_id: stageId })
+    });
+    await loadContent(); showToast('Этап материала обновлён.');
+  } catch (error) { showWorkspaceError(error); }
+}
+
+function renderContentBoard() {
+  const container = $('#content-board'); container.replaceChildren();
+  const stages = state.approvalWorkflow?.stages || [];
+  const columns = [...stages, { id: '', name: 'Без этапа', color: '#64748b', position: 999 }];
+  const items = filteredContentItems();
+  for (const stage of columns) {
+    const stageItems = items.filter((item) => (item.stage?.id || '') === stage.id);
+    const column = document.createElement('section'); column.className = 'content-column';
+    column.dataset.stageId = stage.id;
+    const heading = document.createElement('div'); heading.className = 'content-column-head';
+    const title = document.createElement('h3');
+    const dot = document.createElement('span'); dot.className = 'stage-dot';
+    dot.style.setProperty('--stage-color', stage.color);
+    title.append(dot, document.createTextNode(stage.name));
+    const count = document.createElement('span'); count.textContent = stageItems.length;
+    heading.append(title, count);
+    const body = document.createElement('div'); body.className = 'content-column-body';
+    stageItems.forEach((item) => body.append(contentCard(item)));
+    if (!stageItems.length) {
+      const empty = document.createElement('div'); empty.className = 'empty-column';
+      empty.textContent = 'Перетащите материал сюда'; body.append(empty);
+    }
+    column.addEventListener('dragover', (event) => {
+      if (canEditContent()) event.preventDefault();
+    });
+    column.addEventListener('drop', (event) => {
+      event.preventDefault(); const itemId = event.dataTransfer.getData('text/content-id');
+      if (itemId) moveContentToStage(itemId, stage.id || null);
+    });
+    column.append(heading, body); container.append(column);
+  }
+}
+
+function renderContentCalendar() {
+  const container = $('#content-calendar'); container.replaceChildren();
+  const today = new Date(); const year = today.getFullYear(); const month = today.getMonth();
+  const first = new Date(year, month, 1); const mondayOffset = (first.getDay() + 6) % 7;
+  const start = new Date(year, month, 1 - mondayOffset);
+  const items = filteredContentItems().filter((item) => item.planned_at);
+  for (let index = 0; index < 42; index += 1) {
+    const date = new Date(start); date.setDate(start.getDate() + index);
+    const day = document.createElement('div'); day.className = 'calendar-day';
+    if (date.getMonth() !== month) day.classList.add('outside');
+    if (date.toDateString() === today.toDateString()) day.classList.add('today');
+    const label = document.createElement('time'); label.dateTime = date.toISOString().slice(0, 10);
+    label.textContent = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short' }).format(date);
+    day.append(label);
+    for (const item of items.filter((entry) => new Date(entry.planned_at).toDateString() === date.toDateString())) {
+      const button = document.createElement('button'); button.className = 'calendar-entry';
+      button.type = 'button'; button.textContent = item.title;
+      button.style.setProperty('--entry-color', item.stage?.color || '#64748b');
+      button.addEventListener('click', () => openContentEditor(item.id).catch(showWorkspaceError));
+      day.append(button);
+    }
+    container.append(day);
+  }
+}
+
+function renderContent() {
+  $('#content-project-name').textContent = currentProject()?.name || 'Контент-план';
+  $('#create-content-button').disabled = !canEditContent();
+  $('#create-document-button').disabled = !canEditContent();
+  renderContentStats(); renderContentBoard(); renderContentCalendar(); renderDocuments();
+  $('#content-board').classList.toggle('hidden', state.contentView !== 'board');
+  $('#content-calendar').classList.toggle('hidden', state.contentView !== 'calendar');
+}
+
+function renderDocuments() {
+  const container = $('#documents-list'); container.replaceChildren();
+  const documents = state.contentItems.filter((item) => ['document', 'note'].includes(item.item_type));
+  if (!documents.length) {
+    const empty = document.createElement('div'); empty.className = 'empty-column';
+    empty.textContent = 'Создайте первый документ или рабочую заметку.'; container.append(empty); return;
+  }
+  for (const item of documents) {
+    const card = document.createElement('article'); card.className = 'document-card'; card.tabIndex = 0;
+    const icon = document.createElement('span'); icon.className = 'document-icon';
+    icon.textContent = item.item_type === 'note' ? '◇' : '▤';
+    const title = document.createElement('h3'); title.textContent = item.title;
+    const description = document.createElement('p');
+    description.textContent = (item.tags || []).map((tag) => `#${tag}`).join(' ') || 'Откройте документ, чтобы продолжить работу.';
+    const footer = document.createElement('footer');
+    const stage = document.createElement('span'); stage.textContent = item.stage?.name || 'Без этапа';
+    const updated = document.createElement('span'); updated.textContent = `Изменён ${contentDate(item.updated_at)}`;
+    footer.append(stage, updated); card.append(icon, title, description, footer);
+    card.addEventListener('click', () => openContentEditor(item.id).catch(showWorkspaceError));
+    container.append(card);
+  }
+}
+
+async function loadContent() {
+  if (!state.currentProjectId) return;
+  const [items, workflow] = await Promise.all([
+    api(`/api/projects/${state.currentProjectId}/content`),
+    api(`/api/projects/${state.currentProjectId}/approval-workflow`)
+  ]);
+  state.contentItems = items; state.approvalWorkflow = workflow; renderContent();
+}
+
+function renderLibrary() {
+  const container = $('#library-grid'); container.replaceChildren();
+  const total = state.libraryItems.reduce((sum, item) => sum + Number(item.size_bytes || 0), 0);
+  $('#library-summary').textContent = `${state.libraryItems.length} файлов · ${humanFileSize(total)}`;
+  if (!state.libraryItems.length) {
+    const empty = document.createElement('div'); empty.className = 'empty-column';
+    empty.textContent = 'Прикрепляйте файлы к материалам — они появятся здесь.'; container.append(empty); return;
+  }
+  for (const item of state.libraryItems) {
+    const card = document.createElement('article'); card.className = 'library-card';
+    const icon = document.createElement('span'); icon.className = 'library-file-icon';
+    icon.textContent = (item.name.split('.').pop() || 'FILE').slice(0, 4).toUpperCase();
+    const title = document.createElement('h3'); title.textContent = item.name;
+    const context = document.createElement('p'); context.textContent = item.content_title;
+    const footer = document.createElement('footer');
+    const size = document.createElement('span'); size.textContent = humanFileSize(item.size_bytes);
+    const link = document.createElement('a'); link.className = 'ghost'; link.href = item.download_url;
+    link.textContent = 'Скачать'; footer.append(size, link); card.append(icon, title, context, footer);
+    container.append(card);
+  }
+}
+
+async function loadLibrary() {
+  if (!state.currentProjectId) return;
+  state.libraryItems = await api(`/api/projects/${state.currentProjectId}/library`);
+  renderLibrary();
+}
+
+function setAIStatus(selector, message, isError = false) {
+  const element = $(selector); element.textContent = message;
+  element.className = `status${isError ? ' error' : ''}`;
+}
+
+async function downloadableJobUrl(job) {
+  const ticket = await api(job.download_ticket_url, { method: 'POST' });
+  return ticket.download_url;
+}
+
+function renderAIVideoOptions() {
+  const select = $('#ai-video-attachment'); select.replaceChildren();
+  const videos = state.libraryItems.filter((item) => (item.mime_type || '').startsWith('video/'));
+  const empty = document.createElement('option'); empty.value = '';
+  empty.textContent = videos.length ? 'Выберите видео' : 'Сначала добавьте видео в карточку контента';
+  select.append(empty);
+  for (const video of videos) {
+    const option = document.createElement('option'); option.value = video.id;
+    option.textContent = `${video.content_title} · ${video.name}`; select.append(option);
+  }
+}
+
+async function loadAIStudio() {
+  if (!state.currentProjectId) return;
+  const [config, library] = await Promise.all([
+    api('/api/ai/config'), api(`/api/projects/${state.currentProjectId}/library`)
+  ]);
+  state.aiConfig = config; state.libraryItems = library; renderAIVideoOptions();
+  const badge = $('#ai-provider-status');
+  badge.textContent = config.enabled ? `OpenAI подключён · ${config.text_model}` : 'AI не настроен на сервере';
+  badge.classList.toggle('ready', config.enabled);
+  document.querySelectorAll('#ai-text-form button[type=submit],#ai-image-form button[type=submit],#ai-clips-form button[type=submit]').forEach((button) => {
+    button.disabled = !config.enabled;
+  });
+}
+
+function localDateTimeValue(value) {
+  if (!value) return '';
+  const date = new Date(value); const offset = date.getTimezoneOffset() * 60000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+}
+
+function populateContentOptions(item = null) {
+  const stages = $('#content-stage-input'); stages.replaceChildren();
+  const none = document.createElement('option'); none.value = ''; none.textContent = 'Без этапа'; stages.append(none);
+  for (const stage of state.approvalWorkflow?.stages || []) {
+    const option = document.createElement('option'); option.value = stage.id;
+    option.textContent = stage.name; stages.append(option);
+  }
+  stages.value = item?.stage?.id || '';
+  const assignees = $('#content-assignee-input'); assignees.replaceChildren();
+  const unassigned = document.createElement('option'); unassigned.value = ''; unassigned.textContent = 'Не назначен'; assignees.append(unassigned);
+  for (const member of state.workspaceMembers) {
+    const option = document.createElement('option'); option.value = member.user_id;
+    option.textContent = member.display_name || member.email; assignees.append(option);
+  }
+  assignees.value = item?.assignee?.id || '';
+}
+
+function renderAttachments(attachments = []) {
+  const container = $('#content-attachments'); container.replaceChildren();
+  if (!attachments.length) {
+    const empty = document.createElement('small'); empty.textContent = 'Файлов пока нет.'; container.append(empty); return;
+  }
+  for (const attachment of attachments) {
+    const row = document.createElement('div'); row.className = 'attachment-row';
+    const identity = document.createElement('div');
+    const name = document.createElement('strong'); name.textContent = attachment.name;
+    const size = document.createElement('small'); size.textContent = humanFileSize(attachment.size_bytes);
+    identity.append(name, size);
+    const link = document.createElement('a'); link.className = 'ghost'; link.href = attachment.download_url; link.textContent = 'Скачать';
+    const remove = document.createElement('button'); remove.className = 'danger'; remove.type = 'button';
+    remove.textContent = 'Удалить'; remove.disabled = !canEditContent();
+    remove.addEventListener('click', async () => {
+      try {
+        await api(`/api/content-attachments/${attachment.id}`, { method: 'DELETE' });
+        await refreshOpenContent(); showToast('Файл удалён.');
+      } catch (error) { showWorkspaceError(error); }
+    });
+    row.append(identity, link, remove); container.append(row);
+  }
+}
+
+async function renderRevisions(itemId) {
+  const revisions = await api(`/api/content/${itemId}/revisions`);
+  const container = $('#content-revisions'); container.replaceChildren();
+  for (const revision of revisions) {
+    const row = document.createElement('div'); row.className = 'revision-row';
+    const label = document.createElement('span'); label.textContent = `Версия ${revision.version} · ${revision.author}`;
+    const date = document.createElement('time'); date.textContent = contentDate(revision.created_at, true);
+    row.append(label, date); container.append(row);
+  }
+}
+
+function setContentFormEditable(editable) {
+  $('#content-form').querySelectorAll('input:not([type=hidden]),select,textarea').forEach((control) => {
+    if (control.id !== 'content-file-input') control.disabled = !editable;
+  });
+  $('#content-form').querySelector('button[type=submit]').disabled = !editable;
+  $('#archive-content-button').disabled = !editable;
+  $('#content-file-input').disabled = !editable;
+}
+
+async function openContentEditor(itemId = null, defaultType = 'post') {
+  if (!state.currentProjectId) return;
+  if (!state.approvalWorkflow) await loadApprovalWorkflow();
+  state.editingContentId = itemId;
+  const item = itemId ? await api(`/api/content/${itemId}`) : null;
+  $('#content-form').reset(); $('#content-id').value = itemId || '';
+  $('#content-dialog-title').textContent = item ? item.title : 'Новый материал';
+  $('#content-title-input').value = item?.title || '';
+  $('#content-type-input').value = item?.item_type || defaultType;
+  $('#content-channel-input').value = item?.channel || '';
+  $('#content-planned-input').value = localDateTimeValue(item?.planned_at);
+  $('#content-priority-input').value = item?.priority || 'normal';
+  $('#content-tags-input').value = (item?.tags || []).join(', ');
+  $('#content-body-input').value = item?.body || '';
+  $('#content-body-preview').classList.add('hidden'); $('#content-body-input').classList.remove('hidden');
+  populateContentOptions(item); renderAttachments(item?.attachments || []);
+  $('#content-files-section').classList.toggle('hidden', !item);
+  $('#content-history-section').classList.toggle('hidden', !item);
+  $('#archive-content-button').classList.toggle('hidden', !item);
+  $('#content-form-status').textContent = '';
+  setContentFormEditable(canEditContent());
+  if (item) renderRevisions(item.id).catch(() => {});
+  $('#content-dialog').showModal();
+}
+
+async function refreshOpenContent() {
+  if (!state.editingContentId) return;
+  const item = await api(`/api/content/${state.editingContentId}`);
+  renderAttachments(item.attachments || []); renderRevisions(item.id).catch(() => {});
+}
+
+function contentFormPayload() {
+  const planned = $('#content-planned-input').value;
+  return {
+    title: $('#content-title-input').value.trim(), item_type: $('#content-type-input').value,
+    stage_id: $('#content-stage-input').value || null,
+    channel: $('#content-channel-input').value.trim() || null,
+    planned_at: planned ? new Date(planned).toISOString() : null,
+    assignee_user_id: $('#content-assignee-input').value || null,
+    priority: $('#content-priority-input').value,
+    tags: $('#content-tags-input').value.split(',').map((tag) => tag.trim()).filter(Boolean),
+    body: $('#content-body-input').value
+  };
 }
 
 function formatPlanPrice(plan) {
@@ -139,6 +865,24 @@ async function loadBilling() {
   $('#account-credits').title = summary.reserved
     ? `Ещё ${summary.reserved} кредитов зарезервировано заданиями` : '';
 
+  const entitlement = $('#billing-entitlement');
+  entitlement.classList.toggle('expired', summary.subscription_status === 'expired');
+  if (summary.subscription_status === 'active') {
+    entitlement.textContent = summary.current_period_end ? `Подписка активна до ${new Date(summary.current_period_end).toLocaleDateString('ru-RU')}.` : 'Подписка активна.';
+  } else if (summary.subscription_status === 'expired') {
+    entitlement.textContent = 'Пробный период завершён. Материалы доступны для просмотра, но новые операции требуют подписку.';
+  } else {
+    entitlement.textContent = summary.trial_expires_at ? `Пробный период до ${new Date(summary.trial_expires_at).toLocaleDateString('ru-RU')}.` : 'Пробный период активен.';
+  }
+  const limitLabels = { workspaces: 'Пространства', projects: 'Проекты', members: 'Участники', storage_mb: 'Хранилище, МБ', active_jobs: 'Задания в очереди' };
+  const limitContainer = $('#billing-limits'); limitContainer.replaceChildren();
+  for (const key of Object.keys(limitLabels)) {
+    const card = document.createElement('div'); card.className = 'billing-limit';
+    const label = document.createElement('span'); label.textContent = limitLabels[key];
+    const value = document.createElement('b'); value.textContent = `${summary.usage?.[key] ?? 0} / ${summary.limits?.[key] ?? '∞'}`;
+    card.append(label, value); limitContainer.append(card);
+  }
+
   const planContainer = $('#billing-plans'); planContainer.replaceChildren();
   for (const plan of plans) {
     const card = document.createElement('article');
@@ -149,7 +893,10 @@ async function loadBilling() {
     const credits = document.createElement('b'); credits.textContent = `${plan.monthly_credits} кредитов`;
     const price = document.createElement('small');
     price.textContent = plan.id === summary.plan?.id ? 'Текущий тариф' : formatPlanPrice(plan);
-    footer.append(credits, price); card.append(title, description, footer);
+    const limitLine = document.createElement('small');
+    const planLimits = plan.limits || {};
+    limitLine.textContent = `${planLimits.projects || '∞'} проектов · ${planLimits.members || '∞'} участников · ${planLimits.storage_mb || '∞'} МБ`;
+    footer.append(credits, price); card.append(title, description, limitLine, footer);
     if (plan.price_minor > 0 && plan.id !== summary.plan?.id) {
       const action = document.createElement('button');
       action.className = 'secondary plan-action'; action.type = 'button';
@@ -528,18 +1275,20 @@ $('#channel-form').addEventListener('submit', async (event) => {
   button.disabled = true; status.className = 'status'; status.textContent = 'Задание добавлено в очередь…';
   $('#results-section').classList.add('hidden');
   try {
-    const created = await api('/api/channels/import', {
+    const created = await api('/api/sources/import', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        channel_url: $('#channel-url').value,
-        limit: Number($('#shorts-limit').value)
+        source_url: $('#channel-url').value,
+        platform: $('#source-platform').value,
+        limit: Number($('#shorts-limit').value),
+        project_id: state.currentProjectId
       })
     });
     state.importId = created.id;
     localStorage.setItem('ytLoaderImportJob', created.id);
     const job = await pollJob(created.id, (current) => { status.textContent = current.message || current.status; });
     const items = await api(job.items_url); renderItems(items, created.id);
-    $('#csv-link').href = job.csv_url; status.textContent = `Готово: найдено ${items.length} Shorts`;
+    $('#csv-link').href = job.csv_url; status.textContent = `Готово: найдено ${items.length} видео`;
   } catch (error) {
     status.className = 'status error'; status.textContent = error.message;
   } finally { button.disabled = false; }
@@ -554,15 +1303,35 @@ function renderItems(items, importId) {
     const selector = document.createElement('label'); selector.className = 'video-selector';
     const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.className = 'video-select';
     checkbox.setAttribute('aria-label', `Выбрать ролик ${item.title}`); selector.append(checkbox);
-    const image = document.createElement('img'); image.className = 'thumb'; image.loading = 'lazy'; image.alt = ''; image.src = item.thumbnail || '';
+    const image = document.createElement('img'); image.className = 'thumb'; image.loading = 'lazy'; image.alt = ''; image.src = sourceThumbnailUrl(item.thumbnail || '');
     const info = document.createElement('div');
     const title = document.createElement('h3'); title.textContent = item.title;
-    const meta = document.createElement('div'); meta.className = 'meta'; meta.textContent = [item.uploader, item.upload_date].filter(Boolean).join(' · ');
+    const meta = document.createElement('div'); meta.className = 'meta';
+    meta.textContent = [item.platform?.toUpperCase(), item.uploader, item.upload_date].filter(Boolean).join(' · ');
     const description = document.createElement('p'); description.className = 'description'; description.textContent = item.description || 'Описание отсутствует';
     const tags = document.createElement('div'); tags.className = 'tags'; tags.textContent = item.tags.length ? item.tags.map((tag) => `#${tag}`).join(' ') : 'Теги отсутствуют';
     info.append(title, meta, description, tags);
     const actions = document.createElement('div'); actions.className = 'actions';
     const videoButton = document.createElement('button'); videoButton.className = 'primary'; videoButton.textContent = 'Подготовить видео';
+    const saveContent = document.createElement('button'); saveContent.className = 'ghost';
+    saveContent.type = 'button'; saveContent.textContent = 'В контент-план';
+    saveContent.addEventListener('click', async () => {
+      saveContent.disabled = true;
+      try {
+        await api(`/api/projects/${state.currentProjectId}/content`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: item.title, item_type: 'video', body: item.description || '',
+            channel: item.platform || null, tags: item.tags || [],
+            source_platform: item.platform, source_id: item.id, source_url: item.url
+          })
+        });
+        saveContent.textContent = 'Добавлено'; showToast('Видео сохранено в контент-плане.');
+      } catch (error) {
+        if (error.status === 409) saveContent.textContent = 'Уже добавлено';
+        else { saveContent.disabled = false; showWorkspaceError(error); }
+      }
+    });
     const metadata = document.createElement('a'); metadata.className = 'ghost'; metadata.textContent = 'Теги и описание'; metadata.href = `/api/imports/${importId}/${item.id}/metadata.txt`;
     const note = document.createElement('div'); note.className = 'job-note';
     const record = { item, card, checkbox, videoButton, note, completed: false };
@@ -578,7 +1347,7 @@ function renderItems(items, importId) {
       if (await startDownloadUrl(item.url, videoButton, note)) markVideoCompleted(record);
     });
     loadBilling().catch(() => {});
-    actions.append(videoButton, metadata, note); card.append(selector, image, info, actions); container.append(card);
+    actions.append(videoButton, saveContent, metadata, note); card.append(selector, image, info, actions); container.append(card);
     state.itemCards.set(item.id, record);
   }
   $('#batch-toolbar').classList.toggle('hidden', items.length === 0);
@@ -666,7 +1435,10 @@ function currentDownloadSettings() {
 }
 
 function downloadPayload(url, logoTokens, settings = null) {
-  return { url, logo_tokens: logoTokens, ...(settings || currentDownloadSettings()) };
+  return {
+    url, logo_tokens: logoTokens, project_id: state.currentProjectId,
+    ...(settings || currentDownloadSettings())
+  };
 }
 
 $('#metadata-mode').addEventListener('change', (event) => {
@@ -779,12 +1551,14 @@ $('#direct-video-form').addEventListener('submit', async (event) => {
   const workButton = document.createElement('button'); workButton.className = 'primary';
   workButton.textContent = 'Подготовка…'; buttons.append(workButton);
   submitButton.disabled = true;
-  showSourceVideo($('#direct-video-url').value);
+  try { await showExternalSourcePreview($('#direct-video-url').value); } catch (_) {}
   await startDownloadUrl($('#direct-video-url').value, workButton, note);
   submitButton.disabled = false;
 });
 
-$('#direct-video-url').addEventListener('input', (event) => showSourceVideo(event.target.value));
+$('#direct-video-url').addEventListener('change', (event) => {
+  showExternalSourcePreview(event.target.value).catch((error) => showToast(error.message));
+});
 
 api('/api/health').then((health) => {
   if (health.status !== 'ok') $('#health').innerHTML = '<i style="background:#e0a93b"></i> База данных недоступна';
@@ -804,7 +1578,7 @@ async function resumeImport() {
     const job = await pollJob(id, (current) => { status.textContent = current.message || current.status; });
     if (job.kind !== 'import') return;
     const items = await api(job.items_url); state.importId = id; renderItems(items, id);
-    $('#csv-link').href = job.csv_url; status.textContent = `Готово: найдено ${items.length} Shorts`;
+    $('#csv-link').href = job.csv_url; status.textContent = `Готово: найдено ${items.length} видео`;
   } catch (error) {
     if (error.status === 404 && !queryJob) {
       localStorage.removeItem('ytLoaderImportJob');
@@ -853,5 +1627,249 @@ async function bootstrapAuth() {
     }
   }
 }
+
+document.addEventListener('click', (event) => {
+  const navigationButton = event.target.closest('[data-navigate]');
+  if (!navigationButton || !state.currentUser) return;
+  event.preventDefault();
+  showWorkspacePage(navigationButton.dataset.navigate, true);
+});
+
+window.addEventListener('popstate', () => {
+  const page = workspacePageFromHash();
+  if (page && state.currentUser) showWorkspacePage(page);
+});
+
+window.addEventListener('hashchange', () => {
+  const page = workspacePageFromHash();
+  if (page && state.currentUser) showWorkspacePage(page);
+});
+
+$('#workspace-select').addEventListener('change', (event) => {
+  activateWorkspace(event.target.value).catch(showWorkspaceError);
+});
+
+$('#dismiss-onboarding').addEventListener('click', () => {
+  localStorage.setItem(onboardingStorageKey, 'dismissed');
+  $('#onboarding-panel').classList.add('hidden');
+});
+
+$('#refresh-admin').addEventListener('click', () => {
+  state.adminLoaded = false;
+  loadAdmin(true).then(() => showToast('Данные панели обновлены.')).catch(showWorkspaceError);
+});
+
+$('#create-workspace-button').addEventListener('click', () => {
+  $('#workspace-form').reset(); $('#workspace-dialog-status').textContent = '';
+  $('#workspace-dialog').showModal();
+});
+
+$('#create-project-button').addEventListener('click', () => {
+  $('#project-form').reset(); $('#project-color-input').value = '#7c6cff';
+  $('#project-dialog-status').textContent = ''; $('#project-dialog').showModal();
+});
+
+document.querySelectorAll('.workspace-dialog .dialog-cancel').forEach((button) => {
+  button.addEventListener('click', () => button.closest('dialog').close());
+});
+
+$('#workspace-form').addEventListener('submit', async (event) => {
+  event.preventDefault(); const status = $('#workspace-dialog-status');
+  try {
+    const workspace = await api('/api/workspaces', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: $('#workspace-name-input').value.trim() })
+    });
+    $('#workspace-dialog').close(); await loadWorkspaces(workspace.id);
+    showToast('Рабочее пространство создано.');
+  } catch (error) { status.className = 'auth-status error'; status.textContent = error.message; }
+});
+
+$('#project-form').addEventListener('submit', async (event) => {
+  event.preventDefault(); const status = $('#project-dialog-status');
+  if (!state.currentWorkspaceId) return;
+  try {
+    const project = await api(`/api/workspaces/${state.currentWorkspaceId}/projects`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: $('#project-name-input').value.trim(),
+        description: $('#project-description-input').value.trim() || null,
+        color: $('#project-color-input').value
+      })
+    });
+    $('#project-dialog').close(); state.projects.push(project); selectProject(project.id);
+    showToast('Проект создан.');
+  } catch (error) { status.className = 'auth-status error'; status.textContent = error.message; }
+});
+
+$('#add-member-form').addEventListener('submit', async (event) => {
+  event.preventDefault(); const button = event.submitter; button.disabled = true;
+  try {
+    const member = await api(`/api/workspaces/${state.currentWorkspaceId}/members`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: $('#member-email').value.trim(), role: $('#member-role').value })
+    });
+    state.workspaceMembers.push(member); renderWorkspaceMembers(); event.target.reset();
+    showToast('Участник добавлен в команду.');
+  } catch (error) { showWorkspaceError(error); }
+  finally { button.disabled = false; }
+});
+
+$('#add-approval-stage').addEventListener('click', () => {
+  $('#approval-stages').append(approvalStageRow({ name: 'Новый этап' }));
+});
+
+$('#save-workflow-button').addEventListener('click', async (event) => {
+  const status = $('#workflow-status'); event.currentTarget.disabled = true;
+  status.className = 'status'; status.textContent = 'Сохраняю процесс…';
+  try {
+    const payload = workflowPayload();
+    if (!payload.name || payload.stages.some((stage) => !stage.name)) throw new Error('Заполните названия процесса и всех этапов.');
+    state.approvalWorkflow = await api(`/api/projects/${state.currentProjectId}/approval-workflow`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+    });
+    status.textContent = 'Процесс согласования сохранён.';
+    await loadApprovalWorkflow();
+  } catch (error) { status.classList.add('error'); status.textContent = error.message; }
+  finally { event.currentTarget.disabled = false; }
+});
+
+$('#create-content-button').addEventListener('click', () => openContentEditor().catch(showWorkspaceError));
+$('#create-document-button').addEventListener('click', () => openContentEditor(null, 'document').catch(showWorkspaceError));
+$('#refresh-library-button').addEventListener('click', () => loadLibrary().catch(showWorkspaceError));
+
+$('#content-search').addEventListener('input', renderContent);
+$('#content-type-filter').addEventListener('change', renderContent);
+document.querySelectorAll('[data-content-view]').forEach((button) => {
+  button.addEventListener('click', () => {
+    state.contentView = button.dataset.contentView;
+    document.querySelectorAll('[data-content-view]').forEach((item) => {
+      item.classList.toggle('active', item === button);
+    });
+    renderContent();
+  });
+});
+
+$('#content-dialog-close').addEventListener('click', () => $('#content-dialog').close());
+$('#content-dialog-cancel').addEventListener('click', () => $('#content-dialog').close());
+
+document.querySelectorAll('[data-markdown]').forEach((button) => {
+  button.addEventListener('click', () => {
+    const editor = $('#content-body-input'); const template = button.dataset.markdown;
+    const separator = template.indexOf('|');
+    const before = template.slice(0, separator); const after = template.slice(separator + 1);
+    const start = editor.selectionStart; const end = editor.selectionEnd;
+    const selection = editor.value.slice(start, end);
+    editor.setRangeText(`${before}${selection}${after}`, start, end, 'end'); editor.focus();
+  });
+});
+
+$('#toggle-content-preview').addEventListener('click', () => {
+  const editor = $('#content-body-input'); const preview = $('#content-body-preview');
+  const showing = !preview.classList.contains('hidden');
+  if (!showing) preview.textContent = editor.value || 'Предпросмотр пустого документа.';
+  editor.classList.toggle('hidden', !showing); preview.classList.toggle('hidden', showing);
+  $('#toggle-content-preview').textContent = showing ? 'Предпросмотр' : 'Редактор';
+});
+
+$('#content-form').addEventListener('submit', async (event) => {
+  event.preventDefault(); const status = $('#content-form-status');
+  const submit = event.submitter; submit.disabled = true;
+  status.className = 'auth-status'; status.textContent = 'Сохраняю материал…';
+  try {
+    const id = $('#content-id').value; const payload = contentFormPayload();
+    const saved = await api(id ? `/api/content/${id}` : `/api/projects/${state.currentProjectId}/content`, {
+      method: id ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    state.editingContentId = saved.id; $('#content-dialog').close();
+    await loadContent(); showToast(id ? 'Материал обновлён.' : 'Материал добавлен в контент-план.');
+  } catch (error) {
+    status.className = 'auth-status error'; status.textContent = error.message;
+  } finally { submit.disabled = false; }
+});
+
+$('#archive-content-button').addEventListener('click', async () => {
+  const id = $('#content-id').value;
+  if (!id || !confirm('Переместить материал в архив?')) return;
+  try {
+    await api(`/api/content/${id}`, { method: 'DELETE' });
+    $('#content-dialog').close(); await loadContent(); showToast('Материал перемещён в архив.');
+  } catch (error) { showWorkspaceError(error); }
+});
+
+$('#content-file-input').addEventListener('change', async (event) => {
+  const file = event.target.files[0]; const itemId = $('#content-id').value;
+  if (!file || !itemId) return;
+  const form = new FormData(); form.append('file', file);
+  event.target.disabled = true;
+  try {
+    await api(`/api/content/${itemId}/attachments`, { method: 'POST', body: form });
+    await refreshOpenContent(); await loadLibrary(); showToast('Файл прикреплён к материалу.');
+  } catch (error) { showWorkspaceError(error); }
+  finally { event.target.value = ''; event.target.disabled = !canEditContent(); }
+});
+
+$('#ai-text-form').addEventListener('submit', async (event) => {
+  event.preventDefault(); const button = event.submitter; button.disabled = true;
+  setAIStatus('#ai-text-status', 'Ставлю генерацию в очередь…');
+  $('#ai-text-result').classList.add('hidden');
+  try {
+    const job = await api('/api/ai/text', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        project_id: state.currentProjectId, action: $('#ai-text-action').value,
+        prompt: $('#ai-text-prompt').value.trim(), context: $('#ai-text-context').value.trim() || null
+      })
+    });
+    const done = await pollJob(job.id, (current) => setAIStatus('#ai-text-status', current.message || 'Генерирую…'));
+    $('#ai-text-result textarea').value = done.result.text;
+    $('#ai-text-result').classList.remove('hidden'); setAIStatus('#ai-text-status', 'Текст готов.');
+  } catch (error) { setAIStatus('#ai-text-status', error.message, true); }
+  finally { button.disabled = !state.aiConfig?.enabled; }
+});
+
+$('#ai-copy-text').addEventListener('click', async () => {
+  await navigator.clipboard.writeText($('#ai-text-result textarea').value);
+  showToast('Текст скопирован.');
+});
+
+$('#ai-image-form').addEventListener('submit', async (event) => {
+  event.preventDefault(); const button = event.submitter; button.disabled = true;
+  setAIStatus('#ai-image-status', 'Ставлю изображение в очередь…');
+  $('#ai-image-result').classList.add('hidden');
+  try {
+    const job = await api('/api/ai/images', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_id: state.currentProjectId, prompt: $('#ai-image-prompt').value.trim(), size: $('#ai-image-size').value })
+    });
+    const done = await pollJob(job.id, (current) => setAIStatus('#ai-image-status', current.message || 'Генерирую…'));
+    const url = await downloadableJobUrl(done);
+    $('#ai-image-result img').src = url; $('#ai-image-result a').href = url;
+    $('#ai-image-result').classList.remove('hidden'); setAIStatus('#ai-image-status', 'Изображение готово.');
+  } catch (error) { setAIStatus('#ai-image-status', error.message, true); }
+  finally { button.disabled = !state.aiConfig?.enabled; }
+});
+
+$('#ai-clips-form').addEventListener('submit', async (event) => {
+  event.preventDefault(); const button = event.submitter; button.disabled = true;
+  setAIStatus('#ai-clips-status', 'Ставлю обработку в очередь…');
+  $('#ai-clips-download').classList.add('hidden');
+  try {
+    const job = await api('/api/ai/clips', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        project_id: state.currentProjectId, attachment_id: $('#ai-video-attachment').value,
+        count: Number($('#ai-clip-count').value), min_seconds: Number($('#ai-clip-min').value),
+        max_seconds: Number($('#ai-clip-max').value)
+      })
+    });
+    const done = await pollJob(job.id, (current) => setAIStatus('#ai-clips-status', current.message || 'Обрабатываю…'));
+    const url = await downloadableJobUrl(done); const link = $('#ai-clips-download');
+    link.href = url; link.classList.remove('hidden');
+    setAIStatus('#ai-clips-status', `Готово клипов: ${done.result.count}.`);
+  } catch (error) { setAIStatus('#ai-clips-status', error.message, true); }
+  finally { button.disabled = !state.aiConfig?.enabled; }
+});
 
 bootstrapAuth();

@@ -28,5 +28,19 @@ class FirstSaasUpgradeScriptTests(unittest.TestCase):
         self.assertIn("audit-credits --allow-empty", source)
 
 
+class ContainerManifestTests(unittest.TestCase):
+    def test_saas_routes_are_copied_into_production_image(self) -> None:
+        dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        for module in ("workspace_service.py", "workspace_routes.py", "content_routes.py"):
+            self.assertIn(module, dockerfile)
+
+    def test_all_supported_source_cookie_paths_are_mounted(self) -> None:
+        compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+        self.assertIn("YOUTUBE_COOKIES: /cookies/www.youtube.com_cookies.txt", compose)
+        self.assertIn("VK_COOKIES: /cookies/vk.com_cookies.txt", compose)
+        self.assertIn("RUTUBE_COOKIES: /cookies/rutube.ru_cookies.txt", compose)
+        self.assertIn("./cookies:/cookies", compose)
+
+
 if __name__ == "__main__":
     unittest.main()

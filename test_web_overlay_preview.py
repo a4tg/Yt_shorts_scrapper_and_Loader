@@ -13,7 +13,7 @@ class WebOverlayPreviewTests(unittest.TestCase):
         self.assertIn('id="stage-video-preview"', html)
         self.assertIn('id="stage-video-player"', html)
         self.assertIn("showSourceVideo(item.url, item.thumbnail, item.title)", script)
-        self.assertIn("showSourceVideo($('#direct-video-url').value)", script)
+        self.assertIn("showExternalSourcePreview($('#direct-video-url').value)", script)
         self.assertIn("https://www.youtube-nocookie.com/embed/", script)
 
     def test_unsupported_browser_codec_uses_server_preview(self) -> None:

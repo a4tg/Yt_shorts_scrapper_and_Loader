@@ -1,11 +1,12 @@
 import os
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
-from sqlalchemy import select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session
 
-from saas_models import CreditLedger, Job, User
+from saas_models import CreditLedger, Job, Plan, Subscription, User
 
 
 class InsufficientCreditsError(RuntimeError):
@@ -17,6 +18,14 @@ class InsufficientCreditsError(RuntimeError):
         )
 
 
+class SubscriptionRequiredError(RuntimeError):
+    pass
+
+
+class PlanLimitError(RuntimeError):
+    pass
+
+
 @dataclass(frozen=True)
 class CreditSnapshot:
     balance: int
@@ -25,6 +34,60 @@ class CreditSnapshot:
     @property
     def available(self) -> int:
         return self.balance - self.reserved
+
+
+@dataclass(frozen=True)
+class EntitlementSnapshot:
+    status: str
+    plan: Plan
+    trial_expires_at: datetime | None
+    period_end: datetime | None
+
+    @property
+    def limits(self) -> dict[str, int]:
+        return {str(key): int(value) for key, value in dict(self.plan.feature_limits or {}).items()}
+
+
+def trial_days() -> int:
+    try:
+        return max(1, min(int(os.getenv("YT_LOADER_TRIAL_DAYS", "14")), 90))
+    except ValueError:
+        return 14
+
+
+def entitlement_snapshot(db: Session, user_id: str) -> EntitlementSnapshot:
+    now = datetime.now(timezone.utc)
+    user = db.get(User, user_id)
+    if user is None:
+        raise KeyError(user_id)
+    subscription = db.scalar(
+        select(Subscription).where(
+            Subscription.user_id == user_id,
+            Subscription.status == "active",
+            or_(Subscription.current_period_end.is_(None), Subscription.current_period_end > now),
+        ).order_by(Subscription.created_at.desc())
+    )
+    plan = db.get(Plan, subscription.plan_id if subscription else "free")
+    if plan is None:
+        raise RuntimeError("Тариф пользователя не найден.")
+    expires = user.trial_expires_at
+    normalized = expires.replace(tzinfo=timezone.utc) if expires and expires.tzinfo is None else expires
+    status = "active" if subscription else ("trial" if normalized is None or normalized > now else "expired")
+    return EntitlementSnapshot(status, plan, normalized, subscription.current_period_end if subscription else None)
+
+
+def require_entitlement(db: Session, user_id: str) -> EntitlementSnapshot:
+    entitlement = entitlement_snapshot(db, user_id)
+    if entitlement.status == "expired":
+        raise SubscriptionRequiredError("Пробный период завершён. Выберите тариф, чтобы продолжить работу.")
+    return entitlement
+
+
+def require_plan_capacity(db: Session, user_id: str, key: str, current: int, *, increment: int = 1) -> None:
+    entitlement = require_entitlement(db, user_id)
+    maximum = entitlement.limits.get(key, 0)
+    if maximum and current + increment > maximum:
+        raise PlanLimitError(f"Достигнут лимит тарифа: {key} — {maximum}.")
 
 
 def signup_credits() -> int:
@@ -46,6 +109,16 @@ def job_credit_cost(kind: str, args: dict[str, object]) -> int:
         # One credit per generated video variant. A download without overlays
         # still produces one output and therefore costs one credit.
         return max(1, len(list(args.get("overlays") or [])))
+    if kind == "ai_text":
+        return 1
+    if kind == "ai_image":
+        return 5
+    if kind == "ai_clips":
+        try:
+            count = int(args.get("count") or 1)
+        except (TypeError, ValueError):
+            count = 1
+        return max(3, count * 3)
     return 0
 
 

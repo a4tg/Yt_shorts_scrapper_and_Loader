@@ -12,15 +12,23 @@ import server
 from database import build_engine, get_db
 from saas_models import (
     AccountToken,
+    ApprovalStage,
+    ApprovalWorkflow,
     CreditLedger,
+    ContentAttachment,
+    ContentItem,
+    ContentRevision,
     Job,
     JobFile,
     Overlay,
     Payment,
+    Project,
     Subscription,
     User,
     UserSession,
     WebhookEvent,
+    Workspace,
+    WorkspaceMember,
 )
 
 
@@ -65,6 +73,14 @@ def clear_saas_state_between_tests(isolated_test_database):
         # Delete dependants first so every test starts with an empty tenant and
         # billing state even when SQLite foreign-key enforcement is enabled.
         db.execute(delete(AccountToken))
+        db.execute(delete(ContentAttachment))
+        db.execute(delete(ContentRevision))
+        db.execute(delete(ContentItem))
+        db.execute(delete(ApprovalStage))
+        db.execute(delete(ApprovalWorkflow))
+        db.execute(delete(Project))
+        db.execute(delete(WorkspaceMember))
+        db.execute(delete(Workspace))
         db.execute(delete(CreditLedger))
         db.execute(delete(WebhookEvent))
         db.execute(delete(JobFile))

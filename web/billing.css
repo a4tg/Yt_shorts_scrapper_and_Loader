@@ -16,6 +16,12 @@
 }
 .credit-summary span { color: var(--muted); font-size: 12px; }
 .credit-summary strong { font-size: 24px; color: var(--accent2); }
+.billing-entitlement { margin:14px 0; padding:12px 14px; border-radius:12px; background:rgba(124,108,255,.1); color:var(--muted); }
+.billing-entitlement.expired { background:rgba(239,68,68,.12); color:#fca5a5; }
+.billing-limits { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:10px; margin:14px 0 22px; }
+.billing-limit { padding:12px; border:1px solid var(--line); border-radius:12px; background:rgba(255,255,255,.025); }
+.billing-limit span { display:block; color:var(--muted); font-size:11px; margin-bottom:5px; }
+.billing-limit b { font-size:18px; }
 .plan-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .plan-card {
   padding: 14px;
@@ -41,6 +47,7 @@
 
 @media (max-width: 720px) {
   .plan-grid { grid-template-columns: 1fr; }
+  .billing-limits { grid-template-columns:repeat(2,minmax(0,1fr)); }
 }
 @media (max-width: 520px) {
   .credit-summary { grid-template-columns: 1fr; }

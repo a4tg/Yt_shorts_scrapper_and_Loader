@@ -22,6 +22,9 @@ CSRF_COOKIE = "yt_loader_csrf"
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 PUBLIC_API_PATHS = {
     "/api/health",
+    "/api/health/live",
+    "/api/health/ready",
+    "/api/metrics",
     "/api/auth/config",
     "/api/auth/register",
     "/api/auth/login",

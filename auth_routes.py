@@ -23,7 +23,7 @@ from auth_service import (
     utc_now,
     verify_password,
 )
-from billing_service import credit_snapshot, grant_credits, signup_credits
+from billing_service import credit_snapshot, grant_credits, signup_credits, trial_days
 from database import get_db
 from email_service import (
     email_features_configured,
@@ -32,6 +32,7 @@ from email_service import (
     send_verification_email,
 )
 from saas_models import User
+from workspace_service import create_personal_workspace
 
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -131,11 +132,13 @@ def register(
         password_hash=password_hash,
         display_name=display_name,
         email_verified_at=None if verification_required else utc_now(),
+        trial_expires_at=utc_now() + timedelta(days=trial_days()),
     )
     db.add(user)
     verification_token = None
     try:
         db.flush()
+        create_personal_workspace(db, user)
         initial_credits = signup_credits()
         if initial_credits:
             grant_credits(

@@ -12,7 +12,9 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlparse
 
+import httpx
 from fastapi import FastAPI, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
@@ -23,8 +25,11 @@ from starlette.background import BackgroundTask
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from auth_routes import router as auth_router
+from admin_routes import router as admin_router
 from billing_routes import router as billing_router
+from content_routes import CONTENT_DIR, router as content_router
 from payment_routes import router as payment_router
+from workspace_routes import router as workspace_router
 from auth_service import (
     PUBLIC_API_PATHS,
     SAFE_METHODS,
@@ -32,12 +37,23 @@ from auth_service import (
     csrf_is_valid,
     origin_is_allowed,
 )
-from billing_service import InsufficientCreditsError
+from billing_service import InsufficientCreditsError, PlanLimitError, SubscriptionRequiredError, require_plan_capacity
+from ai_service import (
+    AIServiceError,
+    ai_public_config,
+    generate_image,
+    generate_text,
+    render_vertical_clips,
+    select_highlights,
+    transcribe_media,
+)
+from observability import log_request, metrics, prometheus_text, request_id
 from database import SessionLocal, check_database
 from email_service import email_verification_required
 from job_queue import DatabaseJobManager, ProcessedJob
 from payment_service import SubscriptionRenewalWorker
-from saas_models import Overlay
+from saas_models import ContentAttachment, ContentItem, Overlay, WorkspaceMember
+from workspace_service import has_role, membership_for, project_membership
 from yookassa_client import YooKassaClient
 from server_core import (
     BASE_DIR,
@@ -46,8 +62,10 @@ from server_core import (
     download_short,
     is_supported_overlay,
     normalize_channel_shorts_url,
-    normalize_video_url,
-    run_channel_import,
+    normalize_source_import_url,
+    normalize_source_video_url,
+    probe_source_video,
+    run_source_import,
 )
 
 
@@ -56,8 +74,9 @@ JOBS_DIR = DATA_DIR / "jobs"
 IMPORTS_DIR = DATA_DIR / "imports"
 VIDEOS_DIR = DATA_DIR / "videos"
 LOGOS_DIR = DATA_DIR / "logos"
+AI_DIR = DATA_DIR / "ai"
 WEB_DIR = BASE_DIR / "web"
-for directory in (JOBS_DIR, IMPORTS_DIR, VIDEOS_DIR, LOGOS_DIR):
+for directory in (JOBS_DIR, IMPORTS_DIR, VIDEOS_DIR, LOGOS_DIR, AI_DIR):
     directory.mkdir(parents=True, exist_ok=True)
 
 AFTER_DOWNLOAD_MINUTES = max(1, int(os.getenv("YT_LOADER_AFTER_DOWNLOAD_MINUTES", "15")))
@@ -99,10 +118,19 @@ threading.Thread(target=cleanup_loop, daemon=True, name="cleanup-worker").start(
 class ChannelRequest(BaseModel):
     channel_url: str = Field(min_length=5, max_length=500)
     limit: int = Field(default=50, ge=0, le=1000)
+    project_id: str | None = Field(default=None, max_length=36)
+
+
+class SourceImportRequest(BaseModel):
+    source_url: str = Field(min_length=5, max_length=1000)
+    platform: Literal["auto", "youtube", "vk", "rutube"] = "auto"
+    limit: int = Field(default=50, ge=0, le=1000)
+    project_id: str | None = Field(default=None, max_length=36)
 
 
 class DownloadRequest(BaseModel):
     url: str = Field(min_length=10, max_length=500)
+    project_id: str | None = Field(default=None, max_length=36)
     logo_token: str | None = None
     logo_tokens: list[str] = Field(default_factory=list, max_length=10)
     opacity: int = Field(default=35, ge=5, le=100)
@@ -113,20 +141,88 @@ class DownloadRequest(BaseModel):
     metadata_mode: Literal["none", "strip", "synthetic"] = "strip"
 
 
+class AITextRequest(BaseModel):
+    project_id: str = Field(min_length=36, max_length=36)
+    action: Literal["post", "ideas", "rewrite", "shorten", "titles", "tags"] = "post"
+    prompt: str = Field(min_length=3, max_length=30000)
+    context: str | None = Field(default=None, max_length=30000)
+
+
+class AIImageRequest(BaseModel):
+    project_id: str = Field(min_length=36, max_length=36)
+    prompt: str = Field(min_length=3, max_length=8000)
+    size: Literal["1024x1024", "1536x1024", "1024x1536"] = "1024x1024"
+
+
+class AIClipsRequest(BaseModel):
+    project_id: str = Field(min_length=36, max_length=36)
+    attachment_id: str = Field(min_length=36, max_length=36)
+    count: int = Field(default=3, ge=1, le=5)
+    min_seconds: int = Field(default=20, ge=10, le=120)
+    max_seconds: int = Field(default=60, ge=15, le=180)
+
+
 def process_media_job(
     job_id: str,
     kind: str,
     args: dict[str, object],
     log,
 ) -> ProcessedJob:
+    if kind == "ai_text":
+        action = str(args.get("action") or "post")
+        instructions = {
+            "post": "Ты senior-маркетолог. Создай готовый к публикации пост на русском языке.",
+            "ideas": "Ты креативный стратег. Предложи конкретные идеи контента с сильными заходами.",
+            "rewrite": "Ты редактор. Перепиши текст яснее, живее и убедительнее, сохранив смысл.",
+            "shorten": "Ты редактор. Сократи текст без потери ключевого смысла и фактов.",
+            "titles": "Ты редактор. Предложи сильные заголовки и коротко объясни лучшие варианты.",
+            "tags": "Ты SMM-редактор. Предложи релевантные теги без спама.",
+        }[action]
+        prompt = str(args["prompt"])
+        if args.get("context"):
+            prompt += "\n\nКонтекст проекта:\n" + str(args["context"])
+        log("Генерирую текст")
+        result = generate_text(prompt, instructions)
+        return ProcessedJob(result=result, expires_at=datetime.now(timezone.utc) + timedelta(days=30))
+    if kind == "ai_image":
+        output_dir = VIDEOS_DIR / job_id
+        shutil.rmtree(output_dir, ignore_errors=True)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        log("Генерирую изображение")
+        image, metadata = generate_image(str(args["prompt"]), size=str(args["size"]))
+        target = output_dir / "ai_image.png"
+        target.write_bytes(image)
+        return ProcessedJob(
+            result={**metadata, "filename": target.name, "format": "png"}, files=(target,),
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=READY_HOURS),
+        )
+    if kind == "ai_clips":
+        source = Path(str(args["source_path"])).resolve()
+        if not source.is_file():
+            raise AIServiceError("Исходное видео отсутствует в медиатеке.")
+        output_dir = VIDEOS_DIR / job_id
+        shutil.rmtree(output_dir, ignore_errors=True)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        transcript = transcribe_media(source, output_dir, log)
+        log("Выбираю сильные фрагменты")
+        clips = select_highlights(transcript, int(args["count"]), int(args["min_seconds"]), int(args["max_seconds"]))
+        archive = render_vertical_clips(source, clips, output_dir, log)
+        return ProcessedJob(
+            result={"filename": archive.name, "format": "zip", "count": len(clips), "clips": clips},
+            files=(archive,), expires_at=datetime.now(timezone.utc) + timedelta(hours=READY_HOURS),
+        )
     if kind == "import":
         json_path = IMPORTS_DIR / f"{job_id}.json"
         csv_path = IMPORTS_DIR / f"{job_id}.csv"
-        count = run_channel_import(
-            str(args["channel_url"]), json_path, csv_path, int(args["limit"])
+        count, platform = run_source_import(
+            str(args.get("source_url") or args["channel_url"]),
+            json_path,
+            csv_path,
+            int(args["limit"]),
+            str(args.get("platform") or "youtube"),
         )
         return ProcessedJob(
-            result={"count": count},
+            result={"count": count, "platform": platform},
             files=(json_path, csv_path),
             expires_at=datetime.now(timezone.utc) + timedelta(hours=RETENTION_HOURS),
         )
@@ -206,12 +302,48 @@ api_docs_enabled = os.getenv("YT_LOADER_ENABLE_API_DOCS", "false").strip().lower
     "1", "true", "yes", "on"
 }
 app = FastAPI(
-    title="YT Shorts Loader",
+    title="All As Planned",
     docs_url="/api/docs" if api_docs_enabled else None,
     redoc_url=None,
     openapi_url="/api/openapi.json" if api_docs_enabled else None,
     lifespan=application_lifespan,
 )
+
+
+@app.exception_handler(SubscriptionRequiredError)
+async def subscription_required_handler(_request: Request, exc: SubscriptionRequiredError):
+    return JSONResponse({"detail": str(exc)}, status_code=402)
+
+
+@app.exception_handler(PlanLimitError)
+async def plan_limit_handler(_request: Request, exc: PlanLimitError):
+    return JSONResponse({"detail": str(exc)}, status_code=409)
+
+
+@app.middleware("http")
+async def request_observability(request: Request, call_next):
+    trace_id = request_id(request.headers.get("X-Request-ID"))
+    request.state.request_id = trace_id
+    started = time.perf_counter()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        response.headers["X-Request-ID"] = trace_id
+        return response
+    finally:
+        duration_ms = round((time.perf_counter() - started) * 1000, 2)
+        metrics.increment("http_requests_total")
+        metrics.increment(f"http_responses_{status_code // 100}xx_total")
+        route = request.scope.get("route")
+        route_path = getattr(route, "path", request.url.path)
+        user = getattr(request.state, "user", None)
+        if request.url.path not in {"/api/health", "/api/health/live"}:
+            log_request(
+                request_id=trace_id, method=request.method, path=route_path,
+                status=status_code, duration_ms=duration_ms,
+                user_id=str(user.id) if user else None,
+            )
 allowed_hosts = [
     host.strip()
     for host in os.getenv("YT_LOADER_ALLOWED_HOSTS", "").split(",")
@@ -281,8 +413,11 @@ async def user_session_auth(request: Request, call_next):
 
 
 app.include_router(auth_router)
+app.include_router(admin_router)
 app.include_router(billing_router)
+app.include_router(content_router)
 app.include_router(payment_router)
+app.include_router(workspace_router)
 
 
 @app.middleware("http")
@@ -318,24 +453,207 @@ def health(response: Response) -> dict[str, str]:
     }
 
 
+@app.get("/api/health/live")
+def liveness() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.get("/api/health/ready")
+def readiness(response: Response) -> dict[str, object]:
+    database_status = "ok" if check_database() else "error"
+    workers_status = "ok" if manager.healthy() and renewal_worker.healthy() else "error"
+    disk = shutil.disk_usage(DATA_DIR)
+    minimum_free_mb = max(256, int(os.getenv("YT_LOADER_MIN_FREE_DISK_MB", "2048")))
+    free_mb = disk.free // 1024 // 1024
+    disk_status = "ok" if free_mb >= minimum_free_mb else "error"
+    try:
+        queue = manager.queue_counts()
+    except SQLAlchemyError:
+        queue = {}
+        database_status = "error"
+    ready = all(value == "ok" for value in (database_status, workers_status, disk_status))
+    if not ready:
+        response.status_code = 503
+    return {
+        "status": "ok" if ready else "degraded", "database": database_status,
+        "workers": workers_status, "disk": disk_status, "disk_free_mb": free_mb,
+        "queue": queue,
+    }
+
+
+@app.get("/api/metrics", response_class=PlainTextResponse)
+def application_metrics(request: Request) -> PlainTextResponse:
+    expected = os.getenv("YT_LOADER_METRICS_TOKEN", "").strip()
+    supplied = request.headers.get("Authorization", "")
+    if not expected or not secrets.compare_digest(supplied, f"Bearer {expected}"):
+        raise HTTPException(404, "Not found")
+    try:
+        counts = manager.queue_counts()
+    except SQLAlchemyError:
+        counts = {}
+    extra = {f"jobs_{status}": count for status, count in counts.items()}
+    return PlainTextResponse(prometheus_text(extra), media_type="text/plain; version=0.0.4")
+
+
+def resolve_media_project(project_id: str | None, request: Request) -> tuple[str | None, str | None]:
+    """Resolve and authorize the project used by an import or render job."""
+    if not project_id:
+        return None, None
+    with SessionLocal() as db:
+        access = project_membership(db, project_id, str(request.state.user.id))
+        if access is None:
+            raise HTTPException(404, "Проект не найден")
+        project, member = access
+        if not has_role(member, "editor"):
+            raise HTTPException(403, "Для создания медиазадач нужна роль редактора")
+        return project.workspace_id, project.id
+
+
+@app.get("/api/ai/config")
+def ai_config() -> dict[str, object]:
+    return ai_public_config()
+
+
+@app.post("/api/ai/text", status_code=202)
+def create_ai_text(payload: AITextRequest, request: Request) -> dict[str, object]:
+    workspace_id, project_id = resolve_media_project(payload.project_id, request)
+    try:
+        return manager.create(
+            "ai_text",
+            {"action": payload.action, "prompt": payload.prompt, "context": payload.context},
+            owner_id=str(request.state.user.id), workspace_id=workspace_id, project_id=project_id,
+        )
+    except InsufficientCreditsError as exc:
+        raise HTTPException(402, str(exc)) from exc
+
+
+@app.post("/api/ai/images", status_code=202)
+def create_ai_image(payload: AIImageRequest, request: Request) -> dict[str, object]:
+    workspace_id, project_id = resolve_media_project(payload.project_id, request)
+    try:
+        return manager.create(
+            "ai_image", {"prompt": payload.prompt, "size": payload.size},
+            owner_id=str(request.state.user.id), workspace_id=workspace_id, project_id=project_id,
+        )
+    except InsufficientCreditsError as exc:
+        raise HTTPException(402, str(exc)) from exc
+
+
+@app.post("/api/ai/clips", status_code=202)
+def create_ai_clips(payload: AIClipsRequest, request: Request) -> dict[str, object]:
+    if payload.min_seconds >= payload.max_seconds:
+        raise HTTPException(400, "Максимальная длительность должна быть больше минимальной.")
+    workspace_id, project_id = resolve_media_project(payload.project_id, request)
+    with SessionLocal() as db:
+        require_plan_capacity(db, str(request.state.user.id), "clips_per_job", 0, increment=payload.count)
+        attachment = db.get(ContentAttachment, payload.attachment_id)
+        item = db.get(ContentItem, attachment.content_item_id) if attachment else None
+        if item is None or item.project_id != project_id:
+            raise HTTPException(404, "Видео не найдено в медиатеке проекта.")
+        source_path = Path(attachment.storage_path).resolve()
+        content_root = CONTENT_DIR.resolve()
+        if not source_path.is_file() or not source_path.is_relative_to(content_root):
+            raise HTTPException(404, "Файл видео отсутствует в хранилище.")
+        if not (attachment.mime_type or "").startswith("video/"):
+            raise HTTPException(400, "Для нарезки выберите видеофайл.")
+    try:
+        return manager.create(
+            "ai_clips",
+            {
+                "source_path": str(source_path), "attachment_id": payload.attachment_id,
+                "count": payload.count, "min_seconds": payload.min_seconds,
+                "max_seconds": payload.max_seconds,
+            },
+            owner_id=str(request.state.user.id), workspace_id=workspace_id, project_id=project_id,
+        )
+    except InsufficientCreditsError as exc:
+        raise HTTPException(402, str(exc)) from exc
+
+
 @app.post("/api/channels/import", status_code=202)
 def import_channel(payload: ChannelRequest, request: Request) -> dict[str, object]:
     try:
         channel_url = normalize_channel_shorts_url(payload.channel_url)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+    workspace_id, project_id = resolve_media_project(payload.project_id, request)
     try:
         return manager.create(
             "import",
             {"channel_url": channel_url, "limit": payload.limit},
             owner_id=str(request.state.user.id),
+            workspace_id=workspace_id,
+            project_id=project_id,
         )
     except InsufficientCreditsError as exc:
         raise HTTPException(402, str(exc)) from exc
 
 
+@app.post("/api/sources/import", status_code=202)
+def import_source(payload: SourceImportRequest, request: Request) -> dict[str, object]:
+    try:
+        source_url, platform = normalize_source_import_url(payload.source_url, payload.platform)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    workspace_id, project_id = resolve_media_project(payload.project_id, request)
+    try:
+        return manager.create(
+            "import",
+            {"source_url": source_url, "platform": platform, "limit": payload.limit},
+            owner_id=str(request.state.user.id),
+            workspace_id=workspace_id,
+            project_id=project_id,
+        )
+    except InsufficientCreditsError as exc:
+        raise HTTPException(402, str(exc)) from exc
+
+
+@app.get("/api/sources/preview")
+def source_preview(url: str) -> dict[str, object]:
+    if not 10 <= len(url) <= 1000:
+        raise HTTPException(400, "Некорректная длина ссылки")
+    try:
+        return probe_source_video(url)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.get("/api/sources/thumbnail")
+def source_thumbnail(url: str) -> Response:
+    """Proxy thumbnails from a strict CDN allowlist so CSP stays self-only."""
+    if not 10 <= len(url) <= 2000:
+        raise HTTPException(400, "Некорректная ссылка изображения")
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    allowed_suffixes = (".ytimg.com", ".userapi.com", ".rutubelist.ru", ".rutube.ru")
+    if parsed.scheme != "https" or not any(host == suffix[1:] or host.endswith(suffix) for suffix in allowed_suffixes):
+        raise HTTPException(400, "Домен изображения не разрешён")
+    try:
+        with httpx.stream("GET", url, timeout=12, follow_redirects=False) as upstream:
+            if upstream.status_code != 200:
+                raise HTTPException(404, "Изображение источника недоступно")
+            media_type = upstream.headers.get("content-type", "").split(";", 1)[0].lower()
+            if not media_type.startswith("image/"):
+                raise HTTPException(415, "Источник вернул не изображение")
+            chunks: list[bytes] = []
+            size = 0
+            for chunk in upstream.iter_bytes():
+                size += len(chunk)
+                if size > 5 * 1024 * 1024:
+                    raise HTTPException(413, "Изображение слишком большое")
+                chunks.append(chunk)
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, "Не удалось загрузить изображение источника") from exc
+    return Response(
+        content=b"".join(chunks), media_type=media_type,
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
+
+
 def require_job_access(job_id: str, request: Request) -> dict[str, object]:
-    """Return a job only to its owner (or an administrator)."""
+    """Return a job to its owner, workspace members, or an administrator."""
     try:
         job = manager.get(job_id)
     except KeyError as exc:
@@ -344,6 +662,11 @@ def require_job_access(job_id: str, request: Request) -> dict[str, object]:
     # Jobs created before user accounts existed intentionally have no owner.
     # Only administrators may recover those legacy results.
     if str(job.get("owner_id") or "") != str(user.id) and not user.is_admin:
+        workspace_id = str(job.get("workspace_id") or "")
+        with SessionLocal() as db:
+            membership = membership_for(db, workspace_id, str(user.id)) if workspace_id else None
+        if membership is not None:
+            return job
         raise HTTPException(404, "Задание не найдено")
     return job
 
@@ -354,7 +677,7 @@ def decorate_job_urls(job: dict[str, object]) -> dict[str, object]:
         if job.get("kind") == "import":
             job["items_url"] = f"/api/imports/{job_id}/items"
             job["csv_url"] = f"/api/imports/{job_id}/metadata.csv"
-        elif job.get("kind") == "download":
+        elif job.get("kind") in {"download", "ai_image", "ai_clips"}:
             job["download_ticket_url"] = f"/api/videos/{job_id}/download-ticket"
             job["delete_url"] = f"/api/videos/{job_id}"
     return job
@@ -363,16 +686,28 @@ def decorate_job_urls(job: dict[str, object]) -> dict[str, object]:
 @app.get("/api/jobs")
 def list_jobs(
     request: Request,
-    kind: Literal["import", "download"] | None = None,
+    kind: Literal["import", "download", "ai_text", "ai_image", "ai_clips"] | None = None,
+    project_id: str | None = None,
     limit: int = 50,
 ) -> list[dict[str, object]]:
     if not 1 <= limit <= 200:
         raise HTTPException(400, "limit должен быть от 1 до 200")
     user = request.state.user
+    with SessionLocal() as db:
+        workspace_ids = list(
+            db.scalars(
+                select(WorkspaceMember.workspace_id).where(
+                    WorkspaceMember.user_id == str(user.id)
+                )
+            ).all()
+        )
+        if project_id and project_membership(db, project_id, str(user.id)) is None and not user.is_admin:
+            raise HTTPException(404, "Проект не найден")
     return [
         decorate_job_urls(job)
         for job in manager.list_for_user(
-            str(user.id), is_admin=bool(user.is_admin), kind=kind, limit=limit
+            str(user.id), is_admin=bool(user.is_admin), workspace_ids=workspace_ids,
+            project_id=project_id, kind=kind, limit=limit
         )
     ]
 
@@ -401,17 +736,17 @@ def import_csv(job_id: str, request: Request) -> FileResponse:
     path = IMPORTS_DIR / f"{job_id}.csv"
     if not path.is_file():
         raise HTTPException(404, "CSV не найден")
-    return FileResponse(path, filename="shorts_metadata.csv", media_type="text/csv")
+    return FileResponse(path, filename="source_metadata.csv", media_type="text/csv")
 
 
 @app.get("/api/imports/{job_id}/{video_id}/metadata.txt")
 def item_metadata(job_id: str, video_id: str, request: Request) -> PlainTextResponse:
     require_job_access(job_id, request)
-    if not video_id.isascii() or len(video_id) != 11:
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,160}", video_id):
         raise HTTPException(400, "Некорректный ID")
     item = next((item for item in load_import(job_id) if item.get("id") == video_id), None)
     if not item:
-        raise HTTPException(404, "Shorts не найден")
+        raise HTTPException(404, "Видео не найдено")
     text = (
         f"Название: {item['title']}\n"
         f"Ссылка: {item['url']}\n"
@@ -538,7 +873,7 @@ def overlay_preview(token: str, request: Request) -> FileResponse:
 @app.post("/api/videos/download", status_code=202)
 def create_download(payload: DownloadRequest, request: Request) -> dict[str, object]:
     try:
-        url = normalize_video_url(payload.url)
+        url, _platform = normalize_source_video_url(payload.url)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     if payload.max_height not in {720, 1080, 1440, 2160}:
@@ -554,6 +889,7 @@ def create_download(payload: DownloadRequest, request: Request) -> dict[str, obj
             token, index, str(request.state.user.id)
         )
         overlays.append({"path": str(overlay_path), "name": display_name})
+    workspace_id, project_id = resolve_media_project(payload.project_id, request)
     try:
         return manager.create(
             "download",
@@ -568,6 +904,8 @@ def create_download(payload: DownloadRequest, request: Request) -> dict[str, obj
                 "metadata_mode": payload.metadata_mode,
             },
             owner_id=str(request.state.user.id),
+            workspace_id=workspace_id,
+            project_id=project_id,
         )
     except InsufficientCreditsError as exc:
         raise HTTPException(402, str(exc)) from exc
@@ -582,7 +920,7 @@ def download_result(job_id: str, request: Request) -> FileResponse:
         raise HTTPException(404, "Задание не найдено") from exc
     if job.get("status") == "deleted":
         raise HTTPException(410, "Видео уже удалено")
-    if job.get("kind") != "download" or job.get("status") != "done":
+    if job.get("kind") not in {"download", "ai_image", "ai_clips"} or job.get("status") != "done":
         raise HTTPException(409, "Видео ещё не готово")
     if not job.get("download_ticket_at"):
         raise HTTPException(409, "Сначала запросите скачивание")
@@ -639,6 +977,27 @@ def delete_video(job_id: str, request: Request) -> dict[str, object]:
 app.mount("/assets", StaticFiles(directory=WEB_DIR), name="assets")
 
 
-@app.get("/", response_class=FileResponse)
-def index() -> FileResponse:
+@app.get("/app", response_class=FileResponse)
+@app.get("/app/", response_class=FileResponse)
+def application_index() -> FileResponse:
     return FileResponse(WEB_DIR / "index.html")
+
+
+@app.get("/", response_class=FileResponse)
+def landing() -> FileResponse:
+    return FileResponse(WEB_DIR / "landing.html")
+
+
+@app.get("/privacy", response_class=FileResponse)
+def privacy() -> FileResponse:
+    return FileResponse(WEB_DIR / "privacy.html")
+
+
+@app.get("/terms", response_class=FileResponse)
+def terms() -> FileResponse:
+    return FileResponse(WEB_DIR / "terms.html")
+
+
+@app.get("/favicon.ico", response_class=FileResponse)
+def favicon() -> FileResponse:
+    return FileResponse(WEB_DIR / "favicon.svg", media_type="image/svg+xml")

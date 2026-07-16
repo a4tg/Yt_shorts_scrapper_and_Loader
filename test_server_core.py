@@ -12,10 +12,13 @@ from server_core import (
     find_downloaded_video,
     is_supported_overlay,
     normalize_channel_shorts_url,
+    normalize_source_import_url,
+    normalize_source_video_url,
     normalize_video_url,
     overlay_preview_seek_seconds,
     parse_metadata_lines,
     playlist_limit_args,
+    run_source_import,
 )
 from media_metadata import metadata_movflags, metadata_output_args, normalize_metadata_mode
 
@@ -48,6 +51,37 @@ class ServerUrlTests(unittest.TestCase):
         self.assertEqual(playlist_limit_args(50), ["--playlist-end", "50"])
         self.assertEqual(playlist_limit_args(0), [])
 
+    def test_supported_source_channels_are_normalized(self) -> None:
+        self.assertEqual(
+            normalize_source_import_url("https://youtube.com/@demo", "auto"),
+            ("https://www.youtube.com/@demo/shorts", "youtube"),
+        )
+        self.assertEqual(
+            normalize_source_import_url("https://vk.com/video/@mobidevices", "vk"),
+            ("https://vk.com/video/@mobidevices", "vk"),
+        )
+        self.assertEqual(
+            normalize_source_import_url("https://rutube.ru/channel/25902603/shorts/", "rutube"),
+            ("https://rutube.ru/channel/25902603/shorts/", "rutube"),
+        )
+
+    def test_supported_direct_video_urls_are_validated(self) -> None:
+        self.assertEqual(
+            normalize_source_video_url("https://vk.com/video-77521_162222515")[1], "vk"
+        )
+        self.assertEqual(
+            normalize_source_video_url(
+                "https://rutube.ru/video/0123456789abcdef0123456789abcdef/"
+            )[1],
+            "rutube",
+        )
+        with self.assertRaises(ValueError):
+            normalize_source_video_url("https://example.com/video/123")
+        with self.assertRaises(ValueError):
+            normalize_source_import_url("http://vk.com/video/@demo")
+        with self.assertRaises(ValueError):
+            normalize_source_import_url("https://vk.com/video/@demo", "rutube")
+
 
 class OverlayPreviewTests(unittest.TestCase):
     def test_preview_uses_twenty_percent_frame(self) -> None:
@@ -70,6 +104,48 @@ class MetadataParserTests(unittest.TestCase):
         self.assertEqual(records[0]["url"], "https://www.youtube.com/shorts/abcdefghijk")
         self.assertEqual(records[0]["tags"], ["one"])
         self.assertEqual(records[0]["duration"], 42)
+
+    def test_parses_vk_and_rutube_metadata_without_youtube_id_rules(self) -> None:
+        vk = parse_metadata_lines(json.dumps({
+            "id": "-77521_162222515", "title": "VK demo",
+            "webpage_url": "https://vk.com/video-77521_162222515",
+        }), "vk")[0]
+        rutube = parse_metadata_lines(json.dumps({
+            "id": "0123456789abcdef0123456789abcdef", "title": "Rutube demo",
+        }), "rutube")[0]
+        self.assertEqual(vk["platform"], "vk")
+        self.assertEqual(vk["url"], "https://vk.com/video-77521_162222515")
+        self.assertEqual(rutube["platform"], "rutube")
+        self.assertIn(rutube["id"], rutube["url"])
+
+    def test_vk_import_writes_platform_metadata_and_uses_playlist_limit(self) -> None:
+        payload = json.dumps({
+            "id": "-77521_162222515",
+            "webpage_url": "https://vk.com/video-77521_162222515",
+            "title": "VK demo",
+            "tags": ["one"],
+        })
+        with tempfile.TemporaryDirectory() as temp_dir, patch(
+            "server_core.resolve_tool", return_value="yt-dlp"
+        ), patch(
+            "server_core.subprocess.run", return_value=Mock(returncode=0, stdout=payload, stderr="")
+        ) as execute:
+            root = Path(temp_dir)
+            count, platform = run_source_import(
+                "https://vk.com/video/@mobidevices",
+                root / "items.json",
+                root / "items.csv",
+                limit=25,
+                platform="auto",
+            )
+            saved = json.loads((root / "items.json").read_text(encoding="utf-8"))
+            csv_text = (root / "items.csv").read_text(encoding="utf-8-sig")
+        command = execute.call_args.args[0]
+        self.assertEqual((count, platform), (1, "vk"))
+        self.assertIn("--playlist-end", command)
+        self.assertIn("25", command)
+        self.assertEqual(saved[0]["platform"], "vk")
+        self.assertIn("platform;url;title", csv_text)
 
 
 class MetadataModeTests(unittest.TestCase):
@@ -107,6 +183,14 @@ class DownloadResultTests(unittest.TestCase):
 
             found = find_downloaded_video(output_dir, reported, "abcdefghijk")
 
+        self.assertEqual(found, actual)
+
+    def test_finds_only_mp4_for_non_youtube_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+            actual = output_dir / "VK video.mp4"
+            actual.write_bytes(b"video")
+            found = find_downloaded_video(output_dir, None, "")
         self.assertEqual(found, actual)
 
 

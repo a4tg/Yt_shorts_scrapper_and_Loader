@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Integer, String, Text, false, func
+from sqlalchemy import JSON, BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, false, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -42,6 +42,183 @@ class User(TimestampMixin, Base):
     email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     credit_balance: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     reserved_credits: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    trial_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class Workspace(TimestampMixin, Base):
+    __tablename__ = "workspaces"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    slug: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    owner_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="active", index=True)
+    settings: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class WorkspaceMember(Base):
+    __tablename__ = "workspace_members"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "user_id", name="uq_workspace_members_workspace_user"),
+        CheckConstraint(
+            "role IN ('owner', 'admin', 'editor', 'viewer', 'client')",
+            name="ck_workspace_members_role",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    role: Mapped[str] = mapped_column(String(24), nullable=False, default="viewer", index=True)
+    invited_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    joined_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class Project(TimestampMixin, Base):
+    __tablename__ = "projects"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "slug", name="uq_projects_workspace_slug"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    slug: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(1000))
+    color: Mapped[str] = mapped_column(String(16), nullable=False, default="#7c6cff")
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="active", index=True)
+    created_by_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+
+
+class ApprovalWorkflow(TimestampMixin, Base):
+    __tablename__ = "approval_workflows"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, unique=True, index=True
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False, default="Основной процесс")
+
+
+class ApprovalStage(Base):
+    __tablename__ = "approval_stages"
+    __table_args__ = (
+        UniqueConstraint("workflow_id", "position", name="uq_approval_stages_position"),
+        UniqueConstraint("workflow_id", "stage_key", name="uq_approval_stages_key"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    workflow_id: Mapped[str] = mapped_column(
+        ForeignKey("approval_workflows.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    stage_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    color: Mapped[str] = mapped_column(String(16), nullable=False, default="#7c6cff")
+    required_role: Mapped[str | None] = mapped_column(String(24))
+    is_terminal: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class ContentItem(TimestampMixin, Base):
+    __tablename__ = "content_items"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id", "source_platform", "source_id", name="uq_content_items_external_source"
+        ),
+        CheckConstraint(
+            "item_type IN ('post', 'video', 'banner', 'document', 'campaign', 'note')",
+            name="ck_content_items_type",
+        ),
+        CheckConstraint(
+            "priority IN ('low', 'normal', 'high', 'urgent')",
+            name="ck_content_items_priority",
+        ),
+        CheckConstraint(
+            "status IN ('active', 'archived')",
+            name="ck_content_items_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    stage_id: Mapped[str | None] = mapped_column(
+        ForeignKey("approval_stages.id", ondelete="SET NULL"), index=True
+    )
+    title: Mapped[str] = mapped_column(String(240), nullable=False)
+    item_type: Mapped[str] = mapped_column(String(24), nullable=False, default="post", index=True)
+    body: Mapped[str | None] = mapped_column(Text)
+    channel: Mapped[str | None] = mapped_column(String(80), index=True)
+    source_platform: Mapped[str | None] = mapped_column(String(24), index=True)
+    source_id: Mapped[str | None] = mapped_column(String(160), index=True)
+    source_url: Mapped[str | None] = mapped_column(String(1000))
+    tags: Mapped[list[str] | None] = mapped_column(JSON)
+    priority: Mapped[str] = mapped_column(String(16), nullable=False, default="normal", index=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active", index=True)
+    planned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    assignee_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    created_by_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    extra: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class ContentRevision(Base):
+    __tablename__ = "content_revisions"
+    __table_args__ = (
+        UniqueConstraint("content_item_id", "version_number", name="uq_content_revisions_version"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    content_item_id: Mapped[str] = mapped_column(
+        ForeignKey("content_items.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    title: Mapped[str] = mapped_column(String(240), nullable=False)
+    body: Mapped[str | None] = mapped_column(Text)
+    changed_by_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+
+
+class ContentAttachment(Base):
+    __tablename__ = "content_attachments"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    content_item_id: Mapped[str] = mapped_column(
+        ForeignKey("content_items.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    uploaded_by_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    original_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    storage_path: Mapped[str] = mapped_column(String(1000), nullable=False, unique=True)
+    mime_type: Mapped[str | None] = mapped_column(String(160))
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
 
 
 class UserSession(Base):
@@ -101,6 +278,7 @@ class Plan(TimestampMixin, Base):
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="RUB")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    feature_limits: Mapped[dict[str, Any] | None] = mapped_column(JSON)
 
 
 class Subscription(TimestampMixin, Base):
@@ -185,6 +363,12 @@ class Job(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     user_id: Mapped[str | None] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    workspace_id: Mapped[str | None] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    project_id: Mapped[str | None] = mapped_column(
+        ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True
     )
     kind: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued", index=True)

@@ -1,12 +1,12 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import or_, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from billing_service import credit_snapshot
+from billing_service import credit_snapshot, entitlement_snapshot
 from database import get_db
-from saas_models import CreditLedger, Plan, Subscription
+from saas_models import ContentAttachment, CreditLedger, Job, Plan, Project, Subscription, Workspace, WorkspaceMember
 
 
 router = APIRouter(prefix="/api/billing", tags=["billing"])
@@ -20,6 +20,7 @@ def plan_payload(plan: Plan) -> dict[str, object]:
         "monthly_credits": plan.monthly_credits,
         "price_minor": plan.price_minor,
         "currency": plan.currency,
+        "limits": dict(plan.feature_limits or {}),
     }
 
 
@@ -35,27 +36,28 @@ def plans(db: Session = Depends(get_db)) -> list[dict[str, object]]:
 def summary(request: Request, db: Session = Depends(get_db)) -> dict[str, object]:
     user_id = str(request.state.user.id)
     credits = credit_snapshot(db, user_id)
-    now = datetime.now(timezone.utc)
-    subscription = db.scalar(
-        select(Subscription)
-        .where(
-            Subscription.user_id == user_id,
-            Subscription.status == "active",
-            or_(
-                Subscription.current_period_end.is_(None),
-                Subscription.current_period_end > now,
-            ),
-        )
-        .order_by(Subscription.created_at.desc())
+    entitlement = entitlement_snapshot(db, user_id)
+    subscription = db.scalar(select(Subscription).where(Subscription.user_id == user_id, Subscription.status == "active").order_by(Subscription.created_at.desc()))
+    plan = entitlement.plan
+    workspace_ids = select(Workspace.id).where(
+        Workspace.owner_user_id == user_id, Workspace.status == "active"
     )
-    plan_id = subscription.plan_id if subscription else "free"
-    plan = db.get(Plan, plan_id)
+    usage = {
+        "workspaces": int(db.scalar(select(func.count(Workspace.id)).where(Workspace.owner_user_id == user_id, Workspace.status == "active")) or 0),
+        "projects": int(db.scalar(select(func.count(Project.id)).where(Project.workspace_id.in_(workspace_ids), Project.status == "active")) or 0),
+        "members": int(db.scalar(select(func.count(WorkspaceMember.id)).where(WorkspaceMember.workspace_id.in_(workspace_ids))) or 0),
+        "storage_mb": round(int(db.scalar(select(func.coalesce(func.sum(ContentAttachment.size_bytes), 0)).where(ContentAttachment.uploaded_by_user_id == user_id)) or 0) / 1024 / 1024, 1),
+        "active_jobs": int(db.scalar(select(func.count(Job.id)).where(Job.user_id == user_id, Job.status.in_(["queued", "running"]))) or 0),
+    }
     return {
         "balance": credits.balance,
         "reserved": credits.reserved,
         "available": credits.available,
         "plan": plan_payload(plan) if plan else None,
-        "subscription_status": subscription.status if subscription else "trial",
+        "subscription_status": entitlement.status,
+        "trial_expires_at": entitlement.trial_expires_at.isoformat() if entitlement.trial_expires_at else None,
+        "limits": entitlement.limits,
+        "usage": usage,
         "current_period_end": (
             subscription.current_period_end.isoformat()
             if subscription and subscription.current_period_end

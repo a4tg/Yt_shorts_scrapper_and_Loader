@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>YT Shorts Loader</title>
+  <title>All As Planned</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/assets/style.css">
   <link rel="stylesheet" href="/assets/direct-video.css">
   <link rel="stylesheet" href="/assets/overlay-editor.css">
@@ -11,6 +12,9 @@
   <link rel="stylesheet" href="/assets/batch.css">
   <link rel="stylesheet" href="/assets/auth.css">
   <link rel="stylesheet" href="/assets/billing.css">
+  <link rel="stylesheet" href="/assets/workspace.css">
+  <link rel="stylesheet" href="/assets/ai.css">
+  <link rel="stylesheet" href="/assets/admin.css">
 </head>
 <body>
   <section id="auth-screen" class="auth-shell">
@@ -56,11 +60,36 @@
     </div>
   </section>
 
-  <main id="app-shell" class="shell hidden">
-    <header class="hero">
+  <main id="app-shell" class="app-shell hidden">
+    <aside class="workspace-sidebar">
+      <div class="workspace-brand">
+        <span class="workspace-logo" aria-hidden="true">A</span>
+        <div><strong>All As Planned</strong><small>Контент в одном месте</small></div>
+      </div>
+      <div class="workspace-switcher">
+        <label for="workspace-select">Пространство</label>
+        <div><select id="workspace-select" aria-label="Рабочее пространство"></select><button id="create-workspace-button" type="button" title="Создать пространство">+</button></div>
+      </div>
+      <nav class="workspace-nav" aria-label="Разделы приложения">
+        <button class="workspace-nav-item active" type="button" data-navigate="dashboard"><span>⌂</span>Обзор</button>
+        <button class="workspace-nav-item" type="button" data-navigate="content"><span>▦</span>Контент-план</button>
+        <button class="workspace-nav-item" type="button" data-navigate="documents"><span>▤</span>Документы</button>
+        <button class="workspace-nav-item" type="button" data-navigate="library"><span>◫</span>Медиатека</button>
+        <button class="workspace-nav-item" type="button" data-navigate="video"><span>▶</span>Видео</button>
+        <button class="workspace-nav-item" type="button" data-navigate="approvals"><span>✓</span>Согласования</button>
+        <button class="workspace-nav-item" type="button" data-navigate="ai"><span>✦</span>AI-помощник</button>
+      </nav>
+      <div class="workspace-nav workspace-nav-bottom">
+        <button id="admin-nav-button" class="workspace-nav-item hidden" type="button" data-navigate="admin"><span>◆</span>Управление SaaS</button>
+        <button class="workspace-nav-item" type="button" data-navigate="billing"><span>₽</span>Тариф и кредиты</button>
+      </div>
+    </aside>
+
+    <div class="workspace-main">
+    <header class="workspace-topbar">
       <div>
         <p class="eyebrow">Собственный медиасервис</p>
-        <h1>YT Shorts Loader</h1>
+        <h1 id="workspace-page-title">Обзор</h1>
         <p class="lead">Соберите Shorts канала, отдельно выгрузите метаданные и подготовьте видео с логотипом.</p>
       </div>
       <div class="account-bar">
@@ -79,6 +108,129 @@
       <button id="resend-verification" class="secondary" type="button">Отправить письмо ещё раз</button>
     </section>
 
+    <section class="workspace-page" data-page="dashboard">
+      <div class="dashboard-welcome">
+        <div>
+          <p class="eyebrow">Сегодня в работе</p>
+          <h2>Соберите весь контент-процесс в одном месте</h2>
+          <p>Планируйте материалы, готовьте видео, храните файлы и согласовывайте публикации без разрозненных таблиц и чатов.</p>
+          <div class="dashboard-actions">
+            <button class="primary" type="button" data-navigate="video">Подготовить видео</button>
+            <button class="ghost" type="button" data-navigate="content">Создать контент-план</button>
+          </div>
+        </div>
+        <div class="dashboard-orbit" aria-hidden="true"><span>Текст</span><span>Видео</span><span>План</span><b>✦</b></div>
+      </div>
+      <section id="onboarding-panel" class="onboarding-panel panel hidden" aria-live="polite">
+        <div class="onboarding-heading">
+          <div><p class="eyebrow">Быстрый старт</p><h2>Настройте рабочий процесс</h2><p>Четыре шага, чтобы команда могла планировать, хранить и выпускать контент в одном месте.</p></div>
+          <button id="dismiss-onboarding" class="ghost" type="button">Скрыть</button>
+        </div>
+        <div id="onboarding-steps" class="onboarding-steps"></div>
+      </section>
+      <div class="dashboard-grid">
+        <article class="dashboard-card"><span class="card-icon">▦</span><div><small>Контент-план</small><strong>Планируйте публикации</strong><p>Календарь, статусы и ответственные в едином процессе.</p></div><button type="button" data-navigate="content">Открыть</button></article>
+        <article class="dashboard-card"><span class="card-icon">▶</span><div><small>Видео</small><strong>Готовьте Shorts</strong><p>Импорт, оверлеи, пакетная обработка и метаданные.</p></div><button type="button" data-navigate="video">Открыть</button></article>
+        <article class="dashboard-card"><span class="card-icon">◫</span><div><small>Медиатека</small><strong>Файлы без хаоса</strong><p>Исходники и готовые материалы внутри проектов.</p></div><button type="button" data-navigate="library">Открыть</button></article>
+        <article class="dashboard-card"><span class="card-icon">✓</span><div><small>Согласования</small><strong>Понятные статусы</strong><p>Комментарии, версии и настраиваемые этапы проверки.</p></div><button type="button" data-navigate="approvals">Открыть</button></article>
+      </div>
+      <section class="workspace-management panel">
+        <div class="management-heading">
+          <div><p class="eyebrow">Текущая команда</p><h2 id="current-workspace-name">Рабочее пространство</h2><span id="current-workspace-role" class="role-badge"></span></div>
+          <button id="create-project-button" class="primary" type="button">Новый проект</button>
+        </div>
+        <div id="workspace-projects" class="project-grid" aria-live="polite"></div>
+        <div class="team-heading"><div><h3>Участники</h3><p>Роли определяют доступ к проектам и настройкам.</p></div></div>
+        <form id="add-member-form" class="member-form">
+          <input id="member-email" type="email" placeholder="email зарегистрированного пользователя" required>
+          <select id="member-role"><option value="editor">Редактор</option><option value="admin">Администратор</option><option value="viewer">Наблюдатель</option><option value="client">Клиент</option></select>
+          <button class="secondary" type="submit">Добавить</button>
+        </form>
+        <div id="workspace-members" class="member-list" aria-live="polite"></div>
+      </section>
+    </section>
+
+    <section class="workspace-page hidden" data-page="admin">
+      <section class="admin-panel panel">
+        <div class="admin-heading">
+          <div><p class="eyebrow">Только для владельца сервиса</p><h2>Управление All As Planned</h2><p>Ключевые показатели, пользователи и последние платежи.</p></div>
+          <button id="refresh-admin" class="secondary" type="button">Обновить</button>
+        </div>
+        <div id="admin-stats" class="admin-stats" aria-live="polite"></div>
+        <div class="admin-tables">
+          <section><div class="admin-table-heading"><h3>Пользователи</h3><span id="admin-users-count"></span></div><div class="admin-table-scroll"><table><thead><tr><th>Пользователь</th><th>Тариф</th><th>Кредиты</th><th>Статус</th><th>Создан</th></tr></thead><tbody id="admin-users-body"></tbody></table></div></section>
+          <section><div class="admin-table-heading"><h3>Последние платежи</h3><span id="admin-payments-count"></span></div><div class="admin-table-scroll"><table><thead><tr><th>Пользователь</th><th>Тариф</th><th>Сумма</th><th>Статус</th><th>Дата</th></tr></thead><tbody id="admin-payments-body"></tbody></table></div></section>
+        </div>
+      </section>
+    </section>
+
+    <section class="workspace-page hidden" data-page="content">
+      <section class="content-workspace panel">
+        <div class="content-heading"><div><p class="eyebrow">Текущий проект</p><h2 id="content-project-name">Контент-план</h2><p>Материалы, публикации и согласования в одном рабочем поле.</p></div><button id="create-content-button" class="primary" type="button">+ Новый материал</button></div>
+        <div class="content-stats" id="content-stats"></div>
+        <div class="content-toolbar">
+          <input id="content-search" type="search" placeholder="Поиск по названию и тексту">
+          <select id="content-type-filter"><option value="">Все форматы</option><option value="post">Посты</option><option value="video">Видео</option><option value="banner">Баннеры</option><option value="document">Документы</option><option value="campaign">Кампании</option><option value="note">Заметки</option></select>
+          <div class="view-switcher"><button class="active" type="button" data-content-view="board">Канбан</button><button type="button" data-content-view="calendar">Календарь</button></div>
+        </div>
+        <div id="content-board" class="content-board" aria-live="polite"></div>
+        <div id="content-calendar" class="content-calendar hidden" aria-live="polite"></div>
+      </section>
+    </section>
+    <section class="workspace-page hidden" data-page="documents">
+      <section class="content-workspace panel">
+        <div class="content-heading"><div><p class="eyebrow">База знаний проекта</p><h2>Документы и заметки</h2><p>Брифы, тексты и рабочие заметки с историей изменений.</p></div><button id="create-document-button" class="primary" type="button">+ Новый документ</button></div>
+        <div id="documents-list" class="documents-grid" aria-live="polite"></div>
+      </section>
+    </section>
+    <section class="workspace-page hidden" data-page="library">
+      <section class="content-workspace panel">
+        <div class="content-heading"><div><p class="eyebrow">Файлы проекта</p><h2>Медиатека</h2><p>Все вложения из карточек контента с защищённым скачиванием.</p></div><button id="refresh-library-button" class="ghost" type="button">Обновить</button></div>
+        <div id="library-summary" class="library-summary"></div>
+        <div id="library-grid" class="library-grid" aria-live="polite"></div>
+      </section>
+    </section>
+    <section class="workspace-page hidden" data-page="approvals">
+      <section class="approval-builder panel">
+        <div class="management-heading"><div><p class="eyebrow">Процесс проекта</p><h2>Этапы согласования</h2><p>Настройте путь материала от идеи до публикации.</p></div><button id="save-workflow-button" class="primary" type="button">Сохранить процесс</button></div>
+        <label class="workflow-name-field"><span>Название процесса</span><input id="workflow-name" type="text" maxlength="120" value="Основной процесс"></label>
+        <div id="approval-stages" class="approval-stage-list" aria-live="polite"></div>
+        <button id="add-approval-stage" class="ghost" type="button">+ Добавить этап</button>
+        <div id="workflow-status" class="status hidden" aria-live="polite"></div>
+      </section>
+    </section>
+    <section class="workspace-page hidden" data-page="ai">
+      <div class="ai-heading"><div><p class="eyebrow">AI-студия проекта</p><h2>От идеи до готового материала</h2><p>Генерация использует контекст выбранного проекта. Ключ провайдера хранится только на сервере.</p></div><span id="ai-provider-status" class="ai-provider-badge">Проверяю настройки…</span></div>
+      <div class="ai-grid">
+        <form id="ai-text-form" class="panel ai-card">
+          <div class="ai-card-title"><span>✦</span><div><h3>Текст и идеи</h3><p>Посты, варианты, редактура и теги</p></div></div>
+          <label><span>Задача</span><select id="ai-text-action"><option value="post">Написать пост</option><option value="ideas">Идеи контента</option><option value="rewrite">Переписать</option><option value="shorten">Сократить</option><option value="titles">Заголовки</option><option value="tags">Теги</option></select></label>
+          <label><span>Что нужно сделать</span><textarea id="ai-text-prompt" rows="6" maxlength="30000" required placeholder="Например: пост о запуске нового тарифа для Telegram…"></textarea></label>
+          <label><span>Дополнительный контекст</span><textarea id="ai-text-context" rows="3" maxlength="30000" placeholder="ЦА, тональность, факты, ограничения"></textarea></label>
+          <button class="primary" type="submit">Создать · 1 кредит</button>
+          <div id="ai-text-status" class="status hidden" aria-live="polite"></div>
+          <div id="ai-text-result" class="ai-result hidden"><div><b>Результат</b><button id="ai-copy-text" class="text-button" type="button">Копировать</button></div><textarea readonly rows="12"></textarea></div>
+        </form>
+        <form id="ai-image-form" class="panel ai-card">
+          <div class="ai-card-title"><span>▧</span><div><h3>Изображение</h3><p>Квадрат, вертикаль или горизонталь</p></div></div>
+          <label><span>Описание изображения</span><textarea id="ai-image-prompt" rows="7" maxlength="8000" required placeholder="Опишите сюжет, композицию, стиль и надписи…"></textarea></label>
+          <label><span>Формат</span><select id="ai-image-size"><option value="1024x1024">Квадрат 1:1</option><option value="1024x1536">Вертикальный 2:3</option><option value="1536x1024">Горизонтальный 3:2</option></select></label>
+          <button class="primary" type="submit">Создать · 5 кредитов</button>
+          <div id="ai-image-status" class="status hidden" aria-live="polite"></div>
+          <div id="ai-image-result" class="ai-image-result hidden"><img alt="Сгенерированное изображение"><a class="primary" href="#">Скачать PNG</a></div>
+        </form>
+        <form id="ai-clips-form" class="panel ai-card ai-clips-card">
+          <div class="ai-card-title"><span>▶</span><div><h3>Нарезка на клипы</h3><p>Расшифровка, поиск моментов и вертикальный рендер</p></div></div>
+          <label><span>Видео из медиатеки</span><select id="ai-video-attachment" required><option value="">Сначала добавьте видео в карточку контента</option></select></label>
+          <div class="ai-inline-fields"><label><span>Клипов</span><input id="ai-clip-count" type="number" min="1" max="5" value="1"></label><label><span>От, сек.</span><input id="ai-clip-min" type="number" min="10" max="120" value="20"></label><label><span>До, сек.</span><input id="ai-clip-max" type="number" min="15" max="180" value="60"></label></div>
+          <button class="primary" type="submit">Найти и нарезать</button>
+          <div id="ai-clips-status" class="status hidden" aria-live="polite"></div>
+          <a id="ai-clips-download" class="primary hidden" href="#">Скачать ZIP с клипами</a>
+        </form>
+      </div>
+    </section>
+
+    <section class="workspace-page hidden" data-page="billing">
     <section class="panel billing-panel">
       <div class="section-title billing-title">
         <span class="step">₽</span>
@@ -89,6 +241,8 @@
         <div><span>Зарезервировано</span><strong id="billing-reserved">—</strong></div>
         <div><span>Общий баланс</span><strong id="billing-balance">—</strong></div>
       </div>
+      <div id="billing-entitlement" class="billing-entitlement"></div>
+      <div id="billing-limits" class="billing-limits" aria-live="polite"></div>
       <div id="billing-plans" class="plan-grid" aria-live="polite"></div>
       <button id="billing-subscription-action" class="ghost hidden" type="button"></button>
       <details class="ledger-box">
@@ -96,23 +250,26 @@
         <div id="billing-ledger" class="ledger-list"></div>
       </details>
     </section>
+    </section>
 
+    <section class="workspace-page hidden" data-page="video">
     <section class="panel import-panel">
       <div class="section-title">
         <span class="step">1</span>
-        <div><h2>Канал YouTube</h2><p>Вставьте ссылку вида youtube.com/@channel</p></div>
+        <div><h2>Импорт видео</h2><p>YouTube Shorts, VK Video/Clips и каналы Rutube</p></div>
       </div>
       <form id="channel-form" class="channel-form">
-        <input id="channel-url" type="url" placeholder="https://www.youtube.com/@channel" required>
-        <select id="shorts-limit" aria-label="Сколько Shorts получить">
+        <select id="source-platform" aria-label="Платформа"><option value="auto" selected>Определить автоматически</option><option value="youtube">YouTube Shorts</option><option value="vk">VK Video / Clips</option><option value="rutube">Rutube</option></select>
+        <input id="channel-url" type="url" placeholder="Ссылка на канал, плейлист или видео" required>
+        <select id="shorts-limit" aria-label="Сколько видео получить">
           <option value="10">Первые 10</option>
           <option value="25">Первые 25</option>
           <option value="50" selected>Первые 50</option>
           <option value="100">Первые 100</option>
           <option value="200">Первые 200</option>
-          <option value="0">Все Shorts</option>
+          <option value="0">Все видео</option>
         </select>
-        <button class="primary" type="submit">Получить Shorts</button>
+        <button class="primary" type="submit">Получить видео</button>
       </form>
       <div id="import-status" class="status hidden"></div>
     </section>
@@ -171,11 +328,11 @@
       </div>
       <div class="direct-video">
         <div>
-          <h3>Конкретное YouTube-видео</h3>
-          <p>Подходят ссылки youtube.com/watch, youtu.be и youtube.com/shorts</p>
+          <h3>Конкретное видео</h3>
+          <p>YouTube, VK Video/Clips или Rutube — формат определяется по ссылке</p>
         </div>
         <form id="direct-video-form" class="direct-video-form">
-          <input id="direct-video-url" type="url" placeholder="https://www.youtube.com/watch?v=..." required>
+          <input id="direct-video-url" type="url" placeholder="https://youtube.com/shorts/... или vk.com/video..." required>
           <button class="primary" type="submit">Подготовить видео</button>
         </form>
         <div id="direct-video-actions" class="direct-result hidden">
@@ -187,7 +344,7 @@
 
     <section id="results-section" class="panel results-panel hidden">
       <div class="results-head">
-        <div class="section-title compact"><span class="step">3</span><div><h2>Shorts канала</h2><p id="result-count"></p></div></div>
+        <div class="section-title compact"><span class="step">3</span><div><h2>Видео источника</h2><p id="result-count"></p></div></div>
         <a id="csv-link" class="secondary" href="#">Скачать общий CSV</a>
       </div>
       <div id="batch-toolbar" class="batch-toolbar hidden">
@@ -201,7 +358,56 @@
       <div id="batch-status" class="status hidden" aria-live="polite"></div>
       <div id="items" class="items"></div>
     </section>
+    </section>
+    </div>
   </main>
+
+  <dialog id="workspace-dialog" class="account-dialog workspace-dialog">
+    <form id="workspace-form" method="dialog">
+      <h2>Новое рабочее пространство</h2>
+      <p>Используйте отдельное пространство для команды или группы брендов.</p>
+      <label><span>Название</span><input id="workspace-name-input" type="text" minlength="2" maxlength="120" required></label>
+      <div class="dialog-actions"><button class="ghost dialog-cancel" type="button">Отмена</button><button class="primary" type="submit">Создать</button></div>
+      <div id="workspace-dialog-status" class="auth-status" aria-live="polite"></div>
+    </form>
+  </dialog>
+  <dialog id="project-dialog" class="account-dialog workspace-dialog">
+    <form id="project-form" method="dialog">
+      <h2>Новый проект</h2>
+      <label><span>Название</span><input id="project-name-input" type="text" minlength="2" maxlength="120" required></label>
+      <label><span>Описание</span><textarea id="project-description-input" maxlength="1000" rows="4"></textarea></label>
+      <label><span>Цвет проекта</span><input id="project-color-input" type="color" value="#7c6cff"></label>
+      <div class="dialog-actions"><button class="ghost dialog-cancel" type="button">Отмена</button><button class="primary" type="submit">Создать</button></div>
+      <div id="project-dialog-status" class="auth-status" aria-live="polite"></div>
+    </form>
+  </dialog>
+
+  <dialog id="content-dialog" class="content-dialog">
+    <form id="content-form" method="dialog">
+      <div class="content-dialog-head"><div><p class="eyebrow">Карточка проекта</p><h2 id="content-dialog-title">Новый материал</h2></div><button id="content-dialog-close" class="icon-button" type="button" aria-label="Закрыть">×</button></div>
+      <input id="content-id" type="hidden">
+      <div class="content-form-grid">
+        <label class="wide"><span>Название</span><input id="content-title-input" type="text" maxlength="240" required></label>
+        <label><span>Формат</span><select id="content-type-input"><option value="post">Пост</option><option value="video">Видео</option><option value="banner">Баннер</option><option value="document">Документ</option><option value="campaign">Кампания</option><option value="note">Заметка</option></select></label>
+        <label><span>Этап</span><select id="content-stage-input"></select></label>
+        <label><span>Канал</span><input id="content-channel-input" type="text" maxlength="80" placeholder="Telegram, VK, YouTube…"></label>
+        <label><span>Публикация</span><input id="content-planned-input" type="datetime-local"></label>
+        <label><span>Ответственный</span><select id="content-assignee-input"></select></label>
+        <label><span>Приоритет</span><select id="content-priority-input"><option value="low">Низкий</option><option value="normal">Обычный</option><option value="high">Высокий</option><option value="urgent">Срочный</option></select></label>
+        <label class="wide"><span>Теги через запятую</span><input id="content-tags-input" type="text" maxlength="1000" placeholder="запуск, продукт, июль"></label>
+      </div>
+      <div class="editor-label"><span>Текст или заметка</span><div class="markdown-toolbar"><button type="button" data-markdown="**|**">Жирный</button><button type="button" data-markdown="## |">Заголовок</button><button type="button" data-markdown="[|](https://)">Ссылка</button><button id="toggle-content-preview" type="button">Предпросмотр</button></div></div>
+      <textarea id="content-body-input" class="content-editor" maxlength="2000000" rows="12" placeholder="Пишите текст в Markdown…"></textarea>
+      <div id="content-body-preview" class="content-preview hidden"></div>
+      <section id="content-files-section" class="content-files hidden">
+        <div><h3>Файлы</h3><label class="file-upload-button">+ Прикрепить файл<input id="content-file-input" type="file"></label></div>
+        <div id="content-attachments" class="attachment-list"></div>
+      </section>
+      <details id="content-history-section" class="content-history hidden"><summary>История изменений</summary><div id="content-revisions"></div></details>
+      <div class="dialog-actions content-dialog-actions"><button id="archive-content-button" class="danger hidden" type="button">В архив</button><span></span><button id="content-dialog-cancel" class="ghost" type="button">Отмена</button><button class="primary" type="submit">Сохранить</button></div>
+      <div id="content-form-status" class="auth-status" aria-live="polite"></div>
+    </form>
+  </dialog>
 
   <dialog id="password-dialog" class="account-dialog">
     <form id="change-password-form" method="dialog">

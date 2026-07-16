@@ -27,6 +27,14 @@ EXPECTED_TABLES = {
     "credit_ledger",
     "webhook_events",
     "account_tokens",
+    "workspaces",
+    "workspace_members",
+    "projects",
+    "approval_workflows",
+        "approval_stages",
+        "content_items",
+        "content_revisions",
+        "content_attachments",
 }
 
 
@@ -105,6 +113,24 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertEqual(balance, 5)
         self.assertEqual(grant, 5)
         self.assertIsNotNone(verified_at)
+        with engine.connect() as connection:
+            workspace_role = connection.scalar(
+                text(
+                    "SELECT wm.role FROM workspace_members wm "
+                    "JOIN workspaces w ON w.id = wm.workspace_id "
+                    "WHERE wm.user_id = :id"
+                ),
+                {"id": user_id},
+            )
+            project_count = connection.scalar(
+                text(
+                    "SELECT COUNT(*) FROM projects p JOIN workspaces w ON w.id = p.workspace_id "
+                    "WHERE w.owner_user_id = :id"
+                ),
+                {"id": user_id},
+            )
+        self.assertEqual(workspace_role, "owner")
+        self.assertEqual(project_count, 1)
 
     def test_models_enforce_unique_users_and_keep_credit_history(self) -> None:
         command.upgrade(self.config, "head")

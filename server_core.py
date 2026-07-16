@@ -16,6 +16,12 @@ BASE_DIR = Path(__file__).resolve().parent
 VIDEO_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{11}$")
 YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com"}
 YOUTUBE_VIDEO_HOSTS = YOUTUBE_HOSTS | {"youtu.be", "www.youtu.be"}
+VK_HOSTS = {
+    "vk.com", "www.vk.com", "m.vk.com", "new.vk.com",
+    "vkvideo.ru", "www.vkvideo.ru", "m.vkvideo.ru",
+}
+RUTUBE_HOSTS = {"rutube.ru", "www.rutube.ru"}
+SOURCE_HOSTS = YOUTUBE_VIDEO_HOSTS | VK_HOSTS | RUTUBE_HOSTS
 PATH_MARKER = "__YTLOADER_FILE__:"
 CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 STATIC_OVERLAY_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp"}
@@ -36,6 +42,97 @@ def youtube_cookies() -> Path | None:
     configured = os.getenv("YOUTUBE_COOKIES")
     path = Path(configured) if configured else BASE_DIR / "cookies" / "www.youtube.com_cookies.txt"
     return path if path.is_file() else None
+
+
+def source_cookies(platform: str) -> Path | None:
+    """Return a read-only cookie export configured for a supported platform."""
+    if platform == "youtube":
+        return youtube_cookies()
+    configured = os.getenv(f"{platform.upper()}_COOKIES")
+    if not configured:
+        return None
+    path = Path(configured)
+    return path if path.is_file() else None
+
+
+def detect_source_platform(value: str) -> str:
+    raw_url = value.strip()
+    if "://" not in raw_url:
+        raw_url = "https://" + raw_url
+    host = (urlparse(raw_url).hostname or "").lower()
+    if host in YOUTUBE_VIDEO_HOSTS:
+        return "youtube"
+    if host in VK_HOSTS:
+        return "vk"
+    if host in RUTUBE_HOSTS:
+        return "rutube"
+    raise ValueError("Поддерживаются только ссылки YouTube, VK и Rutube.")
+
+
+def _clean_source_url(value: str) -> tuple[str, object]:
+    raw_url = value.strip()
+    if not raw_url:
+        raise ValueError("Вставь ссылку на источник или видео.")
+    if "://" not in raw_url:
+        raw_url = "https://" + raw_url
+    parsed = urlparse(raw_url)
+    if parsed.scheme != "https":
+        raise ValueError("Ссылка должна использовать HTTPS.")
+    detect_source_platform(raw_url)
+    host = (parsed.hostname or "").lower()
+    if host.startswith("www."):
+        parsed = parsed._replace(netloc=host[4:])
+        raw_url = parsed.geturl()
+    return raw_url, parsed
+
+
+def normalize_source_import_url(value: str, platform: str = "auto") -> tuple[str, str]:
+    """Validate a playlist/channel URL and normalize platform-specific sections."""
+    raw_url, parsed = _clean_source_url(value)
+    detected = detect_source_platform(raw_url)
+    if platform != "auto" and platform != detected:
+        raise ValueError(f"Выбрана платформа {platform}, но ссылка относится к {detected}.")
+    if detected == "youtube":
+        return normalize_channel_shorts_url(raw_url), detected
+    parts = [part for part in parsed.path.split("/") if part]
+    if detected == "vk":
+        valid = (
+            (parsed.hostname or "").lower().endswith("vkvideo.ru") and bool(parts)
+        ) or (len(parts) >= 2 and parts[0] in {"video", "playlist"}) or (
+            len(parts) == 1 and parts[0].startswith(("video", "clip"))
+        )
+        if not valid:
+            raise ValueError(
+                "Для VK вставь ссылку vk.com/video/@канал, vkvideo.ru/@канал, "
+                "плейлист или отдельное video/clip."
+            )
+    else:
+        valid = bool(parts) and parts[0] in {"channel", "u", "plst", "video", "tags"}
+        if not valid:
+            raise ValueError("Для Rutube вставь ссылку на канал, плейлист или видео.")
+    clean = parsed._replace(query=parsed.query, fragment="").geturl()
+    return clean, detected
+
+
+def normalize_source_video_url(value: str) -> tuple[str, str]:
+    """Validate a direct video URL without permitting arbitrary downloader targets."""
+    raw_url, parsed = _clean_source_url(value)
+    platform = detect_source_platform(raw_url)
+    if platform == "youtube":
+        return normalize_video_url(raw_url), platform
+    parts = [part for part in parsed.path.split("/") if part]
+    if platform == "vk":
+        joined = "/".join(parts)
+        if not re.search(r"(?:video|clip)-?\d+_\d+", joined):
+            raise ValueError("Нужна ссылка на отдельное VK Video или Clip.")
+    else:
+        rutube_path = "/" + "/".join(parts)
+        if not re.fullmatch(
+            r"/(?:video(?:/private)?/[0-9a-z]{32}|live/video/[0-9a-z]{32}|(?:video|play)/embed/\d+)",
+            rutube_path,
+        ):
+            raise ValueError("Нужна ссылка на отдельное видео Rutube.")
+    return parsed._replace(fragment="").geturl(), platform
 
 
 def normalize_channel_shorts_url(value: str) -> str:
@@ -84,7 +181,24 @@ def normalize_video_url(value: str) -> str:
     return f"https://www.youtube.com/watch?v={extract_video_id(value)}"
 
 
-def parse_metadata_lines(output: str) -> list[dict[str, object]]:
+def _record_video_url(raw: dict[str, object], platform: str, video_id: str) -> str:
+    for key in ("webpage_url", "original_url"):
+        candidate = str(raw.get(key) or "").strip()
+        if candidate:
+            try:
+                candidate_platform = detect_source_platform(candidate)
+            except ValueError:
+                continue
+            if candidate_platform == platform:
+                return candidate
+    if platform == "youtube":
+        return f"https://www.youtube.com/shorts/{video_id}"
+    if platform == "vk":
+        return f"https://vk.com/video{video_id}"
+    return f"https://rutube.ru/video/{video_id}/"
+
+
+def parse_metadata_lines(output: str, platform: str = "youtube") -> list[dict[str, object]]:
     records: list[dict[str, object]] = []
     seen: set[str] = set()
     for line in output.splitlines():
@@ -95,14 +209,15 @@ def parse_metadata_lines(output: str) -> list[dict[str, object]]:
         if not isinstance(raw, dict):
             continue
         video_id = str(raw.get("id") or "").strip()
-        if not VIDEO_ID_PATTERN.fullmatch(video_id) or video_id in seen:
+        if not video_id or len(video_id) > 160 or video_id in seen:
             continue
         tags = raw.get("tags")
         seen.add(video_id)
         records.append(
             {
                 "id": video_id,
-                "url": f"https://www.youtube.com/shorts/{video_id}",
+                "url": _record_video_url(raw, platform, video_id),
+                "platform": platform,
                 "title": str(raw.get("title") or "Без названия"),
                 "description": str(raw.get("description") or ""),
                 "tags": [str(tag) for tag in tags] if isinstance(tags, list) else [],
@@ -119,7 +234,14 @@ def playlist_limit_args(limit: int) -> list[str]:
     return ["--playlist-end", str(limit)] if limit > 0 else []
 
 
-def run_channel_import(channel_url: str, json_path: Path, csv_path: Path, limit: int = 50) -> int:
+def run_source_import(
+    source_url: str,
+    json_path: Path,
+    csv_path: Path,
+    limit: int = 50,
+    platform: str = "auto",
+) -> tuple[int, str]:
+    normalized_url, detected_platform = normalize_source_import_url(source_url, platform)
     command = [
         resolve_tool("yt-dlp"),
         "--ignore-config",
@@ -130,12 +252,12 @@ def run_channel_import(channel_url: str, json_path: Path, csv_path: Path, limit:
         "--js-runtimes", "node",
         *playlist_limit_args(limit),
         "--print",
-        "%(.{id,title,description,tags,uploader,upload_date,duration,thumbnail})j",
+        "%(.{id,webpage_url,original_url,title,description,tags,uploader,upload_date,duration,thumbnail})j",
     ]
-    cookies = youtube_cookies()
+    cookies = source_cookies(detected_platform)
     if cookies:
         command.extend(["--cookies", str(cookies)])
-    command.append(normalize_channel_shorts_url(channel_url))
+    command.append(normalized_url)
     result = subprocess.run(
         command,
         capture_output=True,
@@ -144,21 +266,22 @@ def run_channel_import(channel_url: str, json_path: Path, csv_path: Path, limit:
         errors="replace",
         creationflags=CREATE_NO_WINDOW,
     )
-    records = parse_metadata_lines(result.stdout)
+    records = parse_metadata_lines(result.stdout, detected_platform)
     if not records and result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or "yt-dlp не смог прочитать канал")
+        raise RuntimeError(result.stderr.strip() or "yt-dlp не смог прочитать источник")
     json_path.parent.mkdir(parents=True, exist_ok=True)
     json_path.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
     with csv_path.open("w", encoding="utf-8-sig", newline="") as csv_file:
         writer = csv.DictWriter(
             csv_file,
-            fieldnames=["url", "title", "description", "tags", "uploader", "upload_date"],
+            fieldnames=["platform", "url", "title", "description", "tags", "uploader", "upload_date"],
             delimiter=";",
         )
         writer.writeheader()
         for record in records:
             writer.writerow(
                 {
+                    "platform": record["platform"],
                     "url": record["url"],
                     "title": record["title"],
                     "description": record["description"],
@@ -167,7 +290,56 @@ def run_channel_import(channel_url: str, json_path: Path, csv_path: Path, limit:
                     "upload_date": record["upload_date"],
                 }
             )
-    return len(records)
+    return len(records), detected_platform
+
+
+def run_channel_import(channel_url: str, json_path: Path, csv_path: Path, limit: int = 50) -> int:
+    """Backward-compatible YouTube Shorts importer used by the desktop application/tests."""
+    count, _ = run_source_import(channel_url, json_path, csv_path, limit, "youtube")
+    return count
+
+
+def probe_source_video(value: str) -> dict[str, object]:
+    """Read safe preview metadata for one supported external video."""
+    normalized_url, platform = normalize_source_video_url(value)
+    command = [
+        resolve_tool("yt-dlp"), "--ignore-config", "--skip-download", "--no-warnings",
+        "--no-update", "--dump-single-json", normalized_url,
+    ]
+    cookies = source_cookies(platform)
+    if cookies:
+        command[1:1] = ["--cookies", str(cookies)]
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=45,
+            creationflags=CREATE_NO_WINDOW,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("Источник слишком долго отвечает") from exc
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or "yt-dlp не смог получить предпросмотр")
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Источник вернул некорректные метаданные") from exc
+    thumbnails = payload.get("thumbnails") if isinstance(payload, dict) else None
+    thumbnail = str(payload.get("thumbnail") or "") if isinstance(payload, dict) else ""
+    if not thumbnail and isinstance(thumbnails, list) and thumbnails:
+        thumbnail = str(dict(thumbnails[-1]).get("url") or "")
+    return {
+        "url": normalized_url,
+        "platform": platform,
+        "id": str(payload.get("id") or ""),
+        "title": str(payload.get("title") or "Без названия"),
+        "thumbnail": thumbnail,
+        "duration": payload.get("duration"),
+        "uploader": str(payload.get("uploader") or ""),
+    }
 
 
 def probe_width(video_path: Path) -> int:
@@ -402,6 +574,11 @@ def find_downloaded_video(
         and f"[{video_id}]" in path.name
         and ".tmp." not in path.name
     ]
+    if not candidates:
+        candidates = [
+            path for path in output_dir.iterdir()
+            if path.is_file() and path.suffix.lower() == ".mp4" and ".tmp." not in path.name
+        ]
     return max(candidates, key=lambda path: path.stat().st_mtime) if candidates else None
 
 
@@ -418,8 +595,8 @@ def download_short(
     metadata_mode: str = "strip",
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
-    normalized_url = normalize_video_url(url)
-    video_id = extract_video_id(normalized_url)
+    normalized_url, platform = normalize_source_video_url(url)
+    video_id = extract_video_id(normalized_url) if platform == "youtube" else ""
     command = [
         resolve_tool("yt-dlp"), "--ignore-config",
         "--js-runtimes", "node",
@@ -429,11 +606,11 @@ def download_short(
         "--print", f"after_move:{PATH_MARKER}%(filepath)s",
         "-P", str(output_dir),
     ]
-    cookies = youtube_cookies()
+    cookies = source_cookies(platform)
     if cookies:
         command.extend(["--cookies", str(cookies)])
     command.append(normalized_url)
-    log("Скачиваю видео…")
+    log(f"Скачиваю видео из {platform.upper()}…")
     process = subprocess.Popen(
         command,
         stdout=subprocess.PIPE,

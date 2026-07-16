@@ -1,5 +1,6 @@
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -53,8 +54,31 @@ def test_registration_receives_starter_credits_and_plan_catalog() -> None:
     summary = client.get("/api/billing/summary").json()
     assert summary["available"] == 5
     assert summary["plan"]["id"] == "free"
+    assert summary["subscription_status"] == "trial"
+    assert summary["trial_expires_at"]
+    assert summary["limits"]["projects"] == 3
+    assert "usage" in summary
     plans = client.get("/api/billing/plans").json()
     assert [plan["id"] for plan in plans] == ["free", "creator", "studio"]
+    assert plans[1]["price_minor"] == 149000
+    assert plans[2]["price_minor"] == 399000
+
+
+def test_expired_trial_keeps_read_access_but_blocks_new_billable_jobs() -> None:
+    client, user = registered_client()
+    with server.SessionLocal() as db:
+        record = db.get(User, user["id"])
+        record.trial_expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+        db.commit()
+    summary = client.get("/api/billing/summary")
+    assert summary.status_code == 200
+    assert summary.json()["subscription_status"] == "expired"
+    rejected = client.post(
+        "/api/channels/import",
+        json={"channel_url": "https://youtube.com/@example/shorts", "limit": 1},
+    )
+    assert rejected.status_code == 402
+    assert "Пробный период" in rejected.json()["detail"]
 
 
 def test_job_reserves_then_charges_credit_on_success() -> None:
