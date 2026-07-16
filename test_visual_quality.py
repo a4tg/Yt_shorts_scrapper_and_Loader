@@ -145,6 +145,7 @@ class VisualQualityTests(unittest.TestCase):
             "motion-system.css", "landing-motion.css", "product-demo.css", "commercial.css",
             "scroll-story.css", "app-motion.css", "brand-graphics.css", "performance.css",
             "ambient-particles.css", "app-shell-premium.css", "workflow-motion.css",
+            "video-workflow-motion.css",
         ]
         for name in motion_files:
             with self.subTest(stylesheet=name):
@@ -188,6 +189,18 @@ class VisualQualityTests(unittest.TestCase):
         self.assertIn("contentCardMoved", motion)
         self.assertIn("transitionContentView", motion)
         self.assertIn("view-transition-name: content-workflow-view", styles)
+        self.assertIn("prefers-reduced-motion: reduce", styles)
+
+    def test_video_workflow_exposes_real_job_and_batch_states(self) -> None:
+        index = (WEB / "index.html").read_text(encoding="utf-8")
+        app = (WEB / "app.js").read_text(encoding="utf-8")
+        motion = (WEB / "app-motion.js").read_text(encoding="utf-8")
+        styles = (WEB / "video-workflow-motion.css").read_text(encoding="utf-8")
+        self.assertIn('/assets/video-workflow-motion.css', index)
+        self.assertIn('id="batch-progress"', index)
+        self.assertIn("videoJobUpdated", app)
+        self.assertIn("batchProgress", motion)
+        self.assertIn("aria-valuenow", motion)
         self.assertIn("prefers-reduced-motion: reduce", styles)
 
     def test_brand_assets_stay_within_delivery_budget(self) -> None:

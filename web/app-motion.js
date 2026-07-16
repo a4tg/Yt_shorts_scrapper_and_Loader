@@ -160,6 +160,77 @@
     return transition;
   }
 
+  function videoPhase(phase) {
+    const page = document.querySelector('.workspace-page[data-page="video"]');
+    if (!page) return;
+    const panels = [
+      page.querySelector('.import-panel'),
+      page.querySelector('.settings-panel'),
+      page.querySelector('.results-panel'),
+    ];
+    const phaseIndex = { idle: 0, importing: 0, editing: 1, results: 2, processing: 2, ready: 2, error: 2 }[phase] ?? 0;
+    page.dataset.videoPhase = phase;
+    panels.forEach((panel, index) => {
+      panel?.classList.toggle('video-step-current', index === phaseIndex);
+      panel?.classList.toggle('video-step-complete', index < phaseIndex || (phase === 'ready' && index === phaseIndex));
+    });
+    replayClass(panels[phaseIndex], 'video-phase-updated', 620);
+  }
+
+  function videoPreviewUpdated(stage) {
+    if (!stage) return;
+    stage.classList.add('has-source');
+    replayClass(stage, 'stage-media-enter', 680);
+    videoPhase('editing');
+  }
+
+  function ensureJobProgress(note) {
+    const host = note?.closest('.item') || note?.closest('.direct-result');
+    if (!host) return null;
+    let progress = host.querySelector('.item-job-progress');
+    if (progress) return progress;
+    progress = document.createElement('div');
+    progress.className = 'item-job-progress hidden';
+    progress.setAttribute('role', 'status');
+    const label = document.createElement('span');
+    const state = document.createElement('b');
+    const track = document.createElement('i'); track.setAttribute('aria-hidden', 'true');
+    track.append(document.createElement('span'));
+    progress.append(label, state, track); host.append(progress);
+    return progress;
+  }
+
+  function videoJobUpdated(note, job) {
+    const progress = ensureJobProgress(note);
+    if (!progress) return;
+    const status = job?.status || 'queued';
+    const values = { queued: 16, running: 64, done: 100, error: 100, deleted: 100 };
+    const labels = { queued: 'В очереди', running: 'Обработка', done: 'Готово', error: 'Ошибка', deleted: 'Удалено' };
+    progress.classList.remove('hidden', 'is-ready', 'is-error');
+    progress.classList.toggle('is-running', ['queued', 'running'].includes(status));
+    progress.classList.toggle('is-ready', status === 'done');
+    progress.classList.toggle('is-error', ['error', 'deleted'].includes(status));
+    progress.style.setProperty('--job-progress', `${values[status] ?? 16}%`);
+    progress.querySelector('span').textContent = job?.message || labels[status] || status;
+    progress.querySelector('b').textContent = labels[status] || status;
+  }
+
+  function batchProgress(current, total, label, tone = 'running') {
+    const progress = document.querySelector('#batch-progress');
+    if (!progress) return;
+    const safeTotal = Math.max(1, Number(total) || 1);
+    const value = Math.min(100, Math.max(0, Math.round(Number(current) / safeTotal * 100)));
+    progress.classList.remove('hidden', 'is-complete', 'is-error');
+    progress.classList.toggle('is-complete', tone === 'complete');
+    progress.classList.toggle('is-error', tone === 'error');
+    progress.style.setProperty('--batch-progress', `${value}%`);
+    progress.setAttribute('aria-valuenow', String(value));
+    const labelElement = progress.querySelector('#batch-progress-label');
+    const countElement = progress.querySelector('#batch-progress-count');
+    if (labelElement) labelElement.textContent = label;
+    if (countElement) countElement.textContent = `${Math.min(Number(current) || 0, safeTotal)} / ${safeTotal}`;
+  }
+
   function prepareSurface(element) {
     if (!(element instanceof Element)) return;
     const surfaces = element.matches(surfaceSelector)
@@ -286,6 +357,6 @@
     animateLayout, appEntered, authEntered, captureLayout, clearContentDragState,
     contentCardMoved, contentCardSaved, contextUpdated, dialogFromSource, networkEnd,
     networkStart, pageEntered, syncNavigationIndicator, toastIn, toastOut,
-    transitionContentView,
+    transitionContentView, batchProgress, videoJobUpdated, videoPhase, videoPreviewUpdated,
   });
 })();

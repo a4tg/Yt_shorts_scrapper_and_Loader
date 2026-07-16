@@ -68,6 +68,7 @@ function showWorkspacePage(page, syncUrl = false) {
     if (contextText) contextText.textContent = workspacePageContexts[page] || 'Рабочее пространство';
     window.AAPAppMotion?.pageEntered(target, page, title, { nativeTransition });
     window.AAPAppMotion?.contextUpdated(context);
+    if (page === 'video' && !target.dataset.videoPhase) window.AAPAppMotion?.videoPhase?.('idle');
     document.title = `${workspacePageTitles[page]} · All As Planned`;
   };
 
@@ -189,6 +190,7 @@ function showSourceVideo(url, thumbnail = '', title = '') {
   label.textContent = title || (videoId ? `YouTube · ${videoId}` : 'Предпросмотр видео');
   label.classList.remove('hidden');
   $('#stage-placeholder').classList.add('hidden');
+  window.AAPAppMotion?.videoPreviewUpdated?.($('#video-stage'));
 }
 
 async function showExternalSourcePreview(url) {
@@ -1404,6 +1406,7 @@ $('#channel-form').addEventListener('submit', async (event) => {
   if (state.batchRunning) { showToast('Дождитесь завершения пакетной обработки.'); return; }
   const button = event.submitter; const status = $('#import-status');
   button.disabled = true; status.className = 'status'; status.textContent = 'Задание добавлено в очередь…';
+  window.AAPAppMotion?.videoPhase?.('importing');
   $('#results-section').classList.add('hidden');
   try {
     const created = await api('/api/sources/import', {
@@ -1421,6 +1424,7 @@ $('#channel-form').addEventListener('submit', async (event) => {
     const items = await api(job.items_url); renderItems(items, created.id);
     $('#csv-link').href = job.csv_url; status.textContent = `Готово: найдено ${items.length} видео`;
   } catch (error) {
+    window.AAPAppMotion?.videoPhase?.('error');
     status.className = 'status error'; status.textContent = error.message;
   } finally { button.disabled = false; }
 });
@@ -1483,8 +1487,10 @@ function renderItems(items, importId) {
   }
   $('#batch-toolbar').classList.toggle('hidden', items.length === 0);
   $('#batch-status').className = 'status hidden';
+  $('#batch-progress').classList.add('hidden');
   updateBatchSelection();
   $('#results-section').classList.remove('hidden');
+  window.AAPAppMotion?.videoPhase?.('results');
 }
 
 function selectableRecords() {
@@ -1509,6 +1515,7 @@ function markVideoCompleted(record) {
   record.completed = true; record.checkbox.checked = false; record.checkbox.disabled = true;
   record.card.classList.remove('selected', 'processing'); record.card.classList.add('ready');
   updateBatchSelection();
+  if (!state.batchRunning) window.AAPAppMotion?.videoPhase?.('ready');
 }
 
 $('#select-all-videos').addEventListener('click', () => {
@@ -1526,6 +1533,8 @@ $('#prepare-selected').addEventListener('click', async () => {
   const status = $('#batch-status'); state.batchRunning = true; status.className = 'status';
   for (const record of selectableRecords()) { record.checkbox.disabled = true; record.videoButton.disabled = true; }
   updateBatchSelection();
+  window.AAPAppMotion?.videoPhase?.('processing');
+  window.AAPAppMotion?.batchProgress?.(0, records.length, 'Подготавливаю очередь');
   let completed = 0; let failed = 0;
   try {
     const batchSettings = currentDownloadSettings();
@@ -1533,6 +1542,7 @@ $('#prepare-selected').addEventListener('click', async () => {
     const logoTokens = await ensureOverlaysUploaded();
     for (let index = 0; index < records.length; index += 1) {
       const record = records[index]; record.card.classList.add('processing');
+      window.AAPAppMotion?.batchProgress?.(index, records.length, `Сейчас: ${record.item.title}`);
       showSourceVideo(record.item.url, record.item.thumbnail, record.item.title);
       status.textContent = `Обрабатывается ${index + 1} из ${records.length}: ${record.item.title}`;
       const success = await startDownloadUrl(
@@ -1541,13 +1551,22 @@ $('#prepare-selected').addEventListener('click', async () => {
       record.card.classList.remove('processing');
       if (success) { completed += 1; markVideoCompleted(record); }
       else { failed += 1; }
+      window.AAPAppMotion?.batchProgress?.(index + 1, records.length, `Завершено ${index + 1} из ${records.length}`);
     }
     status.classList.toggle('error', failed > 0);
     status.textContent = failed
       ? `Очередь завершена: готово ${completed}, с ошибкой ${failed}. Ошибочные ролики можно выбрать повторно.`
       : `Очередь завершена: готово ${completed} из ${records.length}. Скачайте файлы кнопками в карточках.`;
+    window.AAPAppMotion?.batchProgress?.(
+      records.length, records.length,
+      failed ? `Готово ${completed}, ошибок ${failed}` : 'Все выбранные видео готовы',
+      failed ? 'error' : 'complete'
+    );
+    window.AAPAppMotion?.videoPhase?.(failed && !completed ? 'error' : 'ready');
   } catch (error) {
     status.classList.add('error'); status.textContent = error.message;
+    window.AAPAppMotion?.batchProgress?.(completed, records.length, error.message, 'error');
+    window.AAPAppMotion?.videoPhase?.('error');
   } finally {
     state.batchRunning = false;
     for (const record of selectableRecords()) {
@@ -1660,6 +1679,8 @@ function showReadyDownload(job, oldButton, note) {
 
 async function startDownloadUrl(url, button, note, uploadedLogoTokens = null, downloadSettings = null) {
   button.disabled = true; note.textContent = 'Подготовка задания…';
+  window.AAPAppMotion?.videoPhase?.('processing');
+  window.AAPAppMotion?.videoJobUpdated?.(note, { status: 'queued', message: 'Подготовка задания' });
   try {
     const logoTokens = uploadedLogoTokens || await ensureOverlaysUploaded();
     const created = await api('/api/videos/download', {
@@ -1667,10 +1688,19 @@ async function startDownloadUrl(url, button, note, uploadedLogoTokens = null, do
       body: JSON.stringify(downloadPayload(url, logoTokens, downloadSettings))
     });
     loadBilling().catch(() => {});
-    const job = await pollJob(created.id, (current) => { note.textContent = current.message || current.status; });
+    const job = await pollJob(created.id, (current) => {
+      note.textContent = current.message || current.status;
+      window.AAPAppMotion?.videoJobUpdated?.(note, current);
+    });
     showReadyDownload(job, button, note);
+    if (!state.batchRunning) window.AAPAppMotion?.videoPhase?.('ready');
     return true;
-  } catch (error) { note.textContent = error.message; button.disabled = false; return false; }
+  } catch (error) {
+    note.textContent = error.message; button.disabled = false;
+    window.AAPAppMotion?.videoJobUpdated?.(note, { status: 'error', message: error.message });
+    if (!state.batchRunning) window.AAPAppMotion?.videoPhase?.('error');
+    return false;
+  }
 }
 
 $('#direct-video-form').addEventListener('submit', async (event) => {

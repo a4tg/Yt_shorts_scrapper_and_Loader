@@ -23,6 +23,7 @@
   <link rel="stylesheet" href="/assets/app-motion.css">
   <link rel="stylesheet" href="/assets/app-shell-premium.css">
   <link rel="stylesheet" href="/assets/workflow-motion.css">
+  <link rel="stylesheet" href="/assets/video-workflow-motion.css">
   <link rel="stylesheet" href="/assets/brand-graphics.css">
   <link rel="stylesheet" href="/assets/performance.css">
 </head>
@@ -367,6 +368,10 @@
           <button id="clear-video-selection" class="ghost" type="button">Снять выбор</button>
         </div>
         <button id="prepare-selected" class="primary" type="button" disabled>Подготовить выбранные</button>
+      </div>
+      <div id="batch-progress" class="batch-progress hidden" role="progressbar" aria-label="Прогресс пакетной обработки" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div><span id="batch-progress-label">Очередь готова</span><b id="batch-progress-count">0 / 0</b></div>
+        <i><span id="batch-progress-bar"></span></i>
       </div>
       <div id="batch-status" class="status hidden" aria-live="polite"></div>
       <div id="items" class="items"></div>
