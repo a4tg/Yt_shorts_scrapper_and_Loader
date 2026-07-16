@@ -460,7 +460,9 @@ async def browser_security_headers(request: Request, call_next):
     response = await call_next(request)
     path = request.url.path
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-Frame-Options"] = (
+        "SAMEORIGIN" if path.startswith("/api/content-attachments/") and path.endswith("/preview") else "DENY"
+    )
     response.headers["Referrer-Policy"] = "same-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     if path.startswith("/assets/"):
@@ -478,7 +480,7 @@ async def browser_security_headers(request: Request, call_next):
             "form-action 'self'; object-src 'none'; script-src 'self'; "
             "style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data: blob: https://i.ytimg.com; media-src 'self' blob:; "
-            "frame-src https://www.youtube-nocookie.com; connect-src 'self'"
+            "frame-src 'self' https://www.youtube-nocookie.com; connect-src 'self'"
         )
     if request.url.scheme == "https":
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"

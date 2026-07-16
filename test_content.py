@@ -187,6 +187,58 @@ def test_content_attachment_rejects_unsupported_and_disguised_files(tmp_path, mo
     assert not list(tmp_path.rglob("*.part"))
 
 
+def test_attachment_preview_is_inline_tenant_isolated_and_exposes_text_data(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(content_routes, "CONTENT_DIR", tmp_path)
+    owner, _ = register_user()
+    outsider, _ = register_user()
+    _, project = current_project(owner)
+    uploaded = owner.post(
+        f"/api/projects/{project['id']}/files", headers=csrf(owner),
+        files={"file": ("notes.md", "# План\n\nБезопасный просмотр".encode(), "text/markdown")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    asset = uploaded.json()
+    assert asset["preview"] == {
+        "kind": "text", "can_preview": True, "inline_url": False, "data_url": True,
+    }
+    data = owner.get(asset["preview_data_url"])
+    assert data.status_code == 200
+    assert data.json()["text"].startswith("# План")
+    assert owner.get(asset["preview_url"]).status_code == 415
+    assert outsider.get(asset["preview_data_url"]).status_code == 404
+    assert owner.get(f"/api/content-attachments/{asset['id']}").json()["preview"]["kind"] == "text"
+    assert outsider.get(f"/api/content-attachments/{asset['id']}").status_code == 404
+
+    image = owner.post(
+        f"/api/projects/{project['id']}/files", headers=csrf(owner),
+        files={"file": ("pixel.png", b"\x89PNG\r\n\x1a\npreview", "image/png")},
+    ).json()
+    preview = owner.get(image["preview_url"])
+    assert preview.status_code == 200
+    assert preview.headers["content-disposition"] == "inline"
+    assert preview.headers["x-frame-options"] == "SAMEORIGIN"
+    ranged = owner.get(image["preview_url"], headers={"Range": "bytes=0-7"})
+    assert ranged.status_code in {200, 206}
+    assert ranged.content.startswith(b"\x89PNG")
+    assert outsider.get(image["preview_url"]).status_code == 404
+
+
+def test_csv_preview_returns_bounded_table_data(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(content_routes, "CONTENT_DIR", tmp_path)
+    client, _ = register_user()
+    _, project = current_project(client)
+    uploaded = client.post(
+        f"/api/projects/{project['id']}/files", headers=csrf(client),
+        files={"file": ("metrics.csv", "Канал,Просмотры\nVK,42\nYouTube,100".encode(), "text/csv")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    preview = client.get(uploaded.json()["preview_data_url"])
+    assert preview.status_code == 200
+    assert preview.json()["kind"] == "table"
+    assert preview.json()["columns"] == ["Канал", "Просмотры"]
+    assert preview.json()["rows"] == [["VK", "42"], ["YouTube", "100"]]
+
+
 def test_project_folders_direct_upload_rename_and_move(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(content_routes, "CONTENT_DIR", tmp_path)
     client, _ = register_user()

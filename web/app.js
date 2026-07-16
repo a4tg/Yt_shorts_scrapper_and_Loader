@@ -881,7 +881,7 @@ function renderLibrary() {
     const card = document.createElement('article'); card.className = 'library-card';
     let icon;
     if ((item.mime_type || '').startsWith('image/')) {
-      icon = document.createElement('img'); icon.className = 'library-preview'; icon.src = item.download_url; icon.alt = '';
+      icon = document.createElement('img'); icon.className = 'library-preview'; icon.src = item.preview_url || item.download_url; icon.alt = '';
     } else {
       icon = document.createElement('span'); icon.className = 'library-file-icon';
       icon.textContent = (item.name.split('.').pop() || 'FILE').slice(0, 4).toUpperCase();
@@ -891,11 +891,17 @@ function renderLibrary() {
     context.textContent = item.source_type === 'ai' ? '✦ Создано AI' : (item.content_title || 'Файл проекта');
     const footer = document.createElement('footer');
     const size = document.createElement('span'); size.textContent = humanFileSize(item.size_bytes);
+    const preview = document.createElement('button'); preview.className = 'text-button'; preview.type = 'button'; preview.textContent = 'Открыть';
+    preview.addEventListener('click', () => {
+      if (window.AAPWorkspaceDepth?.flags?.enabled('asset_viewer')) {
+        window.AAPWorkspaceDepth.bus.emit('asset:open', { asset: item, assets: state.libraryItems, projectId: state.currentProjectId });
+      } else window.open(item.download_url, '_blank', 'noopener');
+    });
     const link = document.createElement('a'); link.className = 'ghost'; link.href = item.download_url;
     link.textContent = 'Скачать';
     const settings = document.createElement('button'); settings.className = 'text-button'; settings.type = 'button'; settings.textContent = '•••';
     settings.setAttribute('aria-label', `Настроить файл ${item.name}`); settings.addEventListener('click', () => openLibraryFileDialog(item));
-    footer.append(size, link); if (editable) footer.append(settings); card.append(icon, title, context, footer);
+    footer.append(size, preview, link); if (editable) footer.append(settings); card.append(icon, title, context, footer);
     container.append(card);
   }
 }
@@ -1105,6 +1111,7 @@ function renderChatDetails() {
   for (const message of state.messages) if (message.attachment) attachments.set(message.attachment.id, message.attachment);
   for (const attachment of attachments.values()) {
     const link = document.createElement('a'); link.className = 'chat-file-row'; link.href = attachment.download_url;
+    link.dataset.assetId = attachment.id; link.dataset.projectId = state.currentProjectId || '';
     const icon = document.createElement('span'); icon.textContent = '◇';
     const copy = document.createElement('div'); const name = document.createElement('strong'); name.textContent = attachment.name;
     const size = document.createElement('small'); size.textContent = humanFileSize(attachment.size_bytes); copy.append(name, size); link.append(icon, copy); files.append(link);
@@ -1126,6 +1133,7 @@ function renderMessageAttachment(message) {
     const note = document.createElement('small'); note.textContent = 'Файл удалён из проекта'; copy.append(title, note); missing.append(icon, copy); return missing;
   }
   const attachment = message.attachment; const link = document.createElement('a'); link.className = 'message-attachment'; link.href = attachment.download_url;
+  link.dataset.assetId = attachment.id; link.dataset.projectId = state.currentProjectId || '';
   const icon = document.createElement('span'); icon.textContent = (attachment.name.split('.').pop() || 'FILE').slice(0, 4).toUpperCase();
   const copy = document.createElement('div'); const title = document.createElement('strong'); title.textContent = attachment.name;
   const size = document.createElement('small'); size.textContent = humanFileSize(attachment.size_bytes); copy.append(title, size);
@@ -1347,7 +1355,9 @@ function renderAttachments(attachments = []) {
     const name = document.createElement('strong'); name.textContent = attachment.name;
     const size = document.createElement('small'); size.textContent = humanFileSize(attachment.size_bytes);
     identity.append(name, size);
-    const link = document.createElement('a'); link.className = 'ghost'; link.href = attachment.download_url; link.textContent = 'Скачать';
+    const open = document.createElement('a'); open.className = 'ghost'; open.href = attachment.preview_url || attachment.download_url; open.textContent = 'Открыть';
+    open.dataset.assetId = attachment.id; open.dataset.projectId = state.currentProjectId || '';
+    const link = document.createElement('a'); link.className = 'ghost'; link.href = attachment.download_url; link.textContent = 'Скачать'; link.download = '';
     const remove = document.createElement('button'); remove.className = 'danger'; remove.type = 'button';
     remove.textContent = 'Удалить'; remove.disabled = !canEditContent();
     remove.addEventListener('click', async () => {
@@ -1356,7 +1366,7 @@ function renderAttachments(attachments = []) {
         await refreshOpenContent(); showToast('Файл удалён.');
       } catch (error) { showWorkspaceError(error); }
     });
-    row.append(identity, link, remove); container.append(row);
+    row.append(identity, open, link, remove); container.append(row);
   }
 }
 

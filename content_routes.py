@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from billing_service import require_entitlement
 from file_validation import FileValidationError, validate_file
+from asset_preview import PreviewError, build_preview_data, preview_capabilities
 from saas_models import (
     ApprovalStage,
     ApprovalWorkflow,
@@ -217,6 +218,9 @@ def _attachment_payload(attachment: ContentAttachment) -> dict[str, object]:
         "size_bytes": attachment.size_bytes,
         "created_at": attachment.created_at.isoformat(),
         "download_url": f"/api/content-attachments/{attachment.id}/download",
+        "preview_url": f"/api/content-attachments/{attachment.id}/preview",
+        "preview_data_url": f"/api/content-attachments/{attachment.id}/preview-data",
+        "preview": preview_capabilities(attachment.original_name),
     }
 
 
@@ -550,6 +554,14 @@ def _attachment_access(db: Session, attachment_id: str, user_id: str):
     return attachment, access[0], access[1]
 
 
+@router.get("/content-attachments/{attachment_id}")
+def attachment_detail(
+    attachment_id: str, request: Request, db: Session = Depends(get_db)
+) -> dict[str, object]:
+    attachment, _, _ = _attachment_access(db, attachment_id, request.state.user.id)
+    return _attachment_payload(attachment)
+
+
 @router.get("/content-attachments/{attachment_id}/download")
 def download_attachment(
     attachment_id: str, request: Request, db: Session = Depends(get_db)
@@ -559,6 +571,41 @@ def download_attachment(
     if not path.is_file() or not path.is_relative_to(CONTENT_DIR.resolve()):
         raise HTTPException(404, "Файл отсутствует в хранилище")
     return FileResponse(path, filename=attachment.original_name, media_type=attachment.mime_type)
+
+
+def _attachment_path(attachment: ContentAttachment) -> Path:
+    path = Path(attachment.storage_path).resolve()
+    if not path.is_file() or not path.is_relative_to(CONTENT_DIR.resolve()):
+        raise HTTPException(404, "Файл отсутствует в хранилище")
+    return path
+
+
+@router.get("/content-attachments/{attachment_id}/preview")
+def preview_attachment(
+    attachment_id: str, request: Request, db: Session = Depends(get_db)
+) -> FileResponse:
+    attachment, _, _ = _attachment_access(db, attachment_id, request.state.user.id)
+    capability = preview_capabilities(attachment.original_name)
+    if not capability["inline_url"]:
+        raise HTTPException(415, "Для этого формата используется структурированный просмотр.")
+    path = _attachment_path(attachment)
+    return FileResponse(
+        path, media_type=attachment.mime_type,
+        headers={"Content-Disposition": "inline", "Accept-Ranges": "bytes"},
+    )
+
+
+@router.get("/content-attachments/{attachment_id}/preview-data")
+def preview_attachment_data(
+    attachment_id: str, request: Request, db: Session = Depends(get_db)
+) -> dict[str, object]:
+    attachment, _, _ = _attachment_access(db, attachment_id, request.state.user.id)
+    path = _attachment_path(attachment)
+    try:
+        payload = build_preview_data(path, attachment.original_name)
+    except PreviewError as exc:
+        raise HTTPException(415, str(exc)) from exc
+    return {"id": attachment.id, "name": attachment.original_name, **payload}
 
 
 @router.delete("/content-attachments/{attachment_id}", status_code=204)

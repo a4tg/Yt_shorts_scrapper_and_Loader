@@ -165,6 +165,7 @@ export function initChatAnywhere({ bus, router, bridge }) {
     if (!message.attachment && !message.attachment_name) return null;
     if (!message.attachment) return element('div', 'chat-anywhere-file missing', `${message.attachment_name} · файл удалён`);
     const link = element('a', 'chat-anywhere-file'); link.href = message.attachment.download_url;
+    link.dataset.assetId = message.attachment.id; link.dataset.projectId = state.projectId || '';
     link.append(element('span', '', (message.attachment.name.split('.').pop() || 'file').slice(0, 4).toUpperCase()), element('strong', '', message.attachment.name));
     return link;
   }

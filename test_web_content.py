@@ -44,6 +44,20 @@ class WebContentWorkspaceTests(unittest.TestCase):
         ):
             self.assertIn(selector, css)
 
+    def test_asset_viewer_supports_project_files_chat_attachments_and_document_kinds(self) -> None:
+        html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
+        entrypoint = (ROOT / "web" / "workspace-depth.js").read_text(encoding="utf-8")
+        viewer = (ROOT / "web" / "modules" / "asset-viewer.js").read_text(encoding="utf-8")
+        styles = (ROOT / "web" / "asset-viewer.css").read_text(encoding="utf-8")
+        app = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+        self.assertIn('/assets/asset-viewer.css', html)
+        self.assertIn("registerModule('asset-viewer'", entrypoint)
+        for marker in ("asset:open", "preview_data_url", "asset-viewer-pdf", "renderTable", "requestFullscreen"):
+            self.assertIn(marker, viewer)
+        self.assertIn("data-asset-id", viewer)
+        self.assertIn("dataset.assetId", app)
+        self.assertIn("@media(max-width:900px)", styles)
+
 
 if __name__ == "__main__":
     unittest.main()

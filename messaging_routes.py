@@ -24,6 +24,7 @@ from saas_models import (
     User,
     WorkspaceMember,
 )
+from asset_preview import preview_capabilities
 from workspace_service import project_membership
 
 
@@ -128,6 +129,9 @@ def _attachment_payload(attachment: ContentAttachment | None) -> dict[str, objec
         "mime_type": attachment.mime_type,
         "size_bytes": attachment.size_bytes,
         "download_url": f"/api/content-attachments/{attachment.id}/download",
+        "preview_url": f"/api/content-attachments/{attachment.id}/preview",
+        "preview_data_url": f"/api/content-attachments/{attachment.id}/preview-data",
+        "preview": preview_capabilities(attachment.original_name),
     }
 
 
