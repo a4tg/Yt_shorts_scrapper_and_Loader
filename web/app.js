@@ -123,7 +123,12 @@ async function api(url, options = {}) {
       try { message = (await response.json()).detail || message; } catch (_) {}
       const error = new Error(message); error.status = response.status; throw error;
     }
-    return response.headers.get('content-type')?.includes('json') ? await response.json() : response;
+    if (response.status === 204) return null;
+    if (response.headers.get('content-type')?.includes('json')) {
+      const body = await response.text();
+      return body ? JSON.parse(body) : null;
+    }
+    return response;
   } finally {
     window.AAPAppMotion?.networkEnd(motionRequest);
   }

@@ -31,6 +31,11 @@ class WebMessagesTests(unittest.TestCase):
         self.assertIn("updateMessagesNavBadge()", script)
         self.assertIn("startMessagePolling()", script)
 
+    def test_empty_success_responses_are_not_parsed_as_json(self) -> None:
+        script = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+        self.assertIn("if (response.status === 204) return null;", script)
+        self.assertIn("return body ? JSON.parse(body) : null;", script)
+
     def test_messages_styles_include_responsive_three_panel_layout(self) -> None:
         styles = (ROOT / "web" / "messages.css").read_text(encoding="utf-8")
         self.assertIn("grid-template-columns:290px minmax(420px,1fr) 250px", styles)
