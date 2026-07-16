@@ -31,6 +31,21 @@ class WorkspaceDepthFoundationTests(unittest.TestCase):
         self.assertIn("buildWorkspaceHash", router)
         self.assertIn("route:change", router)
 
+    def test_project_graph_and_flowchart_editor_are_wired_as_workspace_module(self) -> None:
+        html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
+        entrypoint = (ROOT / "web" / "workspace-depth.js").read_text(encoding="utf-8")
+        script = (ROOT / "web" / "modules" / "project-graph.js").read_text(encoding="utf-8")
+        styles = (ROOT / "web" / "project-graph.css").read_text(encoding="utf-8")
+        editor_styles = (ROOT / "web" / "project-graph-editor.css").read_text(encoding="utf-8")
+        for marker in ('data-page="graph"', 'id="project-graph-viewport"', 'id="project-diagram-viewport"', 'data-node-kind="decision"'):
+            self.assertIn(marker, html)
+        self.assertIn("registerModule('project-graph'", entrypoint)
+        for marker in ("loadGraph", "createLink", "saveDiagram", "undo", "redo", "EventSource", "project-diagram-edges"):
+            self.assertIn(marker, script)
+        for selector in (".project-graph-node", ".project-diagram-node", ".project-diagram-edge", ".project-graph-minimap"):
+            self.assertIn(selector, styles)
+        self.assertIn(".project-diagram-edge-list", editor_styles)
+
 
 if __name__ == "__main__":
     unittest.main()

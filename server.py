@@ -30,6 +30,7 @@ from admin_routes import router as admin_router
 from billing_routes import router as billing_router
 from content_routes import CONTENT_DIR, router as content_router
 from asset_review_routes import router as asset_review_router
+from graph_routes import router as graph_router
 from messaging_routes import router as messaging_router
 from payment_routes import router as payment_router
 from workspace_routes import router as workspace_router
@@ -452,6 +453,7 @@ app.include_router(admin_router)
 app.include_router(billing_router)
 app.include_router(content_router)
 app.include_router(asset_review_router)
+app.include_router(graph_router)
 app.include_router(messaging_router)
 app.include_router(payment_router)
 app.include_router(workspace_router)

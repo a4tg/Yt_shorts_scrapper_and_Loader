@@ -17,7 +17,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const workspacePageTitles = {
   dashboard: 'Обзор', content: 'Контент-план', documents: 'Документы',
   library: 'Медиатека', video: 'Видео', approvals: 'Согласования', messages: 'Обсуждения',
-  ai: 'AI-помощник', billing: 'Тариф и кредиты', admin: 'Управление SaaS'
+  graph: 'Карта проекта', ai: 'AI-помощник', billing: 'Тариф и кредиты', admin: 'Управление SaaS'
 };
 
 const workspacePageContexts = {
@@ -28,13 +28,14 @@ const workspacePageContexts = {
   video: 'Подготовка и обработка видео',
   approvals: 'Контроль качества и согласование',
   messages: 'Коммуникация в контексте проекта',
+  graph: 'Связи материалов, команды и процессов',
   ai: 'AI-инструменты для контента',
   billing: 'Ресурсы рабочего пространства',
   admin: 'Контроль SaaS-платформы',
 };
 
 const workspacePageOrder = [
-  'dashboard', 'content', 'documents', 'library', 'video', 'approvals', 'messages', 'ai', 'billing', 'admin',
+  'dashboard', 'content', 'documents', 'library', 'video', 'approvals', 'messages', 'graph', 'ai', 'billing', 'admin',
 ];
 
 function workspacePageFromHash() {

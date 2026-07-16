@@ -21,6 +21,8 @@
   <link rel="stylesheet" href="/assets/chat-anywhere.css">
   <link rel="stylesheet" href="/assets/asset-viewer.css">
   <link rel="stylesheet" href="/assets/asset-reviews.css">
+  <link rel="stylesheet" href="/assets/project-graph.css">
+  <link rel="stylesheet" href="/assets/project-graph-editor.css">
   <link rel="stylesheet" href="/assets/admin.css">
   <link rel="stylesheet" href="/assets/brand.css">
   <link rel="stylesheet" href="/assets/motion-system.css">
@@ -97,6 +99,7 @@
         <button class="workspace-nav-item" type="button" data-navigate="video"><span>▶</span>Видео</button>
         <button class="workspace-nav-item" type="button" data-navigate="approvals"><span>✓</span>Согласования</button>
         <button class="workspace-nav-item" type="button" data-navigate="messages"><span>◌</span>Обсуждения<b id="messages-nav-badge" class="nav-unread-badge hidden">0</b></button>
+        <button id="graph-nav-button" class="workspace-nav-item hidden" type="button" data-navigate="graph"><span>⌘</span>Карта проекта</button>
         <button class="workspace-nav-item" type="button" data-navigate="ai"><span>✦</span>AI-помощник</button>
       </nav>
       <div class="workspace-nav workspace-nav-bottom">
@@ -247,6 +250,38 @@
         <div id="workflow-status" class="status hidden" aria-live="polite"></div>
       </section>
     </section>
+    <section class="workspace-page hidden project-graph-page" data-page="graph">
+      <header class="project-graph-page-head">
+        <div><p class="eyebrow">Связи и процессы</p><h2>Живая карта проекта</h2><p>Смотрите, как материалы, файлы, обсуждения и замечания влияют друг на друга.</p></div>
+        <nav aria-label="Режим карты"><button class="active" type="button" data-graph-view="map">Карта</button><button type="button" data-graph-view="diagrams">Блок-схемы</button></nav>
+      </header>
+      <div id="project-graph-workspace" class="project-graph-workspace">
+        <section class="project-graph-map-view">
+          <header class="project-graph-toolbar">
+            <label><span class="sr-only">Поиск на карте</span><input id="project-graph-search" type="search" placeholder="Найти сущность или связь"></label>
+            <div id="project-graph-filters" class="project-graph-filters"></div>
+            <button data-graph-action="link" type="button">Связать</button><button data-graph-action="layout" type="button">Разложить</button><button data-graph-action="fit" type="button">Вписать</button><button data-graph-action="refresh" type="button">↻</button>
+          </header>
+          <div class="project-graph-body">
+            <div id="project-graph-viewport" class="project-graph-viewport" tabindex="0"><div class="project-graph-world"><svg class="project-graph-edges" aria-hidden="true"></svg><div class="project-graph-nodes"></div></div><div class="project-graph-minimap"></div></div>
+            <aside id="project-graph-inspector" class="project-graph-inspector"><div class="project-graph-inspector-empty"><span>⌘</span><strong>Выберите узел</strong><p>Здесь появятся свойства, связи и быстрые действия.</p></div></aside>
+          </div>
+        </section>
+        <section class="project-diagram-view hidden">
+          <aside class="project-diagram-library"><header><strong>Блок-схемы</strong><button data-diagram-action="create" type="button">＋</button></header><div class="project-diagram-list"></div><button data-diagram-action="approval-template" type="button">Создать из согласования</button></aside>
+          <main class="project-diagram-editor">
+            <header class="project-diagram-toolbar"><button data-diagram-action="library" type="button" aria-label="Список схем">☰</button><input id="project-diagram-title" maxlength="160" placeholder="Название схемы" aria-label="Название блок-схемы"><span></span><button data-diagram-action="undo" type="button">↶</button><button data-diagram-action="redo" type="button">↷</button><button data-diagram-action="fit" type="button">Вписать</button><button data-diagram-action="export" type="button">Экспорт</button><button data-diagram-action="delete" type="button">Удалить</button><button class="primary" data-diagram-action="save" type="button">Сохранить</button></header>
+            <div class="project-diagram-body">
+              <aside class="project-diagram-palette"><strong>Элементы</strong><button data-node-kind="start" type="button"><i></i>Старт</button><button data-node-kind="task" type="button"><i></i>Задача</button><button data-node-kind="decision" type="button"><i></i>Условие</button><button data-node-kind="document" type="button"><i></i>Документ</button><button data-node-kind="note" type="button"><i></i>Заметка</button><button data-node-kind="end" type="button"><i></i>Финиш</button></aside>
+              <div id="project-diagram-viewport" class="project-diagram-viewport" tabindex="0"><div class="project-diagram-world"><svg class="project-diagram-edges" aria-hidden="true"></svg><div class="project-diagram-nodes"></div></div></div>
+              <aside class="project-diagram-inspector"><div class="project-diagram-inspector-empty">Выберите узел для редактирования</div><form class="project-diagram-node-form hidden"><label>Название<input name="title" maxlength="240"></label><label>Описание<textarea name="description" maxlength="2000" rows="4"></textarea></label><label>Тип<select name="kind"><option value="start">Старт</option><option value="task">Задача</option><option value="decision">Условие</option><option value="document">Документ</option><option value="asset">Ассет</option><option value="person">Участник</option><option value="note">Заметка</option><option value="end">Финиш</option></select></label><label>Цвет<input name="color" type="color" value="#6f61d9"></label><footer><button data-diagram-action="connect" type="button">Соединить</button><button class="danger" data-diagram-action="delete-node" type="button">Удалить</button></footer></form></aside>
+            </div>
+            <footer class="project-diagram-status"><span>Выберите схему или создайте новую</span><small></small></footer>
+          </main>
+        </section>
+      </div>
+    </section>
+
     <section class="workspace-page hidden" data-page="ai">
       <div class="ai-heading"><div><p class="eyebrow">AI-студия проекта</p><h2>От идеи до готового материала</h2><p>Генерация использует контекст выбранного проекта. Ключ провайдера хранится только на сервере.</p></div><span id="ai-provider-status" class="ai-provider-badge">Проверяю настройки…</span></div>
       <div class="ai-grid">

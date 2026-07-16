@@ -17,6 +17,9 @@ from saas_models import (
     AssetApproval,
     AssetReview,
     CreditLedger,
+    DiagramEdge,
+    DiagramNode,
+    EntityLink,
     ContentAttachment,
     ContentItem,
     ContentRevision,
@@ -25,6 +28,7 @@ from saas_models import (
     Overlay,
     Payment,
     Project,
+    ProjectDiagram,
     Subscription,
     User,
     UserSession,
@@ -77,6 +81,10 @@ def clear_saas_state_between_tests(isolated_test_database):
         db.execute(delete(AccountToken))
         db.execute(delete(AssetApproval))
         db.execute(delete(AssetReview))
+        db.execute(delete(DiagramEdge))
+        db.execute(delete(DiagramNode))
+        db.execute(delete(ProjectDiagram))
+        db.execute(delete(EntityLink))
         db.execute(delete(ContentAttachment))
         db.execute(delete(ContentRevision))
         db.execute(delete(ContentItem))

@@ -324,6 +324,107 @@ class AssetApproval(Base):
     )
 
 
+class EntityLink(TimestampMixin, Base):
+    __tablename__ = "entity_links"
+    __table_args__ = (
+        CheckConstraint(
+            "relation_type IN ('relates_to', 'depends_on', 'blocks', 'produces', 'references', 'assigned_to', 'custom')",
+            name="ck_entity_links_relation_type",
+        ),
+        UniqueConstraint(
+            "project_id", "source_type", "source_id", "target_type", "target_id", "relation_type",
+            name="uq_entity_links_relation",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    source_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    target_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    target_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    relation_type: Mapped[str] = mapped_column(String(32), nullable=False, default="relates_to", index=True)
+    label: Mapped[str | None] = mapped_column(String(160))
+    weight: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    extra: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    created_by_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+
+class ProjectDiagram(TimestampMixin, Base):
+    __tablename__ = "project_diagrams"
+    __table_args__ = (
+        CheckConstraint("diagram_type IN ('process', 'flowchart', 'mind_map')", name="ck_project_diagrams_type"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(1000))
+    diagram_type: Mapped[str] = mapped_column(String(24), nullable=False, default="flowchart", index=True)
+    viewport: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    created_by_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+
+
+class DiagramNode(TimestampMixin, Base):
+    __tablename__ = "diagram_nodes"
+    __table_args__ = (
+        UniqueConstraint("diagram_id", "node_key", name="uq_diagram_nodes_key"),
+        CheckConstraint(
+            "kind IN ('start', 'end', 'task', 'decision', 'document', 'asset', 'person', 'note')",
+            name="ck_diagram_nodes_kind",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    diagram_id: Mapped[str] = mapped_column(
+        ForeignKey("project_diagrams.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    node_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    kind: Mapped[str] = mapped_column(String(24), nullable=False, default="task", index=True)
+    title: Mapped[str] = mapped_column(String(240), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(2000))
+    x: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    y: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    width: Mapped[float] = mapped_column(Float, nullable=False, default=180)
+    height: Mapped[float] = mapped_column(Float, nullable=False, default=80)
+    color: Mapped[str | None] = mapped_column(String(16))
+    entity_type: Mapped[str | None] = mapped_column(String(32), index=True)
+    entity_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    extra: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class DiagramEdge(Base):
+    __tablename__ = "diagram_edges"
+    __table_args__ = (
+        CheckConstraint(
+            "edge_type IN ('default', 'success', 'failure', 'conditional')",
+            name="ck_diagram_edges_type",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    diagram_id: Mapped[str] = mapped_column(
+        ForeignKey("project_diagrams.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    source_node_id: Mapped[str] = mapped_column(
+        ForeignKey("diagram_nodes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    target_node_id: Mapped[str] = mapped_column(
+        ForeignKey("diagram_nodes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    label: Mapped[str | None] = mapped_column(String(160))
+    edge_type: Mapped[str] = mapped_column(String(24), nullable=False, default="default", index=True)
+    extra: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
 class Conversation(TimestampMixin, Base):
     __tablename__ = "conversations"
     __table_args__ = (
