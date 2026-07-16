@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.background import BackgroundTask
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from auth_routes import router as auth_router
@@ -67,6 +68,37 @@ from server_core import (
     probe_source_video,
     run_source_import,
 )
+
+
+class SelectiveGZipMiddleware:
+    """Compress text payloads while leaving already-compressed media untouched."""
+
+    _COMPRESSED_SUFFIXES = {
+        ".gif",
+        ".ico",
+        ".jpeg",
+        ".jpg",
+        ".mov",
+        ".mp4",
+        ".png",
+        ".webm",
+        ".webp",
+    }
+
+    def __init__(self, app, minimum_size: int = 1024, compresslevel: int = 5) -> None:
+        self.app = app
+        self.gzip_app = GZipMiddleware(
+            app,
+            minimum_size=minimum_size,
+            compresslevel=compresslevel,
+        )
+
+    async def __call__(self, scope, receive, send) -> None:
+        path = scope.get("path", "") if scope.get("type") == "http" else ""
+        if Path(path).suffix.lower() in self._COMPRESSED_SUFFIXES:
+            await self.app(scope, receive, send)
+            return
+        await self.gzip_app(scope, receive, send)
 
 
 DATA_DIR = Path(os.getenv("YT_LOADER_DATA_DIR", BASE_DIR / "server_data")).resolve()
@@ -308,6 +340,7 @@ app = FastAPI(
     openapi_url="/api/openapi.json" if api_docs_enabled else None,
     lifespan=application_lifespan,
 )
+app.add_middleware(SelectiveGZipMiddleware, minimum_size=1024, compresslevel=5)
 
 
 @app.exception_handler(SubscriptionRequiredError)
@@ -423,11 +456,21 @@ app.include_router(workspace_router)
 @app.middleware("http")
 async def browser_security_headers(request: Request, call_next):
     response = await call_next(request)
+    path = request.url.path
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "same-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-    if request.url.path != "/api/docs":
+    if path.startswith("/assets/"):
+        if Path(path).suffix.lower() in {".png", ".jpg", ".jpeg", ".webp", ".svg", ".ico"}:
+            response.headers["Cache-Control"] = "public, max-age=86400, stale-while-revalidate=604800"
+        else:
+            response.headers["Cache-Control"] = "public, max-age=0, must-revalidate"
+    elif path in {"/", "/app", "/app/", "/privacy", "/terms"}:
+        response.headers["Cache-Control"] = "no-cache"
+    elif path.startswith("/api/"):
+        response.headers.setdefault("Cache-Control", "no-store")
+    if path != "/api/docs":
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; "
             "form-action 'self'; object-src 'none'; script-src 'self'; "

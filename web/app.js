@@ -120,7 +120,7 @@ function sourceThumbnailUrl(value) {
 function createBrandedEmptyState(title, detail) {
   const empty = document.createElement('div'); empty.className = 'empty-brand-state';
   const image = document.createElement('img'); image.src = '/assets/brand-empty-state.svg';
-  image.alt = ''; image.width = 360; image.height = 210; image.loading = 'lazy';
+  image.alt = ''; image.width = 360; image.height = 210; image.loading = 'lazy'; image.decoding = 'async';
   const heading = document.createElement('h3'); heading.textContent = title;
   const description = document.createElement('p'); description.textContent = detail;
   empty.append(image, heading, description); return empty;
@@ -193,6 +193,7 @@ function showAuthenticated(user) {
   $('#account-credits').textContent = `${user.credit_balance} кредитов`;
   $('#auth-screen').classList.add('hidden');
   $('#app-shell').classList.remove('hidden');
+  $('#skip-link').href = '#app-content'; $('#skip-link').textContent = 'Перейти к приложению';
   window.AAPAppMotion?.appEntered();
   $('#admin-nav-button').classList.toggle('hidden', !user.is_admin);
   showWorkspacePage(workspacePageFromHash() || state.currentPage);
@@ -1011,6 +1012,7 @@ function showAuthentication() {
   $('#app-shell').classList.add('hidden');
   $('#verification-banner').classList.add('hidden');
   $('#auth-screen').classList.remove('hidden');
+  $('#skip-link').href = '#auth-screen'; $('#skip-link').textContent = 'Перейти к форме входа';
   window.AAPAppMotion?.authEntered();
 }
 
@@ -1149,7 +1151,7 @@ async function showGeneratedOverlayPreview(file, expectedIndex) {
   try {
     const result = await uploadOverlayFile(file);
     if (state.overlayFiles[expectedIndex] !== file) return;
-    const image = document.createElement('img'); image.alt = ''; image.src = result.preview_url;
+    const image = document.createElement('img'); image.alt = ''; image.decoding = 'async'; image.src = result.preview_url;
     image.addEventListener('load', updateOverlayPreview);
     image.addEventListener('error', () => { pending.textContent = 'Предпросмотр недоступен'; container.replaceChildren(pending); });
     container.replaceChildren(image);
@@ -1172,7 +1174,7 @@ function showOverlayFile(file) {
     media.addEventListener('loadeddata', () => { media.play().catch(() => {}); updateOverlayPreview(); });
     media.addEventListener('error', () => showGeneratedOverlayPreview(file, expectedIndex), { once: true });
   } else {
-    media.alt = ''; media.addEventListener('load', updateOverlayPreview);
+    media.alt = ''; media.decoding = 'async'; media.addEventListener('load', updateOverlayPreview);
     media.addEventListener('error', () => showGeneratedOverlayPreview(file, expectedIndex), { once: true });
   }
   $('#overlay-media').replaceChildren(media);
@@ -1331,7 +1333,7 @@ function renderItems(items, importId) {
     const selector = document.createElement('label'); selector.className = 'video-selector';
     const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.className = 'video-select';
     checkbox.setAttribute('aria-label', `Выбрать ролик ${item.title}`); selector.append(checkbox);
-    const image = document.createElement('img'); image.className = 'thumb'; image.loading = 'lazy'; image.alt = ''; image.src = sourceThumbnailUrl(item.thumbnail || '');
+    const image = document.createElement('img'); image.className = 'thumb'; image.loading = 'lazy'; image.decoding = 'async'; image.alt = ''; image.src = sourceThumbnailUrl(item.thumbnail || '');
     const info = document.createElement('div');
     const title = document.createElement('h3'); title.textContent = item.title;
     const meta = document.createElement('div'); meta.className = 'meta';
@@ -1872,8 +1874,10 @@ $('#ai-image-form').addEventListener('submit', async (event) => {
       body: JSON.stringify({ project_id: state.currentProjectId, prompt: $('#ai-image-prompt').value.trim(), size: $('#ai-image-size').value })
     });
     const done = await pollJob(job.id, (current) => setAIStatus('#ai-image-status', current.message || 'Генерирую…'));
-    const url = await downloadableJobUrl(done);
-    $('#ai-image-result img').src = url; $('#ai-image-result a').href = url;
+    const url = await downloadableJobUrl(done); const image = $('#ai-image-result img');
+    const [imageWidth, imageHeight] = $('#ai-image-size').value.split('x').map(Number);
+    image.style.aspectRatio = `${imageWidth} / ${imageHeight}`;
+    image.src = url; $('#ai-image-result a').href = url;
     $('#ai-image-result').classList.remove('hidden'); setAIStatus('#ai-image-status', 'Изображение готово.');
   } catch (error) { setAIStatus('#ai-image-status', error.message, true); }
   finally { button.disabled = !state.aiConfig?.enabled; }

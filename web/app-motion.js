@@ -75,6 +75,7 @@
       : [...element.querySelectorAll(surfaceSelector)];
     surfaces.forEach((surface) => surface.classList.add('app-motion-surface'));
     window.AAPMotion?.registerSurfaces?.(element.matches('*') ? element : document);
+    window.AAPMotion?.registerAnimatedRegions?.(element);
   }
 
   function animateDynamicNodes(nodes) {

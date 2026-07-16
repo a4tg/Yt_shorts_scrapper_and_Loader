@@ -3,6 +3,11 @@
   const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
   const finePointerQuery = window.matchMedia('(pointer: fine)');
   let pointerFrame = 0;
+  let regionObserver = null;
+  const animatedRegionSelector = [
+    '.hero-stage', '.product-demo', '.video-feature', '.value-flow', '.final-cta-visual',
+    '.dashboard-orbit', '.audience-section', '.auth-brand-scene', '[data-motion-region]',
+  ].join(',');
 
   function reduced() {
     return reducedMotionQuery.matches;
@@ -12,6 +17,7 @@
     const isReduced = reduced();
     root.dataset.motion = isReduced ? 'reduced' : 'full';
     root.classList.toggle('motion-ready', !isReduced);
+    if (!isReduced) requestAnimationFrame(() => registerAnimatedRegions());
   }
 
   function reveal(elements, options = {}) {
@@ -61,6 +67,24 @@
     });
   }
 
+  function registerAnimatedRegions(scope = document) {
+    if (reduced() || !('IntersectionObserver' in window)) return null;
+    if (!regionObserver) {
+      regionObserver = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => entry.target.classList.toggle('motion-offscreen', !entry.isIntersecting));
+      }, { rootMargin: '180px 0px', threshold: 0 });
+    }
+    const regions = [];
+    if (scope instanceof Element && scope.matches(animatedRegionSelector)) regions.push(scope);
+    regions.push(...scope.querySelectorAll(animatedRegionSelector));
+    regions.forEach((region) => {
+      if (region.dataset.motionRegionObserved) return;
+      region.dataset.motionRegionObserved = 'true';
+      regionObserver.observe(region);
+    });
+    return regionObserver;
+  }
+
   function updatePointer(event) {
     if (pointerFrame || reduced() || !finePointerQuery.matches) return;
     pointerFrame = requestAnimationFrame(() => {
@@ -78,7 +102,10 @@
   document.addEventListener('visibilitychange', () => {
     root.classList.toggle('motion-paused', document.hidden);
   });
-  document.addEventListener('DOMContentLoaded', () => registerSurfaces());
+  document.addEventListener('DOMContentLoaded', () => {
+    registerSurfaces();
+    registerAnimatedRegions();
+  });
 
-  window.AAPMotion = Object.freeze({ reduced, reveal, feedback, registerSurfaces });
+  window.AAPMotion = Object.freeze({ reduced, reveal, feedback, registerAnimatedRegions, registerSurfaces });
 })();

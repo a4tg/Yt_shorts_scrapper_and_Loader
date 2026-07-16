@@ -1,0 +1,200 @@
+.skip-link {
+  position: fixed;
+  z-index: 20000;
+  left: 16px;
+  top: 12px;
+  padding: 11px 15px;
+  border: 2px solid #b8afff;
+  border-radius: 10px;
+  background: #101925;
+  color: #fff;
+  font-weight: 800;
+  opacity: 0;
+  pointer-events: none;
+  translate: 0 -140%;
+  transition: opacity var(--motion-duration-fast) ease, translate var(--motion-duration-fast) var(--motion-ease-enter);
+}
+
+.skip-link:focus {
+  opacity: 1;
+  pointer-events: auto;
+  translate: 0;
+}
+
+#main-content:focus,
+#app-content:focus,
+#auth-screen:focus {
+  outline: none;
+}
+
+img,
+svg,
+video {
+  height: auto;
+}
+
+.motion-offscreen,
+.motion-offscreen * {
+  animation-play-state: paused !important;
+}
+
+@supports (content-visibility: auto) {
+  .audience-section {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 900px;
+  }
+
+  #features {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 1850px;
+  }
+
+  .video-feature,
+  .value-section {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 760px;
+  }
+
+  #pricing {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 1500px;
+  }
+
+  #faq {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 620px;
+  }
+
+  .final-cta {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 620px;
+  }
+
+  body > footer {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 180px;
+  }
+
+  .workspace-page:not(.hidden) > .panel,
+  .workspace-page:not(.hidden) > .dashboard-grid,
+  .workspace-page:not(.hidden) > .workspace-management {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 720px;
+  }
+}
+
+.app-page-enter,
+.app-section-enter,
+.app-item-enter,
+.reveal-item:not(.is-visible) {
+  will-change: opacity, translate, scale;
+}
+
+.hero-stage-core,
+.demo-overlay-object.is-dragging,
+.overlay-object.dragging {
+  will-change: transform;
+}
+
+.landing-section,
+.audience-section,
+.value-section,
+.video-feature,
+.final-cta,
+.workspace-page,
+.panel {
+  overflow-wrap: anywhere;
+}
+
+@media (pointer: coarse) {
+  :where(button, .button, [role="button"], summary, .workspace-nav-item, .text-button) {
+    min-height: 44px;
+  }
+
+  input[type="range"] {
+    min-height: 32px;
+  }
+
+  .story-progress-link,
+  .demo-tabs button {
+    min-width: 44px;
+  }
+}
+
+@media (max-width: 520px), (update: slow) {
+  .landing-header.is-scrolled,
+  .toast,
+  .final-status-card,
+  .demo-overlay-object,
+  .auth-brand-scene {
+    backdrop-filter: none !important;
+  }
+
+  body::before,
+  .hero::before,
+  .product-demo::before,
+  .value-section::before {
+    filter: blur(55px);
+  }
+}
+
+@media (update: slow) {
+  .hero-board,
+  .phone,
+  .dashboard-orbit,
+  .value-before > span,
+  .final-orbit,
+  .hero-particle,
+  .hero-route-map path {
+    animation: none !important;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .landing-header.is-scrolled,
+  .story-progress,
+  .toast,
+  .final-status-card,
+  .demo-overlay-object {
+    backdrop-filter: none !important;
+    background-color: #101925 !important;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --muted: #b6c2d1;
+    --line: #53647a;
+    --workspace-border: #53647a;
+  }
+
+  .kicker,
+  .eyebrow,
+  .content-kind {
+    color: #bdb5ff;
+  }
+
+  :where(.panel, .feature-grid article, .price-grid article, .audience-grid article, .demo-shell, .content-card, .project-card) {
+    border-color: #687a91;
+  }
+}
+
+@media (forced-colors: active) {
+  .health i,
+  .story-progress-link i,
+  .proof span::before,
+  .stage-dot,
+  .priority-dot {
+    forced-color-adjust: none;
+  }
+
+  .button,
+  button,
+  input,
+  select,
+  textarea,
+  .panel,
+  .demo-shell {
+    border: 1px solid CanvasText;
+  }
+}

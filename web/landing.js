@@ -17,6 +17,7 @@ function buildHeroStage() {
 
   const stage = document.createElement('div');
   stage.className = 'hero-stage';
+  stage.setAttribute('role', 'img');
   stage.setAttribute('aria-label', 'Интерактивная схема работы с контентом');
 
   const routes = document.createElementNS('http://www.w3.org/2000/svg', 'svg');

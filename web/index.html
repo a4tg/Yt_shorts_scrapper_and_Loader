@@ -5,7 +5,9 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>All As Planned</title>
   <meta name="theme-color" content="#0b1018">
+  <meta name="robots" content="noindex,nofollow">
   <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="preload" href="/assets/brand-mark.svg" as="image" type="image/svg+xml">
   <link rel="stylesheet" href="/assets/style.css">
   <link rel="stylesheet" href="/assets/direct-video.css">
   <link rel="stylesheet" href="/assets/overlay-editor.css">
@@ -20,12 +22,14 @@
   <link rel="stylesheet" href="/assets/motion-system.css">
   <link rel="stylesheet" href="/assets/app-motion.css">
   <link rel="stylesheet" href="/assets/brand-graphics.css">
+  <link rel="stylesheet" href="/assets/performance.css">
 </head>
 <body>
-  <section id="auth-screen" class="auth-shell">
-    <img class="auth-brand-scene" src="/assets/brand-flow-map.svg" alt="" width="1200" height="600" decoding="async">
+  <a id="skip-link" class="skip-link" href="#auth-screen">Перейти к форме входа</a>
+  <section id="auth-screen" class="auth-shell" tabindex="-1" aria-label="Вход и регистрация">
+    <img class="auth-brand-scene" src="/assets/brand-flow-map.svg" alt="" width="1200" height="600" decoding="async" fetchpriority="low">
     <div class="auth-brand">
-      <img class="auth-brand-mark" src="/assets/brand-mark.svg" alt="" width="72" height="72">
+      <img class="auth-brand-mark" src="/assets/brand-mark.svg" alt="" width="72" height="72" decoding="async">
       <p class="eyebrow">Личный медиасервис</p>
       <h1>All As Planned</h1>
       <p>Подготовка Shorts, оверлеи и метаданные в защищённом рабочем пространстве.</p>
@@ -70,12 +74,12 @@
   <main id="app-shell" class="app-shell hidden">
     <aside class="workspace-sidebar">
       <div class="workspace-brand">
-        <img class="workspace-logo" src="/assets/brand-mark.svg" alt="" width="38" height="38">
+        <img class="workspace-logo" src="/assets/brand-mark.svg" alt="" width="38" height="38" decoding="async">
         <div><strong>All As Planned</strong><small>Контент в одном месте</small></div>
       </div>
       <div class="workspace-switcher">
         <label for="workspace-select">Пространство</label>
-        <div><select id="workspace-select" aria-label="Рабочее пространство"></select><button id="create-workspace-button" type="button" title="Создать пространство">+</button></div>
+        <div><select id="workspace-select" aria-label="Рабочее пространство"></select><button id="create-workspace-button" type="button" title="Создать пространство" aria-label="Создать рабочее пространство">+</button></div>
       </div>
       <nav class="workspace-nav" aria-label="Разделы приложения">
         <button class="workspace-nav-item active" type="button" data-navigate="dashboard"><span>⌂</span>Обзор</button>
@@ -92,7 +96,7 @@
       </div>
     </aside>
 
-    <div class="workspace-main">
+    <div id="app-content" class="workspace-main" tabindex="-1">
     <header class="workspace-topbar">
       <div>
         <p class="eyebrow">Собственный медиасервис</p>
@@ -149,8 +153,8 @@
         <div id="workspace-projects" class="project-grid" aria-live="polite"></div>
         <div class="team-heading"><div><h3>Участники</h3><p>Роли определяют доступ к проектам и настройкам.</p></div></div>
         <form id="add-member-form" class="member-form">
-          <input id="member-email" type="email" placeholder="email зарегистрированного пользователя" required>
-          <select id="member-role"><option value="editor">Редактор</option><option value="admin">Администратор</option><option value="viewer">Наблюдатель</option><option value="client">Клиент</option></select>
+          <input id="member-email" type="email" placeholder="email зарегистрированного пользователя" aria-label="Email участника" required>
+          <select id="member-role" aria-label="Роль участника"><option value="editor">Редактор</option><option value="admin">Администратор</option><option value="viewer">Наблюдатель</option><option value="client">Клиент</option></select>
           <button class="secondary" type="submit">Добавить</button>
         </form>
         <div id="workspace-members" class="member-list" aria-live="polite"></div>
@@ -176,8 +180,8 @@
         <div class="content-heading"><div><p class="eyebrow">Текущий проект</p><h2 id="content-project-name">Контент-план</h2><p>Материалы, публикации и согласования в одном рабочем поле.</p></div><button id="create-content-button" class="primary" type="button">+ Новый материал</button></div>
         <div class="content-stats" id="content-stats"></div>
         <div class="content-toolbar">
-          <input id="content-search" type="search" placeholder="Поиск по названию и тексту">
-          <select id="content-type-filter"><option value="">Все форматы</option><option value="post">Посты</option><option value="video">Видео</option><option value="banner">Баннеры</option><option value="document">Документы</option><option value="campaign">Кампании</option><option value="note">Заметки</option></select>
+          <input id="content-search" type="search" placeholder="Поиск по названию и тексту" aria-label="Поиск по контент-плану">
+          <select id="content-type-filter" aria-label="Фильтр по формату"><option value="">Все форматы</option><option value="post">Посты</option><option value="video">Видео</option><option value="banner">Баннеры</option><option value="document">Документы</option><option value="campaign">Кампании</option><option value="note">Заметки</option></select>
           <div class="view-switcher"><button class="active" type="button" data-content-view="board">Канбан</button><button type="button" data-content-view="calendar">Календарь</button></div>
         </div>
         <div id="content-board" class="content-board" aria-live="polite"></div>
@@ -216,7 +220,7 @@
           <label><span>Дополнительный контекст</span><textarea id="ai-text-context" rows="3" maxlength="30000" placeholder="ЦА, тональность, факты, ограничения"></textarea></label>
           <button class="primary" type="submit">Создать · 1 кредит</button>
           <div id="ai-text-status" class="status hidden" aria-live="polite"></div>
-          <div id="ai-text-result" class="ai-result hidden"><div><b>Результат</b><button id="ai-copy-text" class="text-button" type="button">Копировать</button></div><textarea readonly rows="12"></textarea></div>
+          <div id="ai-text-result" class="ai-result hidden"><div><b>Результат</b><button id="ai-copy-text" class="text-button" type="button">Копировать</button></div><textarea readonly rows="12" aria-label="Сгенерированный текст"></textarea></div>
         </form>
         <form id="ai-image-form" class="panel ai-card">
           <div class="ai-card-title"><span>▧</span><div><h3>Изображение</h3><p>Квадрат, вертикаль или горизонталь</p></div></div>
@@ -224,7 +228,7 @@
           <label><span>Формат</span><select id="ai-image-size"><option value="1024x1024">Квадрат 1:1</option><option value="1024x1536">Вертикальный 2:3</option><option value="1536x1024">Горизонтальный 3:2</option></select></label>
           <button class="primary" type="submit">Создать · 5 кредитов</button>
           <div id="ai-image-status" class="status hidden" aria-live="polite"></div>
-          <div id="ai-image-result" class="ai-image-result hidden"><img alt="Сгенерированное изображение"><a class="primary" href="#">Скачать PNG</a></div>
+          <div id="ai-image-result" class="ai-image-result hidden"><img alt="Сгенерированное изображение" decoding="async"><a class="primary" href="#">Скачать PNG</a></div>
         </form>
         <form id="ai-clips-form" class="panel ai-card ai-clips-card">
           <div class="ai-card-title"><span>▶</span><div><h3>Нарезка на клипы</h3><p>Расшифровка, поиск моментов и вертикальный рендер</p></div></div>
@@ -251,7 +255,7 @@
       <div id="billing-entitlement" class="billing-entitlement"></div>
       <div id="billing-limits" class="billing-limits" aria-live="polite"></div>
       <div id="billing-plans" class="plan-grid" aria-live="polite"></div>
-      <button id="billing-subscription-action" class="ghost hidden" type="button"></button>
+      <button id="billing-subscription-action" class="ghost hidden" type="button" aria-label="Управление подпиской"></button>
       <details class="ledger-box">
         <summary>Последние операции</summary>
         <div id="billing-ledger" class="ledger-list"></div>
@@ -267,7 +271,7 @@
       </div>
       <form id="channel-form" class="channel-form">
         <select id="source-platform" aria-label="Платформа"><option value="auto" selected>Определить автоматически</option><option value="youtube">YouTube Shorts</option><option value="vk">VK Video / Clips</option><option value="rutube">Rutube</option></select>
-        <input id="channel-url" type="url" placeholder="Ссылка на канал, плейлист или видео" required>
+        <input id="channel-url" type="url" placeholder="Ссылка на канал, плейлист или видео" aria-label="Ссылка на канал, плейлист или видео" required>
         <select id="shorts-limit" aria-label="Сколько видео получить">
           <option value="10">Первые 10</option>
           <option value="25">Первые 25</option>
@@ -319,7 +323,7 @@
           <button id="reset-overlay" class="ghost" type="button">Сбросить позицию</button>
         </div>
         <div id="video-stage" class="video-stage" aria-label="Предпросмотр вертикального видео">
-          <img id="stage-video-preview" class="stage-video-preview hidden" alt="Кадр выбранного видео" referrerpolicy="no-referrer">
+          <img id="stage-video-preview" class="stage-video-preview hidden" alt="Кадр выбранного видео" decoding="async" referrerpolicy="no-referrer">
           <iframe id="stage-video-player" class="stage-video-player hidden" title="Предпросмотр выбранного YouTube-видео" allow="encrypted-media; picture-in-picture" referrerpolicy="strict-origin-when-cross-origin"></iframe>
           <div id="stage-video-label" class="stage-video-label hidden"></div>
           <div class="stage-safe-zone"></div>
@@ -339,7 +343,7 @@
           <p>YouTube, VK Video/Clips или Rutube — формат определяется по ссылке</p>
         </div>
         <form id="direct-video-form" class="direct-video-form">
-          <input id="direct-video-url" type="url" placeholder="https://youtube.com/shorts/... или vk.com/video..." required>
+          <input id="direct-video-url" type="url" placeholder="https://youtube.com/shorts/... или vk.com/video..." aria-label="Ссылка на конкретное видео" required>
           <button class="primary" type="submit">Подготовить видео</button>
         </form>
         <div id="direct-video-actions" class="direct-result hidden">
@@ -404,7 +408,7 @@
         <label class="wide"><span>Теги через запятую</span><input id="content-tags-input" type="text" maxlength="1000" placeholder="запуск, продукт, июль"></label>
       </div>
       <div class="editor-label"><span>Текст или заметка</span><div class="markdown-toolbar"><button type="button" data-markdown="**|**">Жирный</button><button type="button" data-markdown="## |">Заголовок</button><button type="button" data-markdown="[|](https://)">Ссылка</button><button id="toggle-content-preview" type="button">Предпросмотр</button></div></div>
-      <textarea id="content-body-input" class="content-editor" maxlength="2000000" rows="12" placeholder="Пишите текст в Markdown…"></textarea>
+      <textarea id="content-body-input" class="content-editor" maxlength="2000000" rows="12" placeholder="Пишите текст в Markdown…" aria-label="Текст или заметка"></textarea>
       <div id="content-body-preview" class="content-preview hidden"></div>
       <section id="content-files-section" class="content-files hidden">
         <div><h3>Файлы</h3><label class="file-upload-button">+ Прикрепить файл<input id="content-file-input" type="file"></label></div>
