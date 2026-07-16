@@ -81,9 +81,14 @@ Desktop-версия сохранена в репозитории. Её виде
 
 ## Последние важные изменения
 
-Текущая разработка находится в ветке `feature/workspace-depth-v2`. Она отправлена
-в GitHub, но намеренно не объединена с `main` и не развёрнута на production.
+Workspace Depth V2 объединён с `main` и отправлен в GitHub. Production уже
+обновлён до базового release-коммита `438c557`; миграции применены. Последующий
+hotfix чата находится в `main`, но его фактическое развёртывание необходимо
+подтвердить свежими `git rev-parse` и health-check с сервера.
 
+- `d354e1d` — исправлены fullscreen/resizing, распределение высоты и зависающий
+  pointer drag в Chat Anywhere; испорченный layout V1 сбрасывается;
+- `438c557` — rollout-документация и усиление client/team visibility;
 - `61bc350` — Decision Intelligence, центр внимания, сводки и связи с графом;
 - `7ac8fd3` — живая карта проекта и редактор блок-схем;
 - `05cfb47` — версии файлов, contextual review и approval workflow;
@@ -126,6 +131,19 @@ Desktop-версия сохранена в репозитории. Её виде
 - реальная регистрация, письмо подтверждения и восстановление пароля проверены
   end-to-end;
 - production `.env` имеет права `600` и не хранится в Git.
+- 17 июля 2026 перед Workspace Depth rollout создан локальный backup
+  `20260716T230411Z` и внешний Restic snapshot `cac15a47`; `restic check`
+  завершился без ошибок;
+- база production успешно мигрирована с `g2b3c4d5e6f7` до
+  `k6f7a8b9c0d1`;
+- после миграции внутренний и внешний `/api/health`, а также readiness вернули
+  `status=ok`, `database=ok`, `workers=ok`;
+- включены `workspace_depth_shell=true` и `chat_anywhere=true`; Asset Viewer,
+  reviews, project graph и Decision Intelligence пока выключены;
+- при smoke-test Chat Anywhere обнаружены ошибки использования свободной высоты
+  и незавершающегося drag. Исправление опубликовано в `main` как `d354e1d`;
+  перед продолжением rollout нужно подтвердить его установку и повторить
+  browser smoke-test.
 
 Почтовые адреса проекта: `no-reply@allasplanned.ru` и
 `support@allasplanned.ru`. Значения SMTP-пароля не фиксировать в документации и
@@ -217,12 +235,11 @@ df -h /
 Полный список проверок находится в `deploy/production-checklist.md`. Наличие
 функции в коде не означает, что её production-интеграция уже проверена.
 
-Workspace Depth V2 завершён и проверен локально, но ещё не считается проверенным
-на production. Перед выкладкой нужен свежий снимок PostgreSQL и `server_data`,
-миграция до `k6f7a8b9c0d1`, проверка свободного места и закрытая end-to-end
-проверка изоляции проектов, загрузки, восстановления файлов, сообщений, review,
-графа и центра внимания. Порядок включения флагов описан в
-`WORKSPACE_DEPTH_V2.md`; сначала объединить feature-ветку с `main` через review.
+Workspace Depth V2 завершён локально и находится в `main`. Production backup и
+миграция до `k6f7a8b9c0d1` выполнены; rollout идёт по feature flags. Следующий
+шаг — установить/подтвердить `d354e1d`, повторно проверить Chat Anywhere и только
+затем последовательно включать Asset Viewer, reviews, project graph и Decision
+Intelligence. Каждому этапу нужен browser smoke-test и контроль health/logs.
 
 ## AI и видео: дальнейшее направление
 
