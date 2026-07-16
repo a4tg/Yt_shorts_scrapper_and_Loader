@@ -38,6 +38,7 @@ function showWorkspacePage(page, syncUrl = false) {
   });
   const title = $('#workspace-page-title');
   if (title) title.textContent = workspacePageTitles[page];
+  window.AAPAppMotion?.pageEntered(target, page, title);
   document.title = `${workspacePageTitles[page]} · All As Planned`;
   if (syncUrl && workspacePageFromHash() !== page) {
     history.pushState({ page }, '', `${location.pathname}${location.search}#/${page}`);
@@ -51,9 +52,14 @@ function showWorkspacePage(page, syncUrl = false) {
   window.scrollTo({ top: 0, behavior: 'instant' });
 }
 
-function showToast(text) {
+let toastTimer = null;
+function showToast(text, tone = 'neutral') {
   const toast = $('#toast'); toast.textContent = text; toast.classList.remove('hidden');
-  setTimeout(() => toast.classList.add('hidden'), 3500);
+  window.AAPAppMotion?.toastIn(toast, tone);
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    if (!window.AAPAppMotion?.toastOut(toast)) toast.classList.add('hidden');
+  }, 3500);
 }
 
 async function api(url, options = {}) {
@@ -64,13 +70,18 @@ async function api(url, options = {}) {
     if (csrfToken) headers.set('X-CSRF-Token', csrfToken);
   }
   options = { ...options, headers, credentials: 'same-origin' };
-  const response = await fetch(url, options);
-  if (!response.ok) {
-    let message = `Ошибка ${response.status}`;
-    try { message = (await response.json()).detail || message; } catch (_) {}
-    const error = new Error(message); error.status = response.status; throw error;
+  const motionRequest = window.AAPAppMotion?.networkStart(method, url);
+  try {
+    const response = await fetch(url, options);
+    if (!response.ok) {
+      let message = `Ошибка ${response.status}`;
+      try { message = (await response.json()).detail || message; } catch (_) {}
+      const error = new Error(message); error.status = response.status; throw error;
+    }
+    return response.headers.get('content-type')?.includes('json') ? await response.json() : response;
+  } finally {
+    window.AAPAppMotion?.networkEnd(motionRequest);
   }
-  return response.headers.get('content-type')?.includes('json') ? response.json() : response;
 }
 
 async function pollJob(id, onUpdate) {
@@ -173,6 +184,7 @@ function showAuthenticated(user) {
   $('#account-credits').textContent = `${user.credit_balance} кредитов`;
   $('#auth-screen').classList.add('hidden');
   $('#app-shell').classList.remove('hidden');
+  window.AAPAppMotion?.appEntered();
   $('#admin-nav-button').classList.toggle('hidden', !user.is_admin);
   showWorkspacePage(workspacePageFromHash() || state.currentPage);
   const needsVerification = state.authConfig.email_verification_required && !user.email_verified;
@@ -190,7 +202,7 @@ const workspaceRoleLabels = {
 };
 
 function showWorkspaceError(error) {
-  showToast(error?.message || 'Не удалось загрузить рабочее пространство.');
+  showToast(error?.message || 'Не удалось загрузить рабочее пространство.', 'error');
 }
 
 function currentWorkspace() {
@@ -984,6 +996,7 @@ function showAuthentication() {
   $('#app-shell').classList.add('hidden');
   $('#verification-banner').classList.add('hidden');
   $('#auth-screen').classList.remove('hidden');
+  window.AAPAppMotion?.authEntered();
 }
 
 async function submitAuthForm(form, endpoint, statusElement, payload) {

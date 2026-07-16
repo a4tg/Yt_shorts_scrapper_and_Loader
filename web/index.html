@@ -17,6 +17,7 @@
   <link rel="stylesheet" href="/assets/admin.css">
   <link rel="stylesheet" href="/assets/brand.css">
   <link rel="stylesheet" href="/assets/motion-system.css">
+  <link rel="stylesheet" href="/assets/app-motion.css">
 </head>
 <body>
   <section id="auth-screen" class="auth-shell">
@@ -421,8 +422,9 @@
       <div id="change-password-status" class="auth-status" aria-live="polite"></div>
     </form>
   </dialog>
-  <div id="toast" class="toast hidden"></div>
+  <div id="toast" class="toast hidden" role="status" aria-live="polite" aria-atomic="true"></div>
   <script src="/assets/motion-system.js" defer></script>
+  <script src="/assets/app-motion.js" defer></script>
   <script src="/assets/app.js" defer></script>
 </body>
 </html>

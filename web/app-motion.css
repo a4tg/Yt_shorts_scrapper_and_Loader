@@ -1,0 +1,490 @@
+.app-network-progress {
+  position: fixed;
+  z-index: 10000;
+  width: 100%;
+  height: 3px;
+  inset: 0 0 auto;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0;
+  background: rgba(128, 109, 255, .1);
+  transition: opacity var(--motion-duration-fast) ease;
+}
+
+.app-network-progress i {
+  position: absolute;
+  width: 42%;
+  height: 100%;
+  left: 0;
+  top: 0;
+  border-radius: 0 99px 99px 0;
+  background: linear-gradient(90deg, #6653e9, #a79dff 58%, #40d9a0);
+  box-shadow: 0 0 16px rgba(128, 109, 255, .72);
+  transform: translateX(-105%);
+}
+
+.app-network-progress.is-active { opacity: 1; }
+.app-network-progress.is-active i { animation: appNetworkTravel 1.15s var(--motion-ease-standard) infinite; }
+.app-network-progress.is-complete i { width: 100%; transform: translateX(0); animation: none; transition: width 180ms ease, transform 180ms ease; }
+
+.app-shell-enter .workspace-sidebar {
+  animation: appSidebarEnter 680ms var(--motion-ease-enter) both;
+}
+
+.app-shell-enter .workspace-main {
+  animation: appMainEnter 760ms var(--motion-ease-enter) 80ms both;
+}
+
+.app-auth-enter .auth-brand {
+  animation: appAuthBrandEnter 720ms var(--motion-ease-enter) both;
+}
+
+.app-auth-enter .auth-card:not(.hidden) {
+  animation: appCardEnter 620ms var(--motion-ease-enter) 90ms both;
+}
+
+.app-page-enter {
+  animation: appPageEnter 520ms var(--motion-ease-enter) both;
+}
+
+.app-section-enter {
+  animation: appSectionEnter 620ms var(--motion-ease-enter) var(--app-section-delay, 0ms) both;
+}
+
+.app-title-enter {
+  animation: appTitleEnter 440ms var(--motion-ease-enter) both;
+}
+
+.app-item-enter {
+  animation: appItemEnter 460ms var(--motion-ease-enter) var(--app-enter-delay, 0ms) both;
+}
+
+.app-card-enter {
+  animation: appCardEnter 560ms var(--motion-ease-enter) both;
+}
+
+.app-status-update {
+  animation: appStatusUpdate 480ms var(--motion-ease-enter) both;
+}
+
+.app-value-update {
+  animation: appValueUpdate 500ms var(--motion-ease-spring) both;
+}
+
+.workspace-sidebar {
+  overflow: hidden;
+}
+
+.workspace-sidebar::before {
+  position: absolute;
+  width: 230px;
+  height: 230px;
+  left: -150px;
+  top: -120px;
+  content: "";
+  pointer-events: none;
+  border-radius: 50%;
+  background: rgba(124, 108, 255, .15);
+  filter: blur(55px);
+  opacity: .8;
+}
+
+.workspace-brand,
+.workspace-switcher,
+.workspace-nav,
+.workspace-nav-bottom {
+  position: relative;
+  z-index: 1;
+}
+
+.workspace-nav-item {
+  position: relative;
+  overflow: hidden;
+  transition: color var(--motion-duration-fast) ease, border-color var(--motion-duration-fast) ease, background var(--motion-duration-fast) ease, translate var(--motion-duration-fast) var(--motion-ease-enter);
+}
+
+.workspace-nav-item::before {
+  position: absolute;
+  width: 3px;
+  height: 16px;
+  left: -1px;
+  top: 50%;
+  content: "";
+  border-radius: 0 4px 4px 0;
+  background: linear-gradient(180deg, #a89eff, #6f5df0);
+  box-shadow: 0 0 13px rgba(128, 109, 255, .65);
+  opacity: 0;
+  transform: translate(-5px, -50%) scaleY(.4);
+  transition: opacity var(--motion-duration-fast) ease, transform var(--motion-duration-base) var(--motion-ease-enter);
+}
+
+.workspace-nav-item:hover { translate: 3px 0; }
+.workspace-nav-item.active::before { opacity: 1; transform: translate(0, -50%) scaleY(1); }
+
+.workspace-nav-item span {
+  transition: color var(--motion-duration-fast) ease, rotate var(--motion-duration-base) var(--motion-ease-spring), scale var(--motion-duration-base) var(--motion-ease-spring);
+}
+
+.workspace-nav-item:hover span { scale: 1.12; }
+.workspace-nav-item.active span { rotate: -3deg; scale: 1.08; }
+
+.workspace-topbar {
+  position: relative;
+}
+
+.workspace-topbar::after {
+  position: absolute;
+  width: 120px;
+  height: 1px;
+  left: 0;
+  bottom: -1px;
+  content: "";
+  background: linear-gradient(90deg, #806dff, transparent);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform var(--motion-duration-slow) var(--motion-ease-enter);
+}
+
+.app-motion-active .workspace-topbar::after { transform: scaleX(1); }
+
+.app-motion-surface {
+  position: relative;
+  transition: border-color var(--motion-duration-base) ease, box-shadow var(--motion-duration-base) ease, background-color var(--motion-duration-base) ease, translate var(--motion-duration-base) var(--motion-ease-enter);
+}
+
+.app-motion-surface::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  border-radius: inherit;
+  background: radial-gradient(260px circle at 76% 0%, rgba(128, 109, 255, .075), transparent 66%);
+  opacity: 0;
+  transition: opacity var(--motion-duration-base) ease;
+}
+
+.app-motion-surface:hover {
+  border-color: rgba(128, 109, 255, .5);
+  box-shadow: 0 20px 45px rgba(0, 0, 0, .22), 0 0 0 1px rgba(128, 109, 255, .045) inset;
+}
+
+.app-motion-surface:hover::after { opacity: 1; }
+
+.dashboard-card .card-icon,
+.ai-card-title > span,
+.library-file-icon,
+.document-icon {
+  transition: color var(--motion-duration-base) ease, background var(--motion-duration-base) ease, rotate var(--motion-duration-base) var(--motion-ease-spring), scale var(--motion-duration-base) var(--motion-ease-spring), box-shadow var(--motion-duration-base) ease;
+}
+
+.dashboard-card:hover .card-icon,
+.ai-card:hover .ai-card-title > span,
+.library-card:hover .library-file-icon,
+.document-card:hover .document-icon {
+  color: #c8c1ff;
+  rotate: -4deg;
+  scale: 1.06;
+  box-shadow: 0 10px 25px rgba(124, 108, 255, .2);
+}
+
+.dashboard-orbit span {
+  animation: appOrbitBadge 4.8s ease-in-out infinite;
+}
+
+.dashboard-orbit span:nth-child(2) { animation-delay: -1.55s; }
+.dashboard-orbit span:nth-child(3) { animation-delay: -3.1s; }
+
+.dashboard-orbit b {
+  animation: appOrbitCore 3.3s ease-in-out infinite;
+}
+
+.content-column,
+.calendar-day,
+.approval-stage-row,
+.member-row,
+.attachment-row,
+.ledger-row,
+tbody > tr {
+  transition: border-color var(--motion-duration-fast) ease, background-color var(--motion-duration-fast) ease, opacity var(--motion-duration-fast) ease, translate var(--motion-duration-fast) var(--motion-ease-enter), box-shadow var(--motion-duration-fast) ease;
+}
+
+.content-column:has(.content-card.dragging) {
+  border-color: rgba(128, 109, 255, .55);
+  background: rgba(128, 109, 255, .045);
+  box-shadow: 0 0 0 3px rgba(128, 109, 255, .06) inset;
+}
+
+.content-card.dragging,
+.approval-stage-row.dragging {
+  opacity: .58;
+  rotate: 1.5deg;
+  scale: .985;
+  box-shadow: 0 18px 38px rgba(0, 0, 0, .3);
+}
+
+.view-switcher button.active {
+  box-shadow: 0 7px 18px rgba(0, 0, 0, .18);
+  animation: appTabActive 320ms var(--motion-ease-enter);
+}
+
+.status:not(.hidden),
+.auth-status:not(:empty),
+.job-note:not(:empty) {
+  position: relative;
+  overflow: hidden;
+}
+
+.status:not(.hidden):not(.error)::after,
+.job-note:not(:empty)::after {
+  position: absolute;
+  width: 35%;
+  height: 1px;
+  left: -35%;
+  bottom: 0;
+  content: "";
+  background: linear-gradient(90deg, transparent, #806dff, transparent);
+  box-shadow: 0 0 8px rgba(128, 109, 255, .6);
+  animation: appStatusTravel 2.1s ease-in-out infinite;
+}
+
+.item.processing {
+  position: relative;
+  overflow: hidden;
+  animation: appProcessingBorder 2.2s ease-in-out infinite;
+}
+
+.item.processing::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  opacity: 1;
+  background: linear-gradient(105deg, transparent 30%, rgba(224, 169, 59, .075), transparent 70%);
+  transform: translateX(-100%);
+  animation: appProcessingSweep 1.7s ease-in-out infinite;
+}
+
+.item.ready {
+  animation: appReady 720ms var(--motion-ease-spring);
+}
+
+.item.selected {
+  box-shadow: 0 0 0 2px rgba(128, 109, 255, .2), 0 18px 38px rgba(0, 0, 0, .18);
+}
+
+.verification-banner:not(.hidden) {
+  animation: appBannerEnter 480ms var(--motion-ease-enter) both;
+}
+
+dialog[open] > form > * {
+  animation: appDialogItemEnter 440ms var(--motion-ease-enter) both;
+}
+
+dialog[open] > form > *:nth-child(2) { animation-delay: 35ms; }
+dialog[open] > form > *:nth-child(3) { animation-delay: 70ms; }
+dialog[open] > form > *:nth-child(4) { animation-delay: 105ms; }
+dialog[open] > form > *:nth-child(5) { animation-delay: 140ms; }
+dialog[open] > form > *:nth-child(n+6) { animation-delay: 175ms; }
+
+.toast {
+  z-index: 80;
+  min-width: min(330px, calc(100vw - 32px));
+  max-width: 440px;
+  overflow: hidden;
+  padding: 14px 18px 14px 45px;
+  border-color: rgba(128, 109, 255, .36);
+  background: rgba(20, 31, 44, .94);
+  box-shadow: 0 20px 55px rgba(0, 0, 0, .38), 0 0 0 1px rgba(255, 255, 255, .025) inset;
+  backdrop-filter: blur(18px) saturate(135%);
+}
+
+.toast:not(.hidden) { animation: none; }
+
+.toast::before {
+  position: absolute;
+  display: grid;
+  width: 22px;
+  height: 22px;
+  left: 14px;
+  top: 50%;
+  place-items: center;
+  content: "✓";
+  border-radius: 50%;
+  background: rgba(64, 217, 160, .12);
+  color: #5edcae;
+  font-size: 10px;
+  font-weight: 900;
+  transform: translateY(-50%);
+}
+
+.toast[data-tone="neutral"]::before { content: "i"; background: rgba(128, 109, 255, .13); color: #b1a8ff; }
+.toast[data-tone="error"] { border-color: rgba(255, 107, 125, .35); }
+.toast[data-tone="error"]::before { content: "!"; background: rgba(255, 107, 125, .12); color: #ff8f9f; }
+
+.toast::after {
+  position: absolute;
+  width: 100%;
+  height: 2px;
+  left: 0;
+  bottom: 0;
+  content: "";
+  background: linear-gradient(90deg, #806dff, #40d9a0);
+  transform-origin: left;
+}
+
+.toast.app-toast-enter {
+  animation: appToastIn 420ms var(--motion-ease-enter) both;
+}
+
+.toast.app-toast-enter::after {
+  animation: appToastTimer 3.5s linear both;
+}
+
+.toast.app-toast-leave {
+  animation: appToastOut 210ms var(--motion-ease-exit) both;
+}
+
+@keyframes appNetworkTravel {
+  0% { transform: translateX(-105%) scaleX(.72); }
+  55% { transform: translateX(128%) scaleX(1.08); }
+  100% { transform: translateX(245%) scaleX(.78); }
+}
+
+@keyframes appSidebarEnter {
+  from { opacity: 0; translate: -26px 0; }
+  to { opacity: 1; translate: 0; }
+}
+
+@keyframes appMainEnter {
+  from { opacity: 0; translate: 0 16px; }
+  to { opacity: 1; translate: 0; }
+}
+
+@keyframes appAuthBrandEnter {
+  from { opacity: 0; translate: -24px 0; }
+  to { opacity: 1; translate: 0; }
+}
+
+@keyframes appPageEnter {
+  from { opacity: .25; translate: 0 13px; scale: .995; }
+  to { opacity: 1; translate: 0; scale: 1; }
+}
+
+@keyframes appSectionEnter {
+  from { opacity: 0; translate: 0 18px; }
+  to { opacity: 1; translate: 0; }
+}
+
+@keyframes appTitleEnter {
+  from { opacity: 0; translate: 0 9px; filter: blur(3px); }
+  to { opacity: 1; translate: 0; filter: blur(0); }
+}
+
+@keyframes appItemEnter {
+  from { opacity: 0; translate: 0 12px; scale: .985; }
+  to { opacity: 1; translate: 0; scale: 1; }
+}
+
+@keyframes appCardEnter {
+  from { opacity: 0; translate: 12px 0; scale: .98; }
+  to { opacity: 1; translate: 0; scale: 1; }
+}
+
+@keyframes appStatusUpdate {
+  0% { opacity: .55; translate: 0 4px; }
+  100% { opacity: 1; translate: 0; }
+}
+
+@keyframes appValueUpdate {
+  0% { scale: .92; color: #fff; }
+  55% { scale: 1.09; color: #b7aeff; }
+  100% { scale: 1; }
+}
+
+@keyframes appOrbitBadge {
+  0%, 100% { translate: 0; }
+  50% { translate: 0 -5px; }
+}
+
+@keyframes appOrbitCore {
+  0%, 100% { scale: .94; filter: drop-shadow(0 0 0 rgba(128, 109, 255, 0)); }
+  50% { scale: 1.06; filter: drop-shadow(0 0 16px rgba(128, 109, 255, .55)); }
+}
+
+@keyframes appTabActive {
+  from { opacity: .55; scale: .96; }
+  to { opacity: 1; scale: 1; }
+}
+
+@keyframes appStatusTravel {
+  0% { left: -35%; opacity: 0; }
+  30% { opacity: 1; }
+  100% { left: 110%; opacity: 0; }
+}
+
+@keyframes appProcessingBorder {
+  0%, 100% { border-color: rgba(224, 169, 59, .55); }
+  50% { border-color: rgba(224, 169, 59, .95); box-shadow: 0 0 0 3px rgba(224, 169, 59, .07); }
+}
+
+@keyframes appProcessingSweep {
+  to { transform: translateX(100%); }
+}
+
+@keyframes appReady {
+  0% { border-color: rgba(64, 217, 160, .9); scale: .985; }
+  60% { box-shadow: 0 0 0 5px rgba(64, 217, 160, .09); scale: 1.008; }
+  100% { scale: 1; }
+}
+
+@keyframes appBannerEnter {
+  from { opacity: 0; translate: 0 -10px; }
+  to { opacity: 1; translate: 0; }
+}
+
+@keyframes appDialogItemEnter {
+  from { opacity: 0; translate: 0 8px; }
+  to { opacity: 1; translate: 0; }
+}
+
+@keyframes appToastIn {
+  from { opacity: 0; translate: 18px 12px; scale: .96; }
+  to { opacity: 1; translate: 0; scale: 1; }
+}
+
+@keyframes appToastOut {
+  from { opacity: 1; translate: 0; scale: 1; }
+  to { opacity: 0; translate: 15px 4px; scale: .97; }
+}
+
+@keyframes appToastTimer {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}
+
+@media (max-width: 760px) {
+  .workspace-sidebar { overflow-x: auto; overflow-y: hidden; }
+  .workspace-nav-item:hover { translate: 0 -2px; }
+  .workspace-nav-item::before { width: 16px; height: 3px; left: 50%; top: auto; bottom: 0; border-radius: 4px 4px 0 0; transform: translate(-50%, 5px) scaleX(.4); }
+  .workspace-nav-item.active::before { transform: translate(-50%, 0) scaleX(1); }
+  .toast { right: 16px; bottom: 90px; }
+}
+
+@media (hover: none) {
+  .app-motion-surface:hover { box-shadow: none; }
+  .app-motion-surface:hover::after { opacity: 0; }
+  .motion-surface:hover { translate: 0; box-shadow: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-network-progress.is-active i,
+  .dashboard-orbit span,
+  .dashboard-orbit b,
+  .status::after,
+  .job-note::after,
+  .item.processing,
+  .item.processing::after,
+  dialog[open] > form > * {
+    animation: none !important;
+  }
+}
