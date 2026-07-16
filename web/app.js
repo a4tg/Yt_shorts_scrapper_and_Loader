@@ -503,18 +503,31 @@ function approvalStageRow(stage = {}) {
   const terminal = document.createElement('input'); terminal.type = 'checkbox'; terminal.checked = Boolean(stage.is_terminal); terminal.className = 'stage-is-terminal';
   terminalLabel.append(terminal, document.createTextNode('Финальный'));
   const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'remove-stage'; remove.textContent = 'Удалить';
-  remove.addEventListener('click', () => { if ($('#approval-stages').children.length > 2) row.remove(); else showToast('В процессе должно остаться минимум два этапа.'); });
+  remove.addEventListener('click', () => {
+    if ($('#approval-stages').children.length > 2) {
+      row.remove(); syncApprovalStageOrder();
+    } else showToast('В процессе должно остаться минимум два этапа.');
+  });
   row.addEventListener('dragstart', () => row.classList.add('dragging'));
-  row.addEventListener('dragend', () => row.classList.remove('dragging'));
+  row.addEventListener('dragend', () => { row.classList.remove('dragging'); syncApprovalStageOrder(); });
   row.addEventListener('dragover', (event) => {
     event.preventDefault();
     const dragging = $('#approval-stages').querySelector('.dragging');
     if (dragging && dragging !== row) {
+      const layout = window.AAPAppMotion?.captureLayout?.(row.parentElement);
       const box = row.getBoundingClientRect();
       row.parentElement.insertBefore(dragging, event.clientY < box.top + box.height / 2 ? row : row.nextSibling);
+      syncApprovalStageOrder();
+      window.AAPAppMotion?.animateLayout?.(layout);
     }
   });
   row.append(grip, color, name, role, terminalLabel, remove); return row;
+}
+
+function syncApprovalStageOrder() {
+  [...$('#approval-stages').children].forEach((row, index) => {
+    row.dataset.stageOrder = String(index + 1).padStart(2, '0');
+  });
 }
 
 async function loadApprovalWorkflow() {
@@ -523,6 +536,7 @@ async function loadApprovalWorkflow() {
   state.approvalWorkflow = workflow; $('#workflow-name').value = workflow.name;
   const container = $('#approval-stages'); container.replaceChildren();
   workflow.stages.forEach((stage) => container.append(approvalStageRow(stage)));
+  syncApprovalStageOrder();
   const workspace = currentWorkspace();
   const canEdit = ['owner', 'admin', 'editor'].includes(workspace?.role);
   $('#save-workflow-button').disabled = !canEdit; $('#add-approval-stage').disabled = !canEdit;
@@ -589,15 +603,22 @@ function contentCard(item) {
   const date = document.createElement('span'); date.textContent = contentDate(item.planned_at, true);
   const owner = document.createElement('span'); owner.textContent = item.assignee?.name || 'Не назначен';
   footer.append(date, owner); card.append(top, title, tags, footer);
-  const open = () => openContentEditor(item.id).catch(showWorkspaceError);
+  const open = () => openContentEditor(item.id, 'post', card).catch(showWorkspaceError);
   card.addEventListener('click', open);
   card.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') open();
   });
   card.addEventListener('dragstart', (event) => {
+    event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData('text/content-id', item.id); card.classList.add('dragging');
+    card.setAttribute('aria-grabbed', 'true');
+    document.documentElement.classList.add('content-is-dragging');
+    document.querySelectorAll('.content-column').forEach((column) => column.classList.add('drop-ready'));
   });
-  card.addEventListener('dragend', () => card.classList.remove('dragging'));
+  card.addEventListener('dragend', () => {
+    card.classList.remove('dragging'); card.removeAttribute('aria-grabbed');
+    window.AAPAppMotion?.clearContentDragState?.();
+  });
   return card;
 }
 
@@ -618,14 +639,48 @@ function renderContentStats() {
   }
 }
 
-async function moveContentToStage(itemId, stageId) {
+function syncContentColumn(column) {
+  if (!column) return;
+  const body = column.querySelector('.content-column-body');
+  const cards = body.querySelectorAll('.content-card');
+  const count = column.querySelector('.content-column-head > span');
+  if (count) count.textContent = cards.length;
+  const existing = body.querySelector('.empty-column');
+  if (cards.length) existing?.remove();
+  else if (!existing) {
+    const empty = document.createElement('div'); empty.className = 'empty-column';
+    empty.textContent = 'Перетащите материал сюда'; body.append(empty);
+  }
+}
+
+async function moveContentToStage(itemId, stageId, targetColumn) {
+  const card = document.querySelector(`.content-card[data-content-id="${CSS.escape(itemId)}"]`);
+  const sourceColumn = card?.closest('.content-column');
+  if (!card || !targetColumn || sourceColumn === targetColumn) {
+    window.AAPAppMotion?.clearContentDragState?.();
+    return;
+  }
+  const previousRect = card.getBoundingClientRect();
+  targetColumn.querySelector('.empty-column')?.remove();
+  targetColumn.querySelector('.content-column-body')?.append(card);
+  syncContentColumn(sourceColumn); syncContentColumn(targetColumn);
+  window.AAPAppMotion?.contentCardMoved?.(card, previousRect, [sourceColumn, targetColumn]);
+  window.AAPAppMotion?.clearContentDragState?.();
   try {
-    await api(`/api/content/${itemId}`, {
+    const saved = await api(`/api/content/${itemId}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ stage_id: stageId })
     });
-    await loadContent(); showToast('Этап материала обновлён.');
-  } catch (error) { showWorkspaceError(error); }
+    const index = state.contentItems.findIndex((item) => item.id === itemId);
+    if (index >= 0) {
+      const stage = (state.approvalWorkflow?.stages || []).find((item) => item.id === stageId) || null;
+      state.contentItems[index] = { ...state.contentItems[index], ...saved, stage: saved.stage ?? stage };
+    }
+    window.AAPAppMotion?.contentCardSaved?.(card);
+    showToast('Этап материала обновлён.');
+  } catch (error) {
+    renderContentBoard(); showWorkspaceError(error);
+  }
 }
 
 function renderContentBoard() {
@@ -651,11 +706,17 @@ function renderContentBoard() {
       empty.textContent = 'Перетащите материал сюда'; body.append(empty);
     }
     column.addEventListener('dragover', (event) => {
-      if (canEditContent()) event.preventDefault();
+      if (!canEditContent()) return;
+      event.preventDefault(); event.dataTransfer.dropEffect = 'move';
+      document.querySelectorAll('.content-column.drop-target').forEach((item) => item.classList.remove('drop-target'));
+      column.classList.add('drop-target');
+    });
+    column.addEventListener('dragleave', (event) => {
+      if (!column.contains(event.relatedTarget)) column.classList.remove('drop-target');
     });
     column.addEventListener('drop', (event) => {
       event.preventDefault(); const itemId = event.dataTransfer.getData('text/content-id');
-      if (itemId) moveContentToStage(itemId, stage.id || null);
+      if (itemId) moveContentToStage(itemId, stage.id || null, column);
     });
     column.append(heading, body); container.append(column);
   }
@@ -679,7 +740,7 @@ function renderContentCalendar() {
       const button = document.createElement('button'); button.className = 'calendar-entry';
       button.type = 'button'; button.textContent = item.title;
       button.style.setProperty('--entry-color', item.stage?.color || '#64748b');
-      button.addEventListener('click', () => openContentEditor(item.id).catch(showWorkspaceError));
+      button.addEventListener('click', () => openContentEditor(item.id, 'post', button).catch(showWorkspaceError));
       day.append(button);
     }
     container.append(day);
@@ -715,7 +776,7 @@ function renderDocuments() {
     const stage = document.createElement('span'); stage.textContent = item.stage?.name || 'Без этапа';
     const updated = document.createElement('span'); updated.textContent = `Изменён ${contentDate(item.updated_at)}`;
     footer.append(stage, updated); card.append(icon, title, description, footer);
-    card.addEventListener('click', () => openContentEditor(item.id).catch(showWorkspaceError));
+    card.addEventListener('click', () => openContentEditor(item.id, 'post', card).catch(showWorkspaceError));
     container.append(card);
   }
 }
@@ -862,8 +923,9 @@ function setContentFormEditable(editable) {
   $('#content-file-input').disabled = !editable;
 }
 
-async function openContentEditor(itemId = null, defaultType = 'post') {
+async function openContentEditor(itemId = null, defaultType = 'post', sourceElement = null) {
   if (!state.currentProjectId) return;
+  const sourceRect = sourceElement?.getBoundingClientRect?.();
   if (!state.approvalWorkflow) await loadApprovalWorkflow();
   state.editingContentId = itemId;
   const item = itemId ? await api(`/api/content/${itemId}`) : null;
@@ -885,6 +947,7 @@ async function openContentEditor(itemId = null, defaultType = 'post') {
   setContentFormEditable(canEditContent());
   if (item) renderRevisions(item.id).catch(() => {});
   $('#content-dialog').showModal();
+  window.AAPAppMotion?.dialogFromSource?.($('#content-dialog'), sourceRect);
 }
 
 async function refreshOpenContent() {
@@ -1784,7 +1847,13 @@ $('#add-member-form').addEventListener('submit', async (event) => {
 });
 
 $('#add-approval-stage').addEventListener('click', () => {
-  $('#approval-stages').append(approvalStageRow({ name: 'Новый этап' }));
+  const container = $('#approval-stages');
+  const layout = window.AAPAppMotion?.captureLayout?.(container);
+  const row = approvalStageRow({ name: 'Новый этап' });
+  container.append(row); syncApprovalStageOrder();
+  window.AAPAppMotion?.animateLayout?.(layout);
+  row.classList.add('app-item-enter');
+  row.addEventListener('animationend', () => row.classList.remove('app-item-enter'), { once: true });
 });
 
 $('#save-workflow-button').addEventListener('click', async (event) => {
@@ -1810,11 +1879,16 @@ $('#content-search').addEventListener('input', renderContent);
 $('#content-type-filter').addEventListener('change', renderContent);
 document.querySelectorAll('[data-content-view]').forEach((button) => {
   button.addEventListener('click', () => {
-    state.contentView = button.dataset.contentView;
-    document.querySelectorAll('[data-content-view]').forEach((item) => {
-      item.classList.toggle('active', item === button);
-    });
-    renderContent();
+    if (state.contentView === button.dataset.contentView) return;
+    const update = () => {
+      state.contentView = button.dataset.contentView;
+      document.querySelectorAll('[data-content-view]').forEach((item) => {
+        item.classList.toggle('active', item === button);
+      });
+      renderContent();
+    };
+    if (window.AAPAppMotion?.transitionContentView) window.AAPAppMotion.transitionContentView(update);
+    else update();
   });
 });
 

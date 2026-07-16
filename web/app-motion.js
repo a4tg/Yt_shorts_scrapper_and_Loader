@@ -89,6 +89,77 @@
     });
   }
 
+  function captureLayout(container) {
+    if (!container || reduced()) return new Map();
+    return new Map([...container.children].map((element) => [element, element.getBoundingClientRect()]));
+  }
+
+  function animateLayout(previousLayout) {
+    if (reduced()) return;
+    previousLayout.forEach((previous, element) => {
+      if (!element.isConnected || typeof element.animate !== 'function') return;
+      const current = element.getBoundingClientRect();
+      const x = previous.left - current.left;
+      const y = previous.top - current.top;
+      if (Math.abs(x) < 1 && Math.abs(y) < 1) return;
+      element.animate([
+        { transform: `translate(${x}px, ${y}px)`, zIndex: 2 },
+        { transform: 'translate(0, 0)', zIndex: 2 },
+      ], { duration: 360, easing: 'cubic-bezier(.2,.75,.25,1)' });
+    });
+  }
+
+  function contentCardMoved(card, previousRect, columns = []) {
+    if (!card) return;
+    card.classList.remove('dragging');
+    card.classList.add('card-saving');
+    columns.filter(Boolean).forEach((column) => replayClass(column, 'count-updated', 480));
+    if (!reduced() && previousRect && typeof card.animate === 'function') {
+      const current = card.getBoundingClientRect();
+      card.animate([
+        { transform: `translate(${previousRect.left - current.left}px, ${previousRect.top - current.top}px) scale(.975)`, boxShadow: '0 26px 55px rgba(0,0,0,.38)' },
+        { transform: 'translate(0, 0) scale(1)', boxShadow: '0 8px 20px rgba(0,0,0,.12)' },
+      ], { duration: 520, easing: 'cubic-bezier(.16,1,.3,1)' });
+    }
+  }
+
+  function contentCardSaved(card) {
+    if (!card) return;
+    card.classList.remove('card-saving');
+    replayClass(card, 'card-settling', 560);
+  }
+
+  function clearContentDragState() {
+    document.documentElement.classList.remove('content-is-dragging');
+    document.querySelectorAll('.content-column').forEach((column) => {
+      column.classList.remove('drop-ready', 'drop-target');
+    });
+  }
+
+  function dialogFromSource(dialog, sourceRect) {
+    if (!dialog || !sourceRect || reduced() || typeof dialog.animate !== 'function') return;
+    const current = dialog.getBoundingClientRect();
+    const x = sourceRect.left + sourceRect.width / 2 - (current.left + current.width / 2);
+    const y = sourceRect.top + sourceRect.height / 2 - (current.top + current.height / 2);
+    dialog.style.setProperty('--dialog-origin-x', `${sourceRect.left + sourceRect.width / 2 - current.left}px`);
+    dialog.style.setProperty('--dialog-origin-y', `${sourceRect.top + sourceRect.height / 2 - current.top}px`);
+    dialog.animate([
+      { opacity: .24, transform: `translate(${x}px, ${y}px) scale(.72)`, filter: 'blur(4px)' },
+      { opacity: 1, transform: 'translate(0, 0) scale(1)', filter: 'blur(0)' },
+    ], { duration: 520, easing: 'cubic-bezier(.16,1,.3,1)' });
+  }
+
+  function transitionContentView(update) {
+    if (reduced() || typeof document.startViewTransition !== 'function') {
+      update();
+      return null;
+    }
+    root.dataset.contentTransition = 'true';
+    const transition = document.startViewTransition(update);
+    transition.finished.finally(() => delete root.dataset.contentTransition);
+    return transition;
+  }
+
   function prepareSurface(element) {
     if (!(element instanceof Element)) return;
     const surfaces = element.matches(surfaceSelector)
@@ -212,7 +283,9 @@
   window.addEventListener('resize', syncNavigationIndicator, { passive: true });
 
   window.AAPAppMotion = Object.freeze({
-    appEntered, authEntered, contextUpdated, networkEnd, networkStart, pageEntered,
-    syncNavigationIndicator, toastIn, toastOut,
+    animateLayout, appEntered, authEntered, captureLayout, clearContentDragState,
+    contentCardMoved, contentCardSaved, contextUpdated, dialogFromSource, networkEnd,
+    networkStart, pageEntered, syncNavigationIndicator, toastIn, toastOut,
+    transitionContentView,
   });
 })();

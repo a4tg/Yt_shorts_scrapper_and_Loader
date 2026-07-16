@@ -1,0 +1,206 @@
+.content-board {
+  scroll-behavior: smooth;
+}
+
+.content-column {
+  position: relative;
+  overflow: hidden;
+}
+
+.content-column::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  border: 1px solid transparent;
+  border-radius: inherit;
+  opacity: 0;
+  background: linear-gradient(180deg, rgba(128, 109, 255, .08), transparent 42%);
+  transition: opacity 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.content-is-dragging .content-column.drop-ready::after {
+  opacity: .42;
+  border-color: rgba(128, 109, 255, .2);
+}
+
+.content-is-dragging .content-column.drop-target::after {
+  opacity: 1;
+  border-color: rgba(166, 154, 255, .68);
+  box-shadow: 0 0 0 3px rgba(128, 109, 255, .08) inset, 0 18px 42px rgba(3, 7, 14, .2);
+}
+
+.content-is-dragging .content-column:not(.drop-target) .content-card:not(.dragging) {
+  opacity: .72;
+}
+
+.content-card {
+  position: relative;
+  overflow: hidden;
+  transform-origin: center;
+  transition:
+    opacity 180ms ease,
+    border-color 180ms ease,
+    box-shadow 240ms ease,
+    translate 240ms var(--motion-ease-enter),
+    scale 240ms var(--motion-ease-enter);
+}
+
+.content-card.dragging {
+  opacity: .38;
+  scale: .965;
+}
+
+.content-card.card-settling {
+  animation: workflowCardSettle 520ms var(--motion-ease-spring) both;
+}
+
+.content-card.card-saving::before {
+  position: absolute;
+  width: 38%;
+  height: 2px;
+  left: -38%;
+  bottom: 0;
+  content: "";
+  border-radius: 99px;
+  background: linear-gradient(90deg, transparent, #a99fff, #40d9a0, transparent);
+  box-shadow: 0 0 10px rgba(128, 109, 255, .55);
+  animation: workflowCardSaving 1.1s ease-in-out infinite;
+}
+
+.content-column.drop-target .empty-column {
+  color: #c2baff;
+  border-color: rgba(128, 109, 255, .35);
+  background: rgba(128, 109, 255, .055);
+}
+
+.empty-column {
+  border: 1px dashed transparent;
+  border-radius: 10px;
+  transition: color 180ms ease, border-color 180ms ease, background 180ms ease;
+}
+
+.content-column-head > span {
+  transition: color 220ms ease, background 220ms ease, scale 260ms var(--motion-ease-spring);
+}
+
+.content-column.count-updated .content-column-head > span {
+  animation: workflowCountUpdate 420ms var(--motion-ease-spring);
+}
+
+#content-board:not(.hidden),
+#content-calendar:not(.hidden) {
+  view-transition-name: content-workflow-view;
+}
+
+html[data-content-transition] .workspace-page:not(.hidden),
+html[data-content-transition] #workspace-page-title {
+  view-transition-name: none;
+}
+
+::view-transition-old(content-workflow-view) {
+  animation: workflowViewOut 170ms var(--motion-ease-exit) both;
+}
+
+::view-transition-new(content-workflow-view) {
+  animation: workflowViewIn 430ms var(--motion-ease-enter) both;
+}
+
+.approval-stage-list {
+  position: relative;
+}
+
+.approval-stage-list::before {
+  position: absolute;
+  width: 1px;
+  left: 29px;
+  top: 24px;
+  bottom: 24px;
+  content: "";
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(128, 109, 255, .16), rgba(128, 109, 255, .62), rgba(64, 217, 160, .22));
+  box-shadow: 0 0 12px rgba(128, 109, 255, .16);
+}
+
+.approval-stage-row {
+  position: relative;
+  isolation: isolate;
+}
+
+.approval-stage-row::before {
+  position: absolute;
+  z-index: 2;
+  display: grid;
+  width: 18px;
+  height: 18px;
+  left: 20px;
+  top: 50%;
+  place-items: center;
+  content: attr(data-stage-order);
+  border: 1px solid rgba(158, 145, 255, .48);
+  border-radius: 50%;
+  background: #121b28;
+  color: #c2baff;
+  font-size: 8px;
+  font-weight: 900;
+  transform: translateY(-50%);
+  box-shadow: 0 0 0 4px #0e1722, 0 0 12px rgba(128, 109, 255, .18);
+  pointer-events: none;
+}
+
+.approval-stage-row .stage-grip {
+  opacity: 0;
+}
+
+.approval-stage-row.dragging {
+  z-index: 3;
+  border-color: rgba(128, 109, 255, .58);
+  background: #151f30;
+}
+
+.content-dialog[open] {
+  transform-origin: var(--dialog-origin-x, 50%) var(--dialog-origin-y, 50%);
+}
+
+@keyframes workflowCardSettle {
+  0% { border-color: rgba(128, 109, 255, .85); box-shadow: 0 0 0 5px rgba(128, 109, 255, .1); }
+  55% { scale: 1.012; }
+  100% { scale: 1; }
+}
+
+@keyframes workflowCardSaving {
+  to { left: 112%; }
+}
+
+@keyframes workflowCountUpdate {
+  0% { scale: .82; }
+  55% { scale: 1.16; color: #fff; background: rgba(128, 109, 255, .32); }
+  100% { scale: 1; }
+}
+
+@keyframes workflowViewOut {
+  to { opacity: 0; translate: -12px 0; filter: blur(2px); }
+}
+
+@keyframes workflowViewIn {
+  from { opacity: 0; translate: 17px 0; filter: blur(3px); }
+  to { opacity: 1; translate: 0; filter: blur(0); }
+}
+
+@media (max-width: 760px) {
+  .approval-stage-list::before { left: 23px; }
+  .approval-stage-row::before { left: 14px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .content-board { scroll-behavior: auto; }
+  .content-card.card-settling,
+  .content-card.card-saving::before,
+  .content-column.count-updated .content-column-head > span {
+    animation: none;
+  }
+  ::view-transition-old(content-workflow-view),
+  ::view-transition-new(content-workflow-view) {
+    animation-duration: .001ms !important;
+  }
+}
