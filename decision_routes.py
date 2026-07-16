@@ -385,6 +385,10 @@ def create_insight(project_id: str, payload: InsightCreate, request: Request, db
     )
     for link in payload.links:
         _validate_entity(db, project, link.entity_type, link.entity_id, request.state.user.id)
+        if member.role == "client" and link.entity_type == "review":
+            review = db.get(AssetReview, link.entity_id)
+            if review is None or review.visibility != "client":
+                raise HTTPException(404, "Связанное замечание не найдено.")
         db.add(InsightLink(insight_id=item.id, **link.model_dump()))
     item.impact_score = impact_score(item.kind, item.priority, item.due_at, sum(link.weight for link in payload.links))
     db.commit(); _event(project.id, "insight.created", request.state.user.id, insight_id=item.id)
@@ -396,6 +400,8 @@ def update_insight(insight_id: str, payload: InsightUpdate, request: Request, db
     item = db.get(ProjectInsight, insight_id)
     if item is None: raise HTTPException(404, "Сигнал не найден.")
     project, member = _project_access(db, item.project_id, request.state.user.id)
+    if member.role == "client" and item.visibility != "client":
+        raise HTTPException(404, "Сигнал не найден.")
     if not (has_role(member, "editor") or item.created_by_user_id == request.state.user.id or item.assignee_user_id == request.state.user.id): raise HTTPException(403, "Недостаточно прав для изменения сигнала.")
     values = payload.model_dump(exclude_unset=True)
     if member.role == "client" and values.get("visibility") not in {None, "client"}: raise HTTPException(403, "Клиент не может создать внутреннюю запись.")
@@ -416,6 +422,8 @@ def dismiss_insight(insight_id: str, request: Request, db: Session = Depends(get
     item = db.get(ProjectInsight, insight_id)
     if item is None: raise HTTPException(404, "Сигнал не найден.")
     _, member = _project_access(db, item.project_id, request.state.user.id)
+    if member.role == "client" and item.visibility != "client":
+        raise HTTPException(404, "Сигнал не найден.")
     if not (has_role(member, "editor") or item.created_by_user_id == request.state.user.id): raise HTTPException(403, "Недостаточно прав.")
     item.status = "dismissed"; item.completed_at = _now(); item.completed_by_user_id = request.state.user.id; db.commit()
     _event(item.project_id, "insight.dismissed", request.state.user.id, insight_id=item.id)

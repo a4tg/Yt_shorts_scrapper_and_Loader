@@ -107,6 +107,8 @@ def test_manual_insight_lifecycle_permissions_and_client_visibility() -> None:
     assert client_item.status_code == 201, client_item.text
     assert team.json()["id"] not in {item["id"] for item in client.get(f"/api/projects/{project['id']}/insights").json()}
     assert client_item.json()["id"] in {item["id"] for item in client.get(f"/api/projects/{project['id']}/insights").json()}
+    assert client.patch(f"/api/insights/{team.json()['id']}", headers=csrf(client), json={"status": "done"}).status_code == 404
+    assert client.delete(f"/api/insights/{team.json()['id']}", headers=csrf(client)).status_code == 404
     assert outsider.get(f"/api/projects/{project['id']}/attention").status_code == 404
     assert viewer.post(f"/api/projects/{project['id']}/insights/extract", headers=csrf(viewer), json={}).status_code == 403
 
