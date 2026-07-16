@@ -10,7 +10,7 @@ RUN apt-get update \
 COPY requirements-server.txt ./
 RUN pip install --no-cache-dir -r requirements-server.txt
 
-COPY server.py server_core.py media_metadata.py ai_service.py observability.py database.py saas_models.py job_queue.py auth_service.py auth_routes.py admin_routes.py email_service.py billing_service.py billing_routes.py payment_service.py payment_routes.py yookassa_client.py manage_users.py workspace_service.py workspace_routes.py content_routes.py asset_review_routes.py graph_routes.py file_validation.py asset_preview.py messaging_routes.py realtime_service.py ./
+COPY server.py server_core.py media_metadata.py ai_service.py observability.py database.py saas_models.py job_queue.py auth_service.py auth_routes.py admin_routes.py email_service.py billing_service.py billing_routes.py payment_service.py payment_routes.py yookassa_client.py manage_users.py workspace_service.py workspace_routes.py content_routes.py asset_review_routes.py graph_routes.py decision_routes.py decision_intelligence.py file_validation.py asset_preview.py messaging_routes.py realtime_service.py ./
 COPY alembic.ini ./
 COPY migrations ./migrations
 COPY web ./web

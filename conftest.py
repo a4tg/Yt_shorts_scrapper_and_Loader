@@ -25,10 +25,13 @@ from saas_models import (
     ContentRevision,
     Job,
     JobFile,
+    InsightLink,
     Overlay,
     Payment,
     Project,
+    ProjectBriefing,
     ProjectDiagram,
+    ProjectInsight,
     Subscription,
     User,
     UserSession,
@@ -85,6 +88,9 @@ def clear_saas_state_between_tests(isolated_test_database):
         db.execute(delete(DiagramNode))
         db.execute(delete(ProjectDiagram))
         db.execute(delete(EntityLink))
+        db.execute(delete(InsightLink))
+        db.execute(delete(ProjectInsight))
+        db.execute(delete(ProjectBriefing))
         db.execute(delete(ContentAttachment))
         db.execute(delete(ContentRevision))
         db.execute(delete(ContentItem))

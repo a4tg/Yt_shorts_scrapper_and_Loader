@@ -14,13 +14,13 @@ from realtime_service import project_events
 from saas_models import (
     ApprovalStage, ApprovalWorkflow, AssetReview, ContentAttachment, ContentItem,
     Conversation, ConversationParticipant, DiagramEdge, DiagramNode, EntityLink, Message, Project,
-    ProjectDiagram, User, WorkspaceMember,
+    InsightLink, ProjectDiagram, ProjectInsight, User, WorkspaceMember,
 )
 from workspace_service import has_role, project_membership
 
 
 router = APIRouter(prefix="/api", tags=["project-graph"])
-EntityType = Literal["project", "content", "asset", "conversation", "review", "user", "diagram"]
+EntityType = Literal["project", "content", "asset", "conversation", "review", "user", "diagram", "insight"]
 RelationType = Literal["relates_to", "depends_on", "blocks", "produces", "references", "assigned_to", "custom"]
 NodeKind = Literal["start", "end", "task", "decision", "document", "asset", "person", "note"]
 EdgeType = Literal["default", "success", "failure", "conditional"]
@@ -113,7 +113,8 @@ def _graph_edge(source_type: str, source_id: str, target_type: str, target_id: s
 def _entity_project_id(db: Session, entity_type: str, entity_id: str) -> str | None:
     if entity_type == "project":
         return entity_id if db.get(Project, entity_id) else None
-    model = {"content": ContentItem, "asset": ContentAttachment, "conversation": Conversation, "diagram": ProjectDiagram}.get(entity_type)
+    model = {"content": ContentItem, "asset": ContentAttachment, "conversation": Conversation,
+             "diagram": ProjectDiagram, "insight": ProjectInsight}.get(entity_type)
     if model:
         entity = db.get(model, entity_id)
         return entity.project_id if entity else None
@@ -235,6 +236,35 @@ def project_graph(
                                      x=-120 + math.cos(index * 1.8) * 180, y=math.sin(index * 1.8) * 320)
             nodes[graph_node["id"]] = graph_node
             edge = _graph_edge("project", project.id, "diagram", diagram.id, "described_by"); edges[edge["id"]] = edge
+
+    if include("insight"):
+        insight_statement = select(ProjectInsight).where(
+            ProjectInsight.project_id == project.id,
+            ProjectInsight.status.in_(["open", "in_progress"]),
+        ).order_by(ProjectInsight.impact_score.desc(), ProjectInsight.updated_at.desc()).limit(120)
+        if member.role == "client":
+            insight_statement = insight_statement.where(ProjectInsight.visibility == "client")
+        insights = db.scalars(insight_statement).all()
+        for index, insight in enumerate(insights):
+            graph_node = _graph_node(
+                "insight", insight.id, insight.title, kind=insight.kind,
+                subtitle=insight.priority, status=insight.status,
+                x=560 + math.cos(index * 1.35) * 190,
+                y=math.sin(index * 1.35) * 420,
+                extra={"impact_score": insight.impact_score, "due_at": insight.due_at.isoformat() if insight.due_at else None},
+            )
+            nodes[graph_node["id"]] = graph_node
+            edge = _graph_edge("project", project.id, "insight", insight.id, "has_signal")
+            edges[edge["id"]] = edge
+        insight_ids = [item.id for item in insights]
+        if insight_ids:
+            for link in db.scalars(select(InsightLink).where(InsightLink.insight_id.in_(insight_ids))).all():
+                source = f"insight:{link.insight_id}"
+                target = f"{link.entity_type}:{link.entity_id}"
+                if source in nodes and target in nodes:
+                    edge = _graph_edge("insight", link.insight_id, link.entity_type, link.entity_id,
+                                       link.relation_type, weight=link.weight)
+                    edges[edge["id"]] = edge
 
     manual_links = db.scalars(select(EntityLink).where(EntityLink.project_id == project.id)).all()
     for link in manual_links:

@@ -1,6 +1,6 @@
 const PAGE_NAMES = new Set([
   'dashboard', 'content', 'documents', 'library', 'video', 'approvals',
-  'messages', 'ai', 'billing', 'admin', 'graph',
+  'messages', 'ai', 'billing', 'admin', 'graph', 'attention',
 ]);
 
 export function parseWorkspaceHash(hash = window.location.hash) {

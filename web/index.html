@@ -23,6 +23,7 @@
   <link rel="stylesheet" href="/assets/asset-reviews.css">
   <link rel="stylesheet" href="/assets/project-graph.css">
   <link rel="stylesheet" href="/assets/project-graph-editor.css">
+  <link rel="stylesheet" href="/assets/decision-intelligence.css">
   <link rel="stylesheet" href="/assets/admin.css">
   <link rel="stylesheet" href="/assets/brand.css">
   <link rel="stylesheet" href="/assets/motion-system.css">
@@ -100,6 +101,7 @@
         <button class="workspace-nav-item" type="button" data-navigate="approvals"><span>✓</span>Согласования</button>
         <button class="workspace-nav-item" type="button" data-navigate="messages"><span>◌</span>Обсуждения<b id="messages-nav-badge" class="nav-unread-badge hidden">0</b></button>
         <button id="graph-nav-button" class="workspace-nav-item hidden" type="button" data-navigate="graph"><span>⌘</span>Карта проекта</button>
+        <button id="attention-nav-button" class="workspace-nav-item hidden" type="button" data-navigate="attention"><span>◆</span>Центр внимания<b id="attention-nav-badge" class="nav-unread-badge hidden">0</b></button>
         <button class="workspace-nav-item" type="button" data-navigate="ai"><span>✦</span>AI-помощник</button>
       </nav>
       <div class="workspace-nav workspace-nav-bottom">
@@ -249,6 +251,30 @@
         <button id="add-approval-stage" class="ghost" type="button">+ Добавить этап</button>
         <div id="workflow-status" class="status hidden" aria-live="polite"></div>
       </section>
+    </section>
+    <section class="workspace-page hidden decision-page" data-page="attention">
+      <header class="decision-page-head">
+        <div><p class="eyebrow">Decision Intelligence</p><h2>Центр внимания проекта</h2><p>Решения, обязательства, риски и открытые вопросы собраны из общего контекста проекта без чтения личных чатов.</p></div>
+        <div class="decision-head-actions"><button data-intel-action="extract" type="button">Обновить сигналы</button><button class="primary" data-intel-action="new" type="button">+ Добавить</button></div>
+      </header>
+      <div class="decision-overview">
+        <article class="attention-score-card"><div class="attention-score-ring"><strong id="attention-score">0</strong><span>/ 100</span></div><div><small>Нагрузка внимания</small><strong id="attention-label">Всё спокойно</strong><p>Чем выше оценка, тем больше срочных решений, просрочек и незакрытых замечаний.</p></div></article>
+        <div id="attention-stats" class="attention-stats"></div>
+      </div>
+      <section class="project-briefing-card">
+        <header><div><small>Короткая управленческая сводка</small><h3>Что важно прямо сейчас</h3></div><div><button data-intel-action="briefing" type="button">Собрать сводку</button><button data-intel-action="briefing-ai" type="button">✦ С AI</button></div></header>
+        <div id="project-briefing" class="project-briefing-empty">Сводка появится после первого анализа проекта.</div>
+      </section>
+      <div class="decision-workspace">
+        <main class="decision-signals-panel">
+          <header><div><h3>Сигналы проекта</h3><span id="decision-result-count"></span></div><div id="decision-filters" class="decision-filters"><button class="active" data-intel-filter="all" type="button">Все</button><button data-intel-filter="decision" type="button">Решения</button><button data-intel-filter="action" type="button">Действия</button><button data-intel-filter="commitment" type="button">Обязательства</button><button data-intel-filter="risk" type="button">Риски</button><button data-intel-filter="question" type="button">Вопросы</button></div></header>
+          <div id="decision-signal-list" class="decision-signal-list"></div>
+        </main>
+        <aside class="attention-queue-panel"><header><div><small>Приоритетная очередь</small><h3>Требует реакции</h3></div><button data-intel-action="graph" type="button">На карте →</button></header><div id="attention-queue" class="attention-queue"></div></aside>
+      </div>
+      <dialog id="decision-create-dialog" class="decision-create-dialog">
+        <form method="dialog"><header><div><small>Новый сигнал</small><h3>Зафиксировать в проекте</h3></div><button value="cancel" aria-label="Закрыть">×</button></header><div class="decision-form-grid"><label>Тип<select name="kind"><option value="decision">Решение</option><option value="action">Действие</option><option value="commitment">Обязательство</option><option value="risk">Риск</option><option value="question">Вопрос</option></select></label><label>Приоритет<select name="priority"><option value="normal">Обычный</option><option value="high">Высокий</option><option value="urgent">Срочный</option><option value="low">Низкий</option></select></label><label class="wide">Название<input name="title" maxlength="240" required></label><label class="wide">Описание<textarea name="description" maxlength="20000" rows="5"></textarea></label><label>Ответственный<select name="assignee_user_id"><option value="">Без ответственного</option></select></label><label>Срок<input name="due_at" type="datetime-local"></label><label>Видимость<select name="visibility"><option value="team">Только команда</option><option value="client">Команда и клиент</option></select></label></div><footer><button value="cancel">Отмена</button><button class="primary" value="default" data-intel-submit type="submit">Создать сигнал</button></footer></form>
+      </dialog>
     </section>
     <section class="workspace-page hidden project-graph-page" data-page="graph">
       <header class="project-graph-page-head">

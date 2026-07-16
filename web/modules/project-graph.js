@@ -1,7 +1,7 @@
 const WORLD_WIDTH = 2200;
 const WORLD_HEIGHT = 1500;
-const TYPE_LABELS = { project: 'Проект', content: 'Контент', asset: 'Файлы', conversation: 'Чаты', review: 'Замечания', user: 'Команда', diagram: 'Схемы' };
-const TYPE_ICONS = { project: 'AAP', content: '▤', asset: '◇', conversation: '◌', review: '!', user: '●', diagram: '⌘' };
+const TYPE_LABELS = { project: 'Проект', content: 'Контент', asset: 'Файлы', conversation: 'Чаты', review: 'Замечания', insight: 'Решения и риски', user: 'Команда', diagram: 'Схемы' };
+const TYPE_ICONS = { project: 'AAP', content: '▤', asset: '◇', conversation: '◌', review: '!', insight: '◆', user: '●', diagram: '⌘' };
 
 function node(tag, className, text) {
   const value = document.createElement(tag); if (className) value.className = className;
@@ -42,6 +42,7 @@ export function initProjectGraph({ bus, bridge }) {
     const groups = {};
     for (const item of state.graph.nodes) (groups[item.entity_type] ||= []).push(item);
     const columns = { user: 80, content: 360, diagram: 700, project: 950, asset: 1130, review: 1500, conversation: 1780 };
+    columns.insight = 1650;
     for (const [type, items] of Object.entries(groups)) {
       if (type === 'project') { items[0]._x = 970; items[0]._y = 690; continue; }
       const x = columns[type] || 1100; const spacing = Math.min(135, 1080 / Math.max(1, items.length));
@@ -148,6 +149,7 @@ export function initProjectGraph({ bus, bridge }) {
     else if (item.entity_type === 'content') bridge.navigate?.('content', true);
     else if (item.entity_type === 'diagram') { setView('diagrams'); openDiagram(item.entity_id).catch(showError); }
     else if (item.entity_type === 'review') bridge.notify?.('Откройте связанный файл, чтобы перейти к замечанию.');
+    else if (item.entity_type === 'insight') bridge.navigate?.('attention', true);
   }
 
   async function loadGraph() {
@@ -166,6 +168,9 @@ export function initProjectGraph({ bus, bridge }) {
     const source = new EventSource(`/api/projects/${state.projectId}/message-events`); state.source = source;
     for (const type of ['graph.link.created', 'graph.link.deleted', 'asset.version.created', 'asset.review.created', 'asset.review.updated', 'diagram.created', 'diagram.updated', 'diagram.deleted']) {
       source.addEventListener(type, () => { clearTimeout(state.refreshTimer); state.refreshTimer = setTimeout(() => { if (!state.dirty) { loadGraph().catch(showError); loadDiagrams().catch(showError); } }, 250); });
+    }
+    for (const type of ['insight.created', 'insight.updated', 'insight.dismissed', 'insights.extracted']) {
+      source.addEventListener(type, () => { clearTimeout(state.refreshTimer); state.refreshTimer = setTimeout(() => loadGraph().catch(showError), 250); });
     }
   }
 

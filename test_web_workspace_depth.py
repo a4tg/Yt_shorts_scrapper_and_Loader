@@ -46,6 +46,19 @@ class WorkspaceDepthFoundationTests(unittest.TestCase):
             self.assertIn(selector, styles)
         self.assertIn(".project-diagram-edge-list", editor_styles)
 
+    def test_decision_intelligence_attention_center_is_wired(self) -> None:
+        html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
+        entrypoint = (ROOT / "web" / "workspace-depth.js").read_text(encoding="utf-8")
+        script = (ROOT / "web" / "modules" / "decision-intelligence.js").read_text(encoding="utf-8")
+        styles = (ROOT / "web" / "decision-intelligence.css").read_text(encoding="utf-8")
+        for marker in ('data-page="attention"', 'id="attention-score"', 'id="decision-signal-list"', 'id="project-briefing"'):
+            self.assertIn(marker, html)
+        self.assertIn("registerModule('decision-intelligence'", entrypoint)
+        for marker in ("/attention", "/insights/extract", "/briefings", "EventSource", "patchInsight"):
+            self.assertIn(marker, script)
+        for selector in (".attention-score-ring", ".decision-signal", ".attention-queue-panel", ".decision-create-dialog"):
+            self.assertIn(selector, styles)
+
 
 if __name__ == "__main__":
     unittest.main()

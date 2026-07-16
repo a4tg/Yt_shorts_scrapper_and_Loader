@@ -425,6 +425,101 @@ class DiagramEdge(Base):
     extra: Mapped[dict[str, Any] | None] = mapped_column(JSON)
 
 
+class ProjectInsight(TimestampMixin, Base):
+    __tablename__ = "project_insights"
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('decision', 'commitment', 'action', 'risk', 'question')",
+            name="ck_project_insights_kind",
+        ),
+        CheckConstraint(
+            "status IN ('open', 'in_progress', 'done', 'dismissed')",
+            name="ck_project_insights_status",
+        ),
+        CheckConstraint(
+            "priority IN ('low', 'normal', 'high', 'urgent')",
+            name="ck_project_insights_priority",
+        ),
+        CheckConstraint("visibility IN ('team', 'client')", name="ck_project_insights_visibility"),
+        UniqueConstraint("project_id", "fingerprint", name="uq_project_insights_fingerprint"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    kind: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(240), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="open", index=True)
+    priority: Mapped[str] = mapped_column(String(16), nullable=False, default="normal", index=True)
+    visibility: Mapped[str] = mapped_column(String(16), nullable=False, default="team", index=True)
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    source_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    source_excerpt: Mapped[str | None] = mapped_column(String(1000))
+    assignee_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    impact_score: Mapped[float] = mapped_column(Float, nullable=False, default=1.0, index=True)
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    extra: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    created_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    completed_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class InsightLink(Base):
+    __tablename__ = "insight_links"
+    __table_args__ = (
+        UniqueConstraint("insight_id", "entity_type", "entity_id", "relation_type", name="uq_insight_links_relation"),
+        CheckConstraint(
+            "relation_type IN ('derived_from', 'impacts', 'depends_on', 'resolves')",
+            name="ck_insight_links_relation_type",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    insight_id: Mapped[str] = mapped_column(
+        ForeignKey("project_insights.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    entity_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    entity_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    relation_type: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
+    weight: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+
+
+class ProjectBriefing(Base):
+    __tablename__ = "project_briefings"
+    __table_args__ = (
+        CheckConstraint("visibility IN ('team', 'client')", name="ck_project_briefings_visibility"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    highlights: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
+    risks: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
+    next_actions: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
+    visibility: Mapped[str] = mapped_column(String(16), nullable=False, default="team", index=True)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False, default="rules")
+    model: Mapped[str | None] = mapped_column(String(120))
+    source_stats: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    generated_by_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    generated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+
+
 class Conversation(TimestampMixin, Base):
     __tablename__ = "conversations"
     __table_args__ = (

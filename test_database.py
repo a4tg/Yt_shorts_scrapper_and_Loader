@@ -46,6 +46,9 @@ EXPECTED_TABLES = {
     "project_diagrams",
     "diagram_nodes",
     "diagram_edges",
+    "project_insights",
+    "insight_links",
+    "project_briefings",
 }
 
 

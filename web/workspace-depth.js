@@ -5,6 +5,7 @@ import { initChatAnywhere } from './modules/chat-anywhere.js';
 import { initAssetViewer } from './modules/asset-viewer.js';
 import { initAssetReviews } from './modules/asset-reviews.js';
 import { initProjectGraph } from './modules/project-graph.js';
+import { initDecisionIntelligence } from './modules/decision-intelligence.js';
 
 const flags = new FeatureFlags(window.AAPLegacyApp?.getAuthConfig?.() || {});
 const router = new ContextRouter({ bus: workspaceBus });
@@ -43,6 +44,7 @@ registerModule('chat-anywhere', initChatAnywhere, 'chat_anywhere');
 registerModule('asset-viewer', initAssetViewer, 'asset_viewer');
 registerModule('asset-reviews', initAssetReviews, 'asset_reviews');
 registerModule('project-graph', initProjectGraph, 'project_graph');
+registerModule('decision-intelligence', initDecisionIntelligence, 'decision_intelligence');
 
 window.addEventListener('aap:auth-config', (event) => hydrateFeatures(event.detail));
 window.addEventListener('aap:context-change', (event) => workspaceBus.emit('context:change', event.detail));
