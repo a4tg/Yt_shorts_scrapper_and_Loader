@@ -8,13 +8,15 @@ const state = {
   workspaces: [], currentWorkspaceId: null, projects: [], currentProjectId: null,
   workspaceMembers: [], approvalWorkflow: null, contentItems: [], contentView: 'board',
   libraryItems: [], libraryFolders: [], currentLibraryFolderId: null,
+  conversations: [], activeConversationId: null, messages: [], messageReplyTo: null,
+  messageHasMore: false, messagePollTimer: null,
   editingContentId: null, aiConfig: null, aiResultJobs: {}, adminLoaded: false
 };
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const workspacePageTitles = {
   dashboard: 'Обзор', content: 'Контент-план', documents: 'Документы',
-  library: 'Медиатека', video: 'Видео', approvals: 'Согласования',
+  library: 'Медиатека', video: 'Видео', approvals: 'Согласования', messages: 'Обсуждения',
   ai: 'AI-помощник', billing: 'Тариф и кредиты', admin: 'Управление SaaS'
 };
 
@@ -25,13 +27,14 @@ const workspacePageContexts = {
   library: 'Единый архив материалов',
   video: 'Подготовка и обработка видео',
   approvals: 'Контроль качества и согласование',
+  messages: 'Коммуникация в контексте проекта',
   ai: 'AI-инструменты для контента',
   billing: 'Ресурсы рабочего пространства',
   admin: 'Контроль SaaS-платформы',
 };
 
 const workspacePageOrder = [
-  'dashboard', 'content', 'documents', 'library', 'video', 'approvals', 'ai', 'billing', 'admin',
+  'dashboard', 'content', 'documents', 'library', 'video', 'approvals', 'messages', 'ai', 'billing', 'admin',
 ];
 
 function workspacePageFromHash() {
@@ -86,6 +89,8 @@ function showWorkspacePage(page, syncUrl = false) {
   if (page === 'approvals' && state.currentProjectId) loadApprovalWorkflow().catch(showWorkspaceError);
   if (['content', 'documents'].includes(page) && state.currentProjectId) loadContent().catch(showWorkspaceError);
   if (page === 'library' && state.currentProjectId) loadLibrary().catch(showWorkspaceError);
+  if (page === 'messages' && state.currentProjectId) loadMessagingWorkspace().catch(showWorkspaceError);
+  else stopMessagePolling();
   if (page === 'ai' && state.currentProjectId) loadAIStudio().catch(showWorkspaceError);
   if (page === 'dashboard' && state.currentWorkspaceId) loadOnboarding().catch(() => {});
   if (page === 'admin' && state.currentUser?.is_admin) loadAdmin().catch(showWorkspaceError);
@@ -295,10 +300,13 @@ async function activateWorkspace(workspaceId) {
   state.currentProjectId = projects.some((project) => project.id === storedProject)
     ? storedProject : projects.find((project) => project.status === 'active')?.id || projects[0]?.id || null;
   state.currentLibraryFolderId = null;
+  state.activeConversationId = null; state.messages = [];
   renderWorkspaceProjects(); renderWorkspaceMembers();
   if (state.currentPage === 'approvals' && state.currentProjectId) await loadApprovalWorkflow();
   if (['content', 'documents'].includes(state.currentPage) && state.currentProjectId) await loadContent();
   if (state.currentPage === 'library' && state.currentProjectId) await loadLibrary();
+  if (state.currentPage === 'messages' && state.currentProjectId) await loadMessagingWorkspace();
+  else if (state.currentProjectId) refreshMessagesBadge().catch(() => {});
   if (state.currentPage === 'ai' && state.currentProjectId) await loadAIStudio();
   if (state.currentPage === 'dashboard') await loadOnboarding();
 }
@@ -307,11 +315,14 @@ function selectProject(projectId) {
   if (!state.projects.some((project) => project.id === projectId)) return;
   state.currentProjectId = projectId;
   state.currentLibraryFolderId = null;
+  state.activeConversationId = null; state.messages = [];
   localStorage.setItem(`allAsPlannedProject:${state.currentWorkspaceId}`, projectId);
   renderWorkspaceProjects();
   if (state.currentPage === 'approvals') loadApprovalWorkflow().catch(showWorkspaceError);
   if (['content', 'documents'].includes(state.currentPage)) loadContent().catch(showWorkspaceError);
   if (state.currentPage === 'library') loadLibrary().catch(showWorkspaceError);
+  if (state.currentPage === 'messages') loadMessagingWorkspace().catch(showWorkspaceError);
+  else refreshMessagesBadge().catch(() => {});
   if (state.currentPage === 'ai') loadAIStudio().catch(showWorkspaceError);
   if (state.currentPage === 'dashboard') loadOnboarding().catch(() => {});
 }
@@ -984,6 +995,259 @@ async function uploadLibraryFiles(fileList) {
   finally { $('#library-file-input').value = ''; setTimeout(() => panel.classList.add('hidden'), 500); }
 }
 
+const conversationKindLabels = { group: 'Групповой чат', direct: 'Личный диалог', context: 'Обсуждение материала' };
+
+function initials(value = '') {
+  return value.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'AAP';
+}
+
+function conversationTime(value) {
+  if (!value) return '';
+  const date = new Date(value); const today = new Date();
+  return date.toDateString() === today.toDateString()
+    ? date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+    : date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+}
+
+function updateMessagesNavBadge() {
+  const unread = state.conversations.reduce((sum, conversation) => sum + Number(conversation.unread_count || 0), 0);
+  const badge = $('#messages-nav-badge'); badge.textContent = unread > 99 ? '99+' : String(unread);
+  badge.classList.toggle('hidden', unread === 0);
+}
+
+function conversationPreview(conversation) {
+  const message = conversation.last_message;
+  if (!message) return conversation.kind === 'context' ? conversation.content_title : 'Сообщений пока нет';
+  if (message.deleted_at) return 'Сообщение удалено';
+  if (message.body) return `${message.author.name}: ${message.body}`;
+  return `${message.author.name}: ${message.attachment_name || 'Файл'}`;
+}
+
+function renderConversationList() {
+  const container = $('#conversation-list'); container.replaceChildren();
+  const query = $('#conversation-search').value.trim().toLocaleLowerCase('ru-RU');
+  const groups = [
+    ['Проектные', state.conversations.filter((item) => item.kind === 'group')],
+    ['Личные', state.conversations.filter((item) => item.kind === 'direct')],
+    ['По материалам', state.conversations.filter((item) => item.kind === 'context')],
+  ];
+  for (const [label, conversations] of groups) {
+    const visible = conversations.filter((item) => !query || item.name.toLocaleLowerCase('ru-RU').includes(query)
+      || conversationPreview(item).toLocaleLowerCase('ru-RU').includes(query));
+    if (!visible.length) continue;
+    const heading = document.createElement('div'); heading.className = 'conversation-section-label'; heading.textContent = label; container.append(heading);
+    for (const conversation of visible) {
+      const button = document.createElement('button'); button.type = 'button';
+      button.className = `conversation-row${conversation.id === state.activeConversationId ? ' active' : ''}`;
+      const avatar = document.createElement('span'); avatar.className = `conversation-avatar ${conversation.kind}`;
+      avatar.textContent = conversation.kind === 'context' ? '▤' : initials(conversation.name);
+      const copy = document.createElement('span'); copy.className = 'conversation-copy';
+      const name = document.createElement('strong'); name.textContent = conversation.name;
+      const preview = document.createElement('small'); preview.textContent = conversationPreview(conversation); copy.append(name, preview);
+      const meta = document.createElement('span'); meta.className = 'conversation-meta';
+      const time = document.createElement('time'); time.textContent = conversationTime(conversation.updated_at); meta.append(time);
+      if (conversation.unread_count) {
+        const unread = document.createElement('b'); unread.className = 'conversation-unread'; unread.textContent = conversation.unread_count; meta.append(unread);
+      }
+      button.append(avatar, copy, meta); button.addEventListener('click', () => openConversation(conversation.id)); container.append(button);
+    }
+  }
+  if (!container.children.length) container.append(createBrandedEmptyState('Диалоги не найдены', 'Создайте групповой чат или начните личную переписку.'));
+  updateMessagesNavBadge();
+}
+
+function activeConversation() {
+  return state.conversations.find((conversation) => conversation.id === state.activeConversationId) || null;
+}
+
+function renderChatDetails() {
+  const conversation = activeConversation(); const members = $('#chat-member-list'); const files = $('#chat-file-list');
+  members.replaceChildren(); files.replaceChildren();
+  if (!conversation) return;
+  const participants = conversation.is_project_wide
+    ? state.workspaceMembers.map((member) => ({ id: member.user_id, name: member.display_name || member.email, email: member.email }))
+    : conversation.participants;
+  for (const member of participants) {
+    const row = document.createElement('div'); row.className = 'chat-member-row';
+    const avatar = document.createElement('span'); avatar.textContent = initials(member.name);
+    const copy = document.createElement('div'); const name = document.createElement('strong'); name.textContent = member.name;
+    const email = document.createElement('small'); email.textContent = member.email; copy.append(name, email); row.append(avatar, copy); members.append(row);
+  }
+  const attachments = new Map();
+  for (const message of state.messages) if (message.attachment) attachments.set(message.attachment.id, message.attachment);
+  for (const attachment of attachments.values()) {
+    const link = document.createElement('a'); link.className = 'chat-file-row'; link.href = attachment.download_url;
+    const icon = document.createElement('span'); icon.textContent = '◇';
+    const copy = document.createElement('div'); const name = document.createElement('strong'); name.textContent = attachment.name;
+    const size = document.createElement('small'); size.textContent = humanFileSize(attachment.size_bytes); copy.append(name, size); link.append(icon, copy); files.append(link);
+  }
+  if (!files.children.length) { const empty = document.createElement('small'); empty.textContent = 'Вложений пока нет'; files.append(empty); }
+  $('#chat-details-avatar').textContent = conversation.kind === 'context' ? '▤' : initials(conversation.name);
+  $('#chat-details-title').textContent = conversation.name;
+  $('#chat-details-description').textContent = conversation.content_title
+    ? `Обсуждение материала «${conversation.content_title}».`
+    : `${conversationKindLabels[conversation.kind]} · ${participants.length} участников`;
+}
+
+function renderMessageAttachment(message) {
+  if (!message.attachment && !message.attachment_name) return null;
+  if (!message.attachment) {
+    const missing = document.createElement('div'); missing.className = 'message-attachment';
+    const icon = document.createElement('span'); icon.textContent = '—';
+    const copy = document.createElement('div'); const title = document.createElement('strong'); title.textContent = message.attachment_name;
+    const note = document.createElement('small'); note.textContent = 'Файл удалён из проекта'; copy.append(title, note); missing.append(icon, copy); return missing;
+  }
+  const attachment = message.attachment; const link = document.createElement('a'); link.className = 'message-attachment'; link.href = attachment.download_url;
+  const icon = document.createElement('span'); icon.textContent = (attachment.name.split('.').pop() || 'FILE').slice(0, 4).toUpperCase();
+  const copy = document.createElement('div'); const title = document.createElement('strong'); title.textContent = attachment.name;
+  const size = document.createElement('small'); size.textContent = humanFileSize(attachment.size_bytes); copy.append(title, size);
+  const arrow = document.createElement('b'); arrow.textContent = '↓'; link.append(icon, copy, arrow); return link;
+}
+
+function renderMessages({ scrollToBottom = false } = {}) {
+  const container = $('#message-list'); container.replaceChildren(); let previousDay = '';
+  if (!state.activeConversationId || !state.messages.length) {
+    const empty = document.createElement('div'); empty.className = 'message-empty';
+    const icon = document.createElement('span'); icon.textContent = '◌'; const title = document.createElement('h3'); title.textContent = 'Начните обсуждение';
+    const text = document.createElement('p'); text.textContent = 'Первое сообщение задаст рабочий контекст для команды.'; empty.append(icon, title, text); container.append(empty);
+  }
+  for (const message of state.messages) {
+    const day = new Date(message.created_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
+    if (day !== previousDay) { const divider = document.createElement('div'); divider.className = 'message-day'; divider.textContent = day; container.append(divider); previousDay = day; }
+    const row = document.createElement('article'); row.className = `message-bubble-row${message.is_own ? ' own' : ''}`; row.dataset.messageId = message.id;
+    const avatar = document.createElement('span'); avatar.className = 'message-author-avatar'; avatar.textContent = initials(message.author.name);
+    const bubble = document.createElement('div'); bubble.className = 'message-bubble';
+    const head = document.createElement('div'); head.className = 'message-bubble-head';
+    const author = document.createElement('strong'); author.textContent = message.author.name;
+    const time = document.createElement('time'); time.textContent = conversationTime(message.created_at); head.append(author, time); bubble.append(head);
+    if (message.reply_to) {
+      const quote = document.createElement('div'); quote.className = 'message-reply-quote';
+      const by = document.createElement('small'); by.textContent = message.reply_to.author_name;
+      const text = document.createElement('span'); text.textContent = message.reply_to.deleted ? 'Сообщение удалено' : (message.reply_to.body || 'Вложение'); quote.append(by, text); bubble.append(quote);
+    }
+    const body = document.createElement('p');
+    if (message.deleted_at) { body.className = 'message-deleted'; body.textContent = 'Сообщение удалено'; }
+    else if (message.body) { body.textContent = message.body; }
+    if (body.textContent) bubble.append(body);
+    const attachment = message.deleted_at ? null : renderMessageAttachment(message); if (attachment) bubble.append(attachment);
+    if (message.edited_at && !message.deleted_at) { const edited = document.createElement('small'); edited.className = 'message-edited'; edited.textContent = 'изменено'; bubble.append(edited); }
+    const actions = document.createElement('div'); actions.className = 'message-actions';
+    if (!message.deleted_at) {
+      const reply = document.createElement('button'); reply.type = 'button'; reply.textContent = 'Ответить'; reply.addEventListener('click', () => setMessageReply(message)); actions.append(reply);
+      if (message.is_own) {
+        const edit = document.createElement('button'); edit.type = 'button'; edit.textContent = 'Изменить'; edit.addEventListener('click', () => editMessage(message));
+        const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = 'Удалить'; remove.addEventListener('click', () => deleteMessage(message)); actions.append(edit, remove);
+      }
+    }
+    row.append(avatar, bubble, actions); container.append(row);
+  }
+  $('#load-older-messages').classList.toggle('hidden', !state.messageHasMore);
+  renderChatDetails();
+  if (scrollToBottom) requestAnimationFrame(() => { container.scrollTop = container.scrollHeight; });
+}
+
+function setMessageReply(message) {
+  state.messageReplyTo = message; const preview = $('#message-reply-preview'); preview.classList.remove('hidden');
+  preview.querySelector('strong').textContent = `${message.author.name}: ${message.body || message.attachment_name || 'Вложение'}`;
+  $('#message-body').focus();
+}
+
+function clearMessageReply() { state.messageReplyTo = null; $('#message-reply-preview').classList.add('hidden'); }
+
+async function editMessage(message) {
+  const body = prompt('Изменить сообщение', message.body || ''); if (!body?.trim() || body.trim() === message.body) return;
+  try {
+    const updated = await api(`/api/messages/${message.id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body: body.trim() })
+    });
+    state.messages = state.messages.map((item) => item.id === updated.id ? updated : item); renderMessages();
+  } catch (error) { showWorkspaceError(error); }
+}
+
+async function deleteMessage(message) {
+  if (!confirm('Удалить это сообщение?')) return;
+  try { await api(`/api/messages/${message.id}`, { method: 'DELETE' }); await refreshActiveMessages(); }
+  catch (error) { showWorkspaceError(error); }
+}
+
+function populateMessageAttachmentSelect() {
+  const select = $('#message-attachment'); select.replaceChildren();
+  const none = document.createElement('option'); none.value = ''; none.textContent = 'Без вложения'; select.append(none);
+  for (const item of state.libraryItems) { const option = document.createElement('option'); option.value = item.id; option.textContent = item.name; select.append(option); }
+}
+
+async function openConversation(conversationId, { preserveScroll = false } = {}) {
+  state.activeConversationId = conversationId; clearMessageReply(); renderConversationList();
+  const conversation = activeConversation();
+  $('#chat-kind').textContent = conversationKindLabels[conversation.kind]; $('#chat-title').textContent = conversation.name;
+  const participantCount = conversation.is_project_wide ? state.workspaceMembers.length : conversation.participants.length;
+  $('#chat-participants').textContent = conversation.content_title || `${participantCount} участников`;
+  const result = await api(`/api/conversations/${conversation.id}/messages`);
+  state.messages = result.messages; state.messageHasMore = result.has_more; renderMessages({ scrollToBottom: !preserveScroll });
+  await api(`/api/conversations/${conversation.id}/read`, { method: 'POST' });
+  conversation.unread_count = 0; renderConversationList();
+}
+
+async function refreshActiveMessages() {
+  if (!state.activeConversationId) return;
+  const result = await api(`/api/conversations/${state.activeConversationId}/messages`);
+  state.messages = result.messages; state.messageHasMore = result.has_more; renderMessages({ scrollToBottom: true });
+}
+
+async function loadMessagingWorkspace() {
+  if (!state.currentProjectId) return;
+  stopMessagePolling();
+  const [conversations, library] = await Promise.all([
+    api(`/api/projects/${state.currentProjectId}/conversations`),
+    api(`/api/projects/${state.currentProjectId}/library`),
+  ]);
+  state.conversations = conversations; state.libraryItems = library; populateMessageAttachmentSelect();
+  if (!state.conversations.some((conversation) => conversation.id === state.activeConversationId)) {
+    state.activeConversationId = state.conversations[0]?.id || null;
+  }
+  renderConversationList();
+  if (state.activeConversationId) await openConversation(state.activeConversationId);
+  startMessagePolling();
+}
+
+async function refreshMessagesBadge() {
+  if (!state.currentProjectId) return;
+  state.conversations = await api(`/api/projects/${state.currentProjectId}/conversations`);
+  updateMessagesNavBadge();
+}
+
+async function pollMessages() {
+  if (state.currentPage !== 'messages' || !state.currentProjectId) return;
+  try {
+    state.conversations = await api(`/api/projects/${state.currentProjectId}/conversations`); renderConversationList();
+    if (state.activeConversationId) {
+      const result = await api(`/api/conversations/${state.activeConversationId}/messages`);
+      if (JSON.stringify(result.messages) !== JSON.stringify(state.messages)) {
+        const previousLast = state.messages[state.messages.length - 1]?.id;
+        state.messages = result.messages; state.messageHasMore = result.has_more;
+        renderMessages({ scrollToBottom: previousLast !== state.messages[state.messages.length - 1]?.id });
+        await api(`/api/conversations/${state.activeConversationId}/read`, { method: 'POST' });
+        const active = activeConversation(); if (active) active.unread_count = 0; renderConversationList();
+      }
+    }
+  } catch (_) {}
+  if (state.currentPage === 'messages') state.messagePollTimer = setTimeout(pollMessages, 4000);
+}
+
+function startMessagePolling() { stopMessagePolling(); state.messagePollTimer = setTimeout(pollMessages, 4000); }
+function stopMessagePolling() { if (state.messagePollTimer) clearTimeout(state.messagePollTimer); state.messagePollTimer = null; }
+
+function renderConversationMemberOptions() {
+  const container = $('#conversation-member-options'); container.replaceChildren();
+  const direct = $('#conversation-kind').value === 'direct';
+  for (const member of state.workspaceMembers.filter((item) => item.user_id !== state.currentUser?.id)) {
+    const label = document.createElement('label'); label.className = 'conversation-member-option';
+    const input = document.createElement('input'); input.type = direct ? 'radio' : 'checkbox'; input.name = 'conversation-member'; input.value = member.user_id;
+    const copy = document.createElement('span'); const name = document.createElement('strong'); name.textContent = member.display_name || member.email;
+    const detail = document.createElement('small'); detail.textContent = member.email; copy.append(name, detail); label.append(input, copy); container.append(label);
+  }
+}
+
 function setAIStatus(selector, message, isError = false) {
   const element = $(selector); element.textContent = message;
   element.className = `status${isError ? ' error' : ''}`;
@@ -1109,6 +1373,7 @@ async function openContentEditor(itemId = null, defaultType = 'post', sourceElem
   $('#content-files-section').classList.toggle('hidden', !item);
   $('#content-history-section').classList.toggle('hidden', !item);
   $('#archive-content-button').classList.toggle('hidden', !item);
+  $('#content-discussion-button').classList.toggle('hidden', !item);
   $('#content-form-status').textContent = '';
   setContentFormEditable(canEditContent());
   if (item) renderRevisions(item.id).catch(() => {});
@@ -2132,6 +2397,86 @@ $('#library-file-delete').addEventListener('click', async () => {
   try {
     await api(`/api/content-attachments/${id}`, { method: 'DELETE' });
     $('#library-file-dialog').close(); await loadLibrary(); showToast('Файл удалён.');
+  } catch (error) { showWorkspaceError(error); }
+});
+
+$('#conversation-search').addEventListener('input', renderConversationList);
+$('#new-conversation-button').addEventListener('click', () => {
+  $('#conversation-form').reset(); $('#conversation-kind').value = 'group';
+  $('#conversation-name-label').classList.remove('hidden'); $('#conversation-wide-label').classList.remove('hidden');
+  renderConversationMemberOptions(); $('#conversation-status').textContent = ''; $('#conversation-dialog').showModal();
+});
+$('#conversation-kind').addEventListener('change', () => {
+  const direct = $('#conversation-kind').value === 'direct';
+  $('#conversation-name-label').classList.toggle('hidden', direct);
+  $('#conversation-wide-label').classList.toggle('hidden', direct);
+  renderConversationMemberOptions();
+});
+$('#conversation-project-wide').addEventListener('change', (event) => {
+  $('#conversation-member-options').classList.toggle('muted', event.target.checked);
+});
+$('#conversation-form').addEventListener('submit', async (event) => {
+  event.preventDefault(); const submit = event.submitter; submit.disabled = true;
+  const status = $('#conversation-status'); status.className = 'auth-status'; status.textContent = 'Создаю диалог…';
+  try {
+    const selected = [...document.querySelectorAll('#conversation-member-options input:checked')].map((input) => input.value);
+    const kind = $('#conversation-kind').value;
+    const conversation = await api(`/api/projects/${state.currentProjectId}/conversations`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        kind, name: kind === 'group' ? $('#conversation-name').value.trim() : null,
+        participant_user_ids: selected,
+        is_project_wide: kind === 'group' && $('#conversation-project-wide').checked,
+      })
+    });
+    $('#conversation-dialog').close(); state.activeConversationId = conversation.id;
+    await loadMessagingWorkspace(); showToast(kind === 'direct' ? 'Личный диалог открыт.' : 'Групповой чат создан.');
+  } catch (error) { status.className = 'auth-status error'; status.textContent = error.message; }
+  finally { submit.disabled = false; }
+});
+
+$('#message-composer').addEventListener('submit', async (event) => {
+  event.preventDefault(); if (!state.activeConversationId) return;
+  const submit = event.submitter; const body = $('#message-body').value.trim(); const attachmentId = $('#message-attachment').value || null;
+  if (!body && !attachmentId) return;
+  submit.disabled = true;
+  try {
+    const message = await api(`/api/conversations/${state.activeConversationId}/messages`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body: body || null, attachment_id: attachmentId, reply_to_message_id: state.messageReplyTo?.id || null })
+    });
+    state.messages.push(message); $('#message-body').value = ''; $('#message-attachment').value = ''; clearMessageReply();
+    $('.message-attachment-picker span').textContent = '＋ Файл';
+    const conversation = activeConversation();
+    if (conversation) { conversation.last_message = message; conversation.updated_at = message.created_at; conversation.unread_count = 0; }
+    renderConversationList();
+    renderMessages({ scrollToBottom: true });
+  } catch (error) { showWorkspaceError(error); }
+  finally { submit.disabled = false; }
+});
+$('#message-body').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); $('#message-composer').requestSubmit(); }
+});
+$('#message-attachment').addEventListener('change', (event) => {
+  const option = event.target.selectedOptions[0];
+  $('.message-attachment-picker span').textContent = event.target.value ? `＋ ${option.textContent}` : '＋ Файл';
+});
+$('#cancel-message-reply').addEventListener('click', clearMessageReply);
+$('#load-older-messages').addEventListener('click', async () => {
+  const first = state.messages[0]; if (!first || !state.activeConversationId) return;
+  try {
+    const result = await api(`/api/conversations/${state.activeConversationId}/messages?before=${encodeURIComponent(first.created_at)}`);
+    state.messages = [...result.messages, ...state.messages]; state.messageHasMore = result.has_more; renderMessages();
+  } catch (error) { showWorkspaceError(error); }
+});
+$('#chat-details-toggle').addEventListener('click', () => $('#chat-details').classList.toggle('open'));
+
+$('#content-discussion-button').addEventListener('click', async () => {
+  const itemId = $('#content-id').value; if (!itemId) return;
+  try {
+    const conversation = await api(`/api/content/${itemId}/conversation`, { method: 'POST' });
+    $('#content-dialog').close(); state.activeConversationId = conversation.id;
+    showWorkspacePage('messages', true);
   } catch (error) { showWorkspaceError(error); }
 });
 

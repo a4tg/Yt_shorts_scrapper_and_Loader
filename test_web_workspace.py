@@ -18,6 +18,7 @@ class WebWorkspaceTests(unittest.TestCase):
             "library",
             "video",
             "approvals",
+            "messages",
             "ai",
             "billing",
             "admin",

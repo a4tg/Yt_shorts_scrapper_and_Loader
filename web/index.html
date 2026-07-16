@@ -17,6 +17,7 @@
   <link rel="stylesheet" href="/assets/billing.css">
   <link rel="stylesheet" href="/assets/workspace.css">
   <link rel="stylesheet" href="/assets/ai.css">
+  <link rel="stylesheet" href="/assets/messages.css">
   <link rel="stylesheet" href="/assets/admin.css">
   <link rel="stylesheet" href="/assets/brand.css">
   <link rel="stylesheet" href="/assets/motion-system.css">
@@ -92,6 +93,7 @@
         <button class="workspace-nav-item" type="button" data-navigate="library"><span>◫</span>Медиатека</button>
         <button class="workspace-nav-item" type="button" data-navigate="video"><span>▶</span>Видео</button>
         <button class="workspace-nav-item" type="button" data-navigate="approvals"><span>✓</span>Согласования</button>
+        <button class="workspace-nav-item" type="button" data-navigate="messages"><span>◌</span>Обсуждения<b id="messages-nav-badge" class="nav-unread-badge hidden">0</b></button>
         <button class="workspace-nav-item" type="button" data-navigate="ai"><span>✦</span>AI-помощник</button>
       </nav>
       <div class="workspace-nav workspace-nav-bottom">
@@ -206,6 +208,31 @@
         <div id="library-upload-progress" class="content-upload-progress hidden" aria-live="polite"><div><span>Загрузка</span><b>0%</b></div><progress max="100" value="0"></progress></div>
         <div id="library-summary" class="library-summary"></div>
         <div id="library-grid" class="library-grid" aria-live="polite"></div>
+      </section>
+    </section>
+    <section class="workspace-page hidden" data-page="messages">
+      <section class="messages-workspace panel">
+        <aside class="messages-sidebar">
+          <div class="messages-sidebar-head"><div><p class="eyebrow">Команда проекта</p><h2>Обсуждения</h2></div><button id="new-conversation-button" class="icon-button" type="button" aria-label="Новый диалог" title="Новый диалог">+</button></div>
+          <input id="conversation-search" type="search" placeholder="Найти диалог" aria-label="Поиск диалогов">
+          <div id="conversation-list" class="conversation-list" aria-live="polite"></div>
+        </aside>
+        <section id="chat-panel" class="chat-panel">
+          <header class="chat-header"><div><p id="chat-kind" class="eyebrow">Выберите диалог</p><h2 id="chat-title">Сообщения проекта</h2><span id="chat-participants">Контекст и решения остаются рядом с работой</span></div><button id="chat-details-toggle" class="icon-button" type="button" aria-label="Информация о диалоге">ⓘ</button></header>
+          <button id="load-older-messages" class="text-button hidden" type="button">Показать более ранние сообщения</button>
+          <div id="message-list" class="message-list" aria-live="polite"></div>
+          <form id="message-composer" class="message-composer">
+            <div id="message-reply-preview" class="message-reply-preview hidden"><div><small>Ответ на сообщение</small><strong></strong></div><button id="cancel-message-reply" class="icon-button" type="button" aria-label="Отменить ответ">×</button></div>
+            <textarea id="message-body" rows="2" maxlength="10000" placeholder="Напишите сообщение…" aria-label="Текст сообщения"></textarea>
+            <div class="message-composer-actions"><label class="message-attachment-picker"><span>＋ Файл</span><select id="message-attachment" aria-label="Прикрепить файл из проекта"><option value="">Без вложения</option></select></label><small>Enter — отправить · Shift+Enter — новая строка</small><button class="primary" type="submit">Отправить <span>↗</span></button></div>
+          </form>
+        </section>
+        <aside id="chat-details" class="chat-details">
+          <div class="chat-details-visual"><span id="chat-details-avatar">AAP</span></div>
+          <h3 id="chat-details-title">Рабочий контекст</h3><p id="chat-details-description">Участники, вложения и связь с материалом появятся здесь.</p>
+          <div><h4>Участники</h4><div id="chat-member-list" class="chat-member-list"></div></div>
+          <div><h4>Файлы в переписке</h4><div id="chat-file-list" class="chat-file-list"></div></div>
+        </aside>
       </section>
     </section>
     <section class="workspace-page hidden" data-page="approvals">
@@ -403,6 +430,17 @@
       <div id="project-dialog-status" class="auth-status" aria-live="polite"></div>
     </form>
   </dialog>
+  <dialog id="conversation-dialog" class="account-dialog workspace-dialog conversation-dialog">
+    <form id="conversation-form" method="dialog">
+      <h2>Новый диалог</h2>
+      <label><span>Формат</span><select id="conversation-kind"><option value="group">Групповой чат</option><option value="direct">Личное сообщение</option></select></label>
+      <label id="conversation-name-label"><span>Название</span><input id="conversation-name" type="text" maxlength="120" placeholder="Например, Редакция запуска"></label>
+      <label id="conversation-wide-label" class="conversation-wide-option"><input id="conversation-project-wide" type="checkbox"><span>Доступен всем участникам проекта</span></label>
+      <fieldset><legend>Участники</legend><div id="conversation-member-options" class="conversation-member-options"></div></fieldset>
+      <div class="dialog-actions"><button class="ghost dialog-cancel" type="button">Отмена</button><button class="primary" type="submit">Создать диалог</button></div>
+      <div id="conversation-status" class="auth-status" aria-live="polite"></div>
+    </form>
+  </dialog>
   <dialog id="library-file-dialog" class="account-dialog workspace-dialog">
     <form id="library-file-form" method="dialog">
       <h2>Настроить файл</h2>
@@ -450,7 +488,7 @@
         <div id="content-attachments" class="attachment-list"></div>
       </section>
       <details id="content-history-section" class="content-history hidden"><summary>История изменений</summary><div id="content-revisions"></div></details>
-      <div class="dialog-actions content-dialog-actions"><button id="archive-content-button" class="danger hidden" type="button">В архив</button><span></span><button id="content-dialog-cancel" class="ghost" type="button">Отмена</button><button class="primary" type="submit">Сохранить</button></div>
+      <div class="dialog-actions content-dialog-actions"><button id="archive-content-button" class="danger hidden" type="button">В архив</button><span></span><button id="content-discussion-button" class="ghost hidden" type="button">Обсудить</button><button id="content-dialog-cancel" class="ghost" type="button">Отмена</button><button class="primary" type="submit">Сохранить</button></div>
       <div id="content-form-status" class="auth-status" aria-live="polite"></div>
     </form>
   </dialog>
