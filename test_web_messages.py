@@ -42,6 +42,20 @@ class WebMessagesTests(unittest.TestCase):
         self.assertIn(".message-bubble-row.own", styles)
         self.assertIn("@media(max-width:760px)", styles)
 
+    def test_chat_anywhere_module_has_persistent_floating_realtime_ux(self) -> None:
+        html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
+        entrypoint = (ROOT / "web" / "workspace-depth.js").read_text(encoding="utf-8")
+        script = (ROOT / "web" / "modules" / "chat-anywhere.js").read_text(encoding="utf-8")
+        styles = (ROOT / "web" / "chat-anywhere.css").read_text(encoding="utf-8")
+        self.assertIn('/assets/chat-anywhere.css', html)
+        self.assertIn("registerModule('chat-anywhere'", entrypoint)
+        self.assertIn("new EventSource", script)
+        self.assertIn("aapChatAnywhereLayoutV1", script)
+        self.assertIn("mentioned_user_ids", script)
+        self.assertIn("/pinned-messages", script)
+        self.assertIn("data-mode=docked", styles)
+        self.assertIn("resize:both", styles)
+
 
 if __name__ == "__main__":
     unittest.main()

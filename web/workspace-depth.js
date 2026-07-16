@@ -1,6 +1,7 @@
 import { workspaceBus } from './core/event-bus.js';
 import { FeatureFlags } from './core/feature-flags.js';
 import { ContextRouter } from './core/context-router.js';
+import { initChatAnywhere } from './modules/chat-anywhere.js';
 
 const flags = new FeatureFlags(window.AAPLegacyApp?.getAuthConfig?.() || {});
 const router = new ContextRouter({ bus: workspaceBus });
@@ -34,6 +35,8 @@ window.AAPWorkspaceDepth = Object.freeze({
   registerModule,
   startModule,
 });
+
+registerModule('chat-anywhere', initChatAnywhere, 'chat_anywhere');
 
 window.addEventListener('aap:auth-config', (event) => hydrateFeatures(event.detail));
 window.addEventListener('aap:context-change', (event) => workspaceBus.emit('context:change', event.detail));

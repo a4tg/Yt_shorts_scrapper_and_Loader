@@ -2505,7 +2505,12 @@ $('#content-discussion-button').addEventListener('click', async () => {
   try {
     const conversation = await api(`/api/content/${itemId}/conversation`, { method: 'POST' });
     $('#content-dialog').close(); state.activeConversationId = conversation.id;
-    showWorkspacePage('messages', true);
+    if (window.AAPWorkspaceDepth?.flags?.enabled('chat_anywhere')) {
+      window.AAPWorkspaceDepth.bus.emit('chat:open', {
+        conversationId: conversation.id,
+        context: { type: 'content', id: itemId, title: conversation.content_title },
+      });
+    } else showWorkspacePage('messages', true);
   } catch (error) { showWorkspaceError(error); }
 });
 
