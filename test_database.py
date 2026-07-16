@@ -36,6 +36,9 @@ EXPECTED_TABLES = {
         "content_revisions",
     "content_attachments",
     "project_folders",
+    "conversations",
+    "conversation_participants",
+    "messages",
 }
 
 

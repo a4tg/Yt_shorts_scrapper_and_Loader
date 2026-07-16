@@ -244,6 +244,77 @@ class ContentAttachment(Base):
     )
 
 
+class Conversation(TimestampMixin, Base):
+    __tablename__ = "conversations"
+    __table_args__ = (
+        UniqueConstraint("project_id", "conversation_key", name="uq_conversations_project_key"),
+        CheckConstraint(
+            "kind IN ('group', 'direct', 'context')", name="ck_conversations_kind"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    content_item_id: Mapped[str | None] = mapped_column(
+        ForeignKey("content_items.id", ondelete="CASCADE"), index=True
+    )
+    kind: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
+    conversation_key: Mapped[str | None] = mapped_column(String(200))
+    name: Mapped[str | None] = mapped_column(String(120))
+    is_project_wide: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
+    created_by_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+
+
+class ConversationParticipant(Base):
+    __tablename__ = "conversation_participants"
+    __table_args__ = (
+        UniqueConstraint("conversation_id", "user_id", name="uq_conversation_participant_user"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    conversation_id: Mapped[str] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    joined_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    last_read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class Message(Base):
+    __tablename__ = "messages"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    conversation_id: Mapped[str] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    author_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    reply_to_message_id: Mapped[str | None] = mapped_column(
+        ForeignKey("messages.id", ondelete="SET NULL"), index=True
+    )
+    attachment_id: Mapped[str | None] = mapped_column(
+        ForeignKey("content_attachments.id", ondelete="SET NULL"), index=True
+    )
+    attachment_name: Mapped[str | None] = mapped_column(String(255))
+    body: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+    edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+
+
 class UserSession(Base):
     __tablename__ = "user_sessions"
 

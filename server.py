@@ -29,6 +29,7 @@ from auth_routes import router as auth_router
 from admin_routes import router as admin_router
 from billing_routes import router as billing_router
 from content_routes import CONTENT_DIR, router as content_router
+from messaging_routes import router as messaging_router
 from payment_routes import router as payment_router
 from workspace_routes import router as workspace_router
 from auth_service import (
@@ -449,6 +450,7 @@ app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(billing_router)
 app.include_router(content_router)
+app.include_router(messaging_router)
 app.include_router(payment_router)
 app.include_router(workspace_router)
 
