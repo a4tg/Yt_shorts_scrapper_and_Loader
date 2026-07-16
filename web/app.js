@@ -94,6 +94,7 @@ function showWorkspacePage(page, syncUrl = false) {
   if (page === 'ai' && state.currentProjectId) loadAIStudio().catch(showWorkspaceError);
   if (page === 'dashboard' && state.currentWorkspaceId) loadOnboarding().catch(() => {});
   if (page === 'admin' && state.currentUser?.is_admin) loadAdmin().catch(showWorkspaceError);
+  emitWorkspaceContext('page');
   window.scrollTo({ top: 0, behavior: 'instant' });
 }
 
@@ -274,6 +275,26 @@ function currentProject() {
   return state.projects.find((project) => project.id === state.currentProjectId) || null;
 }
 
+function workspaceContextSnapshot() {
+  const workspace = currentWorkspace(); const project = currentProject();
+  return {
+    page: state.currentPage,
+    user: state.currentUser ? {
+      id: state.currentUser.id,
+      name: state.currentUser.display_name || state.currentUser.email,
+      isAdmin: Boolean(state.currentUser.is_admin),
+    } : null,
+    workspace: workspace ? { id: workspace.id, name: workspace.name, role: workspace.role } : null,
+    project: project ? { id: project.id, name: project.name, status: project.status } : null,
+  };
+}
+
+function emitWorkspaceContext(reason) {
+  window.dispatchEvent(new CustomEvent('aap:context-change', {
+    detail: { ...workspaceContextSnapshot(), reason },
+  }));
+}
+
 async function loadWorkspaces(preferredId = null) {
   state.workspaces = await api('/api/workspaces');
   const select = $('#workspace-select'); select.replaceChildren();
@@ -314,6 +335,7 @@ async function activateWorkspace(workspaceId) {
   else if (state.currentProjectId) refreshMessagesBadge().catch(() => {});
   if (state.currentPage === 'ai' && state.currentProjectId) await loadAIStudio();
   if (state.currentPage === 'dashboard') await loadOnboarding();
+  emitWorkspaceContext('workspace');
 }
 
 function selectProject(projectId) {
@@ -330,6 +352,7 @@ function selectProject(projectId) {
   else refreshMessagesBadge().catch(() => {});
   if (state.currentPage === 'ai') loadAIStudio().catch(showWorkspaceError);
   if (state.currentPage === 'dashboard') loadOnboarding().catch(() => {});
+  emitWorkspaceContext('project');
 }
 
 const onboardingStorageKey = 'allAsPlannedOnboardingV1';
@@ -2215,6 +2238,7 @@ async function bootstrapAuth() {
   try {
     const config = await api('/api/auth/config');
     state.authConfig = config;
+    window.dispatchEvent(new CustomEvent('aap:auth-config', { detail: config }));
     $('#register-form').classList.toggle('hidden', !config.registration_enabled);
     $('#forgot-toggle').dataset.available = String(config.password_reset_enabled);
     $('#forgot-toggle').title = config.password_reset_enabled
@@ -2719,4 +2743,12 @@ $('#ai-save-form').addEventListener('submit', async (event) => {
   finally { submit.disabled = false; }
 });
 
+window.AAPLegacyApp = Object.freeze({
+  api,
+  getAuthConfig: () => ({ ...state.authConfig }),
+  getContext: workspaceContextSnapshot,
+  navigate: (page, syncUrl = true) => showWorkspacePage(page, syncUrl),
+  notify: showToast,
+});
+window.dispatchEvent(new CustomEvent('aap:legacy-ready'));
 bootstrapAuth();

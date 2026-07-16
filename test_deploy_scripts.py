@@ -47,6 +47,18 @@ class ContainerManifestTests(unittest.TestCase):
         self.assertIn("RUTUBE_COOKIES: /cookies/rutube.ru_cookies.txt", compose)
         self.assertIn("./cookies:/cookies", compose)
 
+    def test_workspace_depth_flags_are_passed_to_containers(self) -> None:
+        compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+        for name in (
+            "WORKSPACE_DEPTH_SHELL",
+            "CHAT_ANYWHERE",
+            "ASSET_VIEWER",
+            "ASSET_REVIEWS",
+            "PROJECT_GRAPH",
+            "DECISION_INTELLIGENCE",
+        ):
+            self.assertIn(f"YT_LOADER_FEATURE_{name}", compose)
+
 
 if __name__ == "__main__":
     unittest.main()

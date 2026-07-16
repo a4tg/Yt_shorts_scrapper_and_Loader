@@ -41,6 +41,35 @@ def test_protected_api_requires_login() -> None:
     assert "script-src 'self'" in response.headers["content-security-policy"]
 
 
+def test_workspace_depth_features_are_public_and_disabled_by_default(monkeypatch) -> None:
+    names = (
+        "WORKSPACE_DEPTH_SHELL",
+        "CHAT_ANYWHERE",
+        "ASSET_VIEWER",
+        "ASSET_REVIEWS",
+        "PROJECT_GRAPH",
+        "DECISION_INTELLIGENCE",
+    )
+    for name in names:
+        monkeypatch.delenv(f"YT_LOADER_FEATURE_{name}", raising=False)
+    response = TestClient(server.app).get("/api/auth/config")
+    assert response.status_code == 200
+    assert response.json()["features"] == {
+        "workspace_depth_shell": False,
+        "chat_anywhere": False,
+        "asset_viewer": False,
+        "asset_reviews": False,
+        "project_graph": False,
+        "decision_intelligence": False,
+    }
+
+
+def test_workspace_depth_feature_can_be_enabled(monkeypatch) -> None:
+    monkeypatch.setenv("YT_LOADER_FEATURE_ASSET_VIEWER", "true")
+    response = TestClient(server.app).get("/api/auth/config")
+    assert response.json()["features"]["asset_viewer"] is True
+
+
 def test_registration_uses_argon2_and_server_side_session() -> None:
     client, payload = register_client()
 

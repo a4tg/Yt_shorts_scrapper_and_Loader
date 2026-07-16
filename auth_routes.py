@@ -73,6 +73,25 @@ def registration_enabled() -> bool:
     }
 
 
+WORKSPACE_DEPTH_FEATURES = (
+    "workspace_depth_shell",
+    "chat_anywhere",
+    "asset_viewer",
+    "asset_reviews",
+    "project_graph",
+    "decision_intelligence",
+)
+
+
+def workspace_depth_features() -> dict[str, bool]:
+    """Return public rollout flags without exposing environment values."""
+    return {
+        name: os.getenv(f"YT_LOADER_FEATURE_{name.upper()}", "false").strip().lower()
+        in {"1", "true", "yes", "on"}
+        for name in WORKSPACE_DEPTH_FEATURES
+    }
+
+
 def user_payload(db: Session, user: User) -> dict[str, object]:
     credits = credit_snapshot(db, user.id)
     return {
@@ -88,12 +107,13 @@ def user_payload(db: Session, user: User) -> dict[str, object]:
 
 
 @router.get("/config")
-def auth_config() -> dict[str, bool]:
+def auth_config() -> dict[str, object]:
     return {
         "registration_enabled": registration_enabled(),
         "email_verification_required": email_verification_required(),
         "email_delivery_enabled": email_features_configured(),
         "password_reset_enabled": email_features_configured(),
+        "features": workspace_depth_features(),
     }
 
 
