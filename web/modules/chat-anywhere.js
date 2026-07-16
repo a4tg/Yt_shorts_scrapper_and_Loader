@@ -1,5 +1,6 @@
 const REACTIONS = ['👍', '❤️', '🔥', '🎉', '👀', '✅'];
-const LAYOUT_KEY = 'aapChatAnywhereLayoutV1';
+// V2 intentionally resets layouts saved by the pre-hotfix unbounded resizer.
+const LAYOUT_KEY = 'aapChatAnywhereLayoutV2';
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -31,7 +32,8 @@ export function initChatAnywhere({ bus, router, bridge }) {
     activeConversationId: null, replyTo: null, mentionedIds: new Set(),
     source: null, refreshTimer: null, projectId: null, opened: false,
   };
-  const layout = { mode: 'floating', left: null, top: null, width: 430, height: 650, ...loadLayout() };
+  const layout = { mode: 'floating', left: null, top: null, width: 480, height: 680, ...loadLayout() };
+  if (!['floating', 'docked', 'minimized', 'expanded'].includes(layout.mode)) layout.mode = 'floating';
 
   const launcher = element('button', 'chat-anywhere-launcher');
   launcher.type = 'button'; launcher.setAttribute('aria-label', 'Открыть чат');
@@ -44,7 +46,7 @@ export function initChatAnywhere({ bus, router, bridge }) {
       <button class="chat-anywhere-conversations-toggle" type="button" aria-label="Показать диалоги">☰</button>
       <span class="chat-anywhere-avatar">AAP</span>
       <div><strong>Чат проекта</strong><small>Выберите проект</small></div>
-      <button data-chat-control="full" type="button" title="Открыть inbox" aria-label="Открыть полную страницу сообщений">↗</button>
+      <button data-chat-control="full" type="button" title="Развернуть чат" aria-label="Развернуть чат на весь экран">⛶</button>
       <button data-chat-control="dock" type="button" title="Закрепить сбоку" aria-label="Закрепить окно сбоку">◧</button>
       <button data-chat-control="minimize" type="button" title="Свернуть" aria-label="Свернуть окно">—</button>
       <button data-chat-control="close" type="button" title="Закрыть" aria-label="Закрыть окно">×</button>
@@ -111,10 +113,17 @@ export function initChatAnywhere({ bus, router, bridge }) {
     shell.style.removeProperty('left'); shell.style.removeProperty('top');
     shell.style.removeProperty('width'); shell.style.removeProperty('height');
     if (layout.mode === 'floating') {
-      shell.style.width = `${Math.max(360, layout.width)}px`; shell.style.height = `${Math.max(460, layout.height)}px`;
-      if (layout.left !== null) shell.style.left = `${Math.max(8, Math.min(layout.left, innerWidth - 360))}px`;
-      if (layout.top !== null) shell.style.top = `${Math.max(8, Math.min(layout.top, innerHeight - 120))}px`;
+      const width = Math.min(Math.max(360, Number(layout.width) || 480), Math.max(360, innerWidth - 16));
+      const height = Math.min(Math.max(460, Number(layout.height) || 680), Math.max(460, innerHeight - 16));
+      layout.width = width; layout.height = height;
+      shell.style.width = `${width}px`; shell.style.height = `${height}px`;
+      if (layout.left !== null) shell.style.left = `${Math.max(8, Math.min(Number(layout.left) || 8, Math.max(8, innerWidth - width - 8)))}px`;
+      if (layout.top !== null) shell.style.top = `${Math.max(8, Math.min(Number(layout.top) || 8, Math.max(8, innerHeight - height - 8)))}px`;
     }
+    const fullButton = $('[data-chat-control="full"]');
+    fullButton.textContent = layout.mode === 'expanded' ? '↙' : '⛶';
+    fullButton.title = layout.mode === 'expanded' ? 'Вернуть размер окна' : 'Развернуть чат';
+    fullButton.setAttribute('aria-label', fullButton.title);
   }
 
   function setMode(mode) {
@@ -337,7 +346,7 @@ export function initChatAnywhere({ bus, router, bridge }) {
     if (control === 'close') closeWindow();
     else if (control === 'minimize') setMode(layout.mode === 'minimized' ? 'floating' : 'minimized');
     else if (control === 'dock') setMode(layout.mode === 'docked' ? 'floating' : 'docked');
-    else if (control === 'full') bridge.navigate('messages', true);
+    else if (control === 'full') setMode(layout.mode === 'expanded' ? 'floating' : 'expanded');
     const action = event.target.closest('[data-chat-action]')?.dataset.chatAction;
     if (action === 'mention') mentionPanel.classList.toggle('hidden');
     else if (action === 'pins') showPins().catch(showError);
@@ -374,17 +383,34 @@ export function initChatAnywhere({ bus, router, bridge }) {
   });
 
   let drag = null;
-  $('.chat-anywhere-head').addEventListener('pointerdown', (event) => {
+  const dragHandle = $('.chat-anywhere-head');
+  function finishDrag(event) {
+    if (!drag || (event?.pointerId !== undefined && event.pointerId !== drag.pointerId)) return;
+    const moved = drag.moved; const pointerId = drag.pointerId; drag = null;
+    shell.classList.remove('dragging');
+    if (dragHandle.hasPointerCapture?.(pointerId)) dragHandle.releasePointerCapture(pointerId);
+    if (moved) persistLayout();
+  }
+  dragHandle.addEventListener('pointerdown', (event) => {
     if (layout.mode !== 'floating' || event.target.closest('button')) return;
-    const bounds = shell.getBoundingClientRect(); drag = { x: event.clientX, y: event.clientY, left: bounds.left, top: bounds.top };
-    shell.setPointerCapture(event.pointerId); shell.classList.add('dragging');
+    const bounds = shell.getBoundingClientRect();
+    drag = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, left: bounds.left, top: bounds.top, moved: false };
+    dragHandle.setPointerCapture(event.pointerId);
   });
-  $('.chat-anywhere-head').addEventListener('pointermove', (event) => {
-    if (!drag) return;
-    shell.style.left = `${Math.max(8, Math.min(innerWidth - shell.offsetWidth - 8, drag.left + event.clientX - drag.x))}px`;
-    shell.style.top = `${Math.max(8, Math.min(innerHeight - 70, drag.top + event.clientY - drag.y))}px`;
+  dragHandle.addEventListener('pointermove', (event) => {
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    const dx = event.clientX - drag.x; const dy = event.clientY - drag.y;
+    if (!drag.moved && Math.hypot(dx, dy) < 6) return;
+    if (!drag.moved) { drag.moved = true; shell.classList.add('dragging'); }
+    event.preventDefault();
+    shell.style.left = `${Math.max(8, Math.min(innerWidth - shell.offsetWidth - 8, drag.left + dx))}px`;
+    shell.style.top = `${Math.max(8, Math.min(innerHeight - shell.offsetHeight - 8, drag.top + dy))}px`;
   });
-  $('.chat-anywhere-head').addEventListener('pointerup', () => { if (drag) { drag = null; shell.classList.remove('dragging'); persistLayout(); } });
+  dragHandle.addEventListener('pointerup', finishDrag);
+  dragHandle.addEventListener('pointercancel', finishDrag);
+  dragHandle.addEventListener('lostpointercapture', finishDrag);
+  window.addEventListener('blur', finishDrag);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) finishDrag(); });
   window.addEventListener('mouseup', () => { if (!shell.classList.contains('hidden')) persistLayout(); });
   window.addEventListener('resize', applyLayout);
   window.addEventListener('keydown', (event) => {

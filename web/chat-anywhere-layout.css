@@ -1,0 +1,14 @@
+.chat-anywhere-head{touch-action:none}
+.chat-anywhere-thread-head{grid-row:1}
+.chat-anywhere-context{grid-row:2}
+.chat-anywhere-messages{grid-row:3}
+.chat-anywhere-reply{grid-row:4}
+.chat-anywhere-composer{grid-row:5}
+.chat-anywhere[data-mode=expanded] .chat-anywhere-body{grid-template-columns:minmax(220px,18vw) minmax(0,1fr)}
+.chat-anywhere[data-mode=expanded] .chat-anywhere-message{max-width:min(72%,900px)}
+
+@media(max-width:700px){
+  .chat-anywhere[data-mode=expanded]{inset:auto 0 0!important;width:100%!important;height:100%!important;border-radius:0}
+  .chat-anywhere[data-mode=expanded] .chat-anywhere-body{display:block}
+  .chat-anywhere[data-mode=expanded] .chat-anywhere-message{max-width:96%}
+}
