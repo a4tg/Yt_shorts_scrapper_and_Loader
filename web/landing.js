@@ -92,9 +92,10 @@ if (!window.AAPMotion.reduced()) {
   const revealGroups = [
     ['.hero-copy', '.hero-board'],
     ['.proof span'],
+    ['.story-chapter-marker'],
     ['.landing-section > .kicker', '.landing-section > h2'],
     ['.feature-grid article'],
-    ['.video-feature > div'],
+    ['.video-feature > div:not(.story-chapter-marker):not(.story-chapter-ambient)'],
     ['.price-grid article'],
     ['.faq details'],
     ['.final-cta > *'],
