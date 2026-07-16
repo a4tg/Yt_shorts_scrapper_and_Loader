@@ -6,7 +6,8 @@
   let regionObserver = null;
   const animatedRegionSelector = [
     '.hero-stage', '.product-demo', '.video-feature', '.value-flow', '.final-cta-visual',
-    '.dashboard-orbit', '.audience-section', '.auth-brand-scene', '[data-motion-region]',
+    '.dashboard-orbit', '.audience-section', '.auth-brand-scene', '.video-stage',
+    '.batch-progress', '.approval-stage-list', '.content-board', '[data-motion-region]',
   ].join(',');
 
   function reduced() {

@@ -145,7 +145,7 @@ class VisualQualityTests(unittest.TestCase):
             "motion-system.css", "landing-motion.css", "product-demo.css", "commercial.css",
             "scroll-story.css", "app-motion.css", "brand-graphics.css", "performance.css",
             "ambient-particles.css", "app-shell-premium.css", "workflow-motion.css",
-            "video-workflow-motion.css",
+            "video-workflow-motion.css", "app-polish.css",
         ]
         for name in motion_files:
             with self.subTest(stylesheet=name):
@@ -202,6 +202,17 @@ class VisualQualityTests(unittest.TestCase):
         self.assertIn("batchProgress", motion)
         self.assertIn("aria-valuenow", motion)
         self.assertIn("prefers-reduced-motion: reduce", styles)
+
+    def test_app_polish_preserves_mobile_and_accessibility_fallbacks(self) -> None:
+        index = (WEB / "index.html").read_text(encoding="utf-8")
+        motion = (WEB / "motion-system.js").read_text(encoding="utf-8")
+        styles = (WEB / "app-polish.css").read_text(encoding="utf-8")
+        self.assertIn('/assets/app-polish.css', index)
+        self.assertIn("max-width: 760px", styles)
+        self.assertIn("update: slow", styles)
+        self.assertIn("prefers-reduced-motion: reduce", styles)
+        self.assertIn("forced-colors: active", styles)
+        self.assertIn(".video-stage", motion)
 
     def test_brand_assets_stay_within_delivery_budget(self) -> None:
         budgets = {

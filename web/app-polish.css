@@ -1,0 +1,200 @@
+html {
+  scrollbar-color: #34435a #0b121c;
+  scrollbar-width: thin;
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: #0b121c; }
+::-webkit-scrollbar-thumb { border: 2px solid #0b121c; border-radius: 99px; background: #34435a; }
+::-webkit-scrollbar-thumb:hover { background: #465a77; }
+
+.workspace-main::after {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  min-height: 32px;
+  right: 24px;
+  top: 76px;
+  align-items: center;
+  padding: 0 12px 0 30px;
+  content: "Синхронизация";
+  border: 1px solid rgba(128, 109, 255, .3);
+  border-radius: 999px;
+  color: #c6c0ff;
+  background:
+    radial-gradient(circle at 15px 50%, #806dff 0 3px, transparent 4px),
+    rgba(13, 21, 32, .9);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .28), 0 0 0 1px rgba(255, 255, 255, .025) inset;
+  backdrop-filter: blur(14px) saturate(130%);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  opacity: 0;
+  pointer-events: none;
+  translate: 0 -9px;
+  transition: opacity 180ms ease, translate 300ms var(--motion-ease-enter);
+}
+
+.app-shell[aria-busy="true"] .workspace-main::after {
+  opacity: 1;
+  translate: 0;
+  animation: appSyncChip 1.8s ease-in-out infinite;
+}
+
+.workspace-main :where(input, select, textarea):not(:disabled) {
+  transition:
+    border-color 180ms ease,
+    box-shadow 240ms ease,
+    background-color 240ms ease,
+    translate 180ms var(--motion-ease-enter);
+}
+
+.workspace-main :where(input, select, textarea):not(:disabled):focus {
+  border-color: rgba(145, 129, 255, .8);
+  background-color: #101a28;
+  box-shadow: 0 0 0 3px rgba(128, 109, 255, .095), 0 10px 28px rgba(0, 0, 0, .13);
+}
+
+.workspace-main :where(button, .button, a.primary, a.secondary, a.ghost):not(:disabled) {
+  transition:
+    translate 180ms var(--motion-ease-enter),
+    scale 180ms var(--motion-ease-enter),
+    filter 180ms ease,
+    border-color 180ms ease,
+    box-shadow 240ms ease;
+}
+
+.workspace-main :where(button, .button, a.primary, a.secondary, a.ghost):not(:disabled):hover {
+  translate: 0 -1px;
+}
+
+.workspace-main :where(button, .button, a.primary, a.secondary, a.ghost):not(:disabled):active {
+  translate: 0 1px;
+  scale: .98;
+}
+
+.workspace-main :where(button, input, select, textarea):disabled {
+  filter: saturate(.62);
+}
+
+.panel,
+.dashboard-welcome,
+.content-dialog,
+.account-dialog {
+  background-clip: padding-box;
+}
+
+.panel > .section-title,
+.panel > .content-heading,
+.panel > .results-head {
+  position: relative;
+  z-index: 1;
+}
+
+.content-dialog::backdrop,
+.account-dialog::backdrop,
+.workspace-dialog::backdrop {
+  background: rgba(2, 6, 12, .72);
+  backdrop-filter: blur(8px) saturate(120%);
+}
+
+@keyframes appSyncChip {
+  0%, 100% { box-shadow: 0 12px 32px rgba(0, 0, 0, .28), 0 0 0 0 rgba(128, 109, 255, 0); }
+  50% { box-shadow: 0 12px 32px rgba(0, 0, 0, .28), 0 0 0 4px rgba(128, 109, 255, .06); }
+}
+
+@keyframes appBottomSheetIn {
+  from { opacity: .45; translate: 0 30px; }
+  to { opacity: 1; translate: 0; }
+}
+
+@media (max-width: 760px) {
+  .workspace-main::after {
+    right: 12px;
+    top: 68px;
+  }
+
+  .workspace-sidebar {
+    background: rgba(10, 17, 27, .94);
+    box-shadow: 0 -12px 38px rgba(0, 0, 0, .3);
+    backdrop-filter: blur(18px) saturate(135%);
+  }
+
+  .workspace-nav-item {
+    overflow: hidden;
+    transition: min-width 400ms var(--motion-ease-spring), background 180ms ease, color 180ms ease;
+  }
+
+  .workspace-nav-item.active {
+    min-width: 108px;
+    gap: 7px;
+    font-size: 10px;
+    white-space: nowrap;
+  }
+
+  :where(.content-dialog, .account-dialog, .workspace-dialog)[open] {
+    width: 100%;
+    max-width: none;
+    max-height: min(92dvh, 850px);
+    inset: auto 0 0;
+    margin: 0;
+    border-radius: 22px 22px 0 0;
+    animation: appBottomSheetIn 420ms var(--motion-ease-enter) both;
+  }
+
+  .content-dialog form,
+  .account-dialog form,
+  .workspace-dialog form {
+    max-height: min(92dvh, 850px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+}
+
+@media (max-width: 520px) {
+  .workspace-main::after { top: 62px; }
+  .batch-progress > div { align-items: flex-start; flex-direction: column; gap: 3px; }
+  .item-job-progress { grid-template-columns: 1fr; }
+  .item-job-progress > b { font-size: 10px; }
+}
+
+@media (update: slow) {
+  .workspace-main::after,
+  .workspace-sidebar,
+  .content-dialog::backdrop,
+  .account-dialog::backdrop,
+  .workspace-dialog::backdrop {
+    backdrop-filter: none;
+  }
+
+  .app-shell[aria-busy="true"] .workspace-main::after,
+  .video-step-current .step::after,
+  .video-stage.has-source::before,
+  .item-job-progress.is-running > i span {
+    animation: none;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .workspace-main::after,
+  .workspace-sidebar {
+    backdrop-filter: none;
+    background-color: #0b121c;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-shell[aria-busy="true"] .workspace-main::after,
+  :where(.content-dialog, .account-dialog, .workspace-dialog)[open] {
+    animation: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .workspace-main::after,
+  .workspace-sidebar::after,
+  .item-job-progress,
+  .batch-progress {
+    border: 1px solid CanvasText;
+  }
+}

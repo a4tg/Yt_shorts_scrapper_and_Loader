@@ -7,6 +7,7 @@
   let requestSequence = 0;
   let networkHideTimer = 0;
   let navigationFrame = 0;
+  let navigationResizeObserver = null;
 
   const networkBar = document.createElement('div');
   networkBar.className = 'app-network-progress';
@@ -351,6 +352,10 @@
     if (!authScreen?.classList.contains('hidden')) authEntered();
     syncNavigationIndicator();
   });
+  if ('ResizeObserver' in window) {
+    navigationResizeObserver = new ResizeObserver(syncNavigationIndicator);
+    document.querySelectorAll('.workspace-nav-item[data-navigate]').forEach((item) => navigationResizeObserver.observe(item));
+  }
   window.addEventListener('resize', syncNavigationIndicator, { passive: true });
 
   window.AAPAppMotion = Object.freeze({
