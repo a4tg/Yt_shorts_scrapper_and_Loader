@@ -23,6 +23,9 @@ class WebAccountTests(unittest.TestCase):
         self.assertIn("/api/auth/verification/confirm", script)
         self.assertIn("/api/auth/verification/request", script)
         self.assertIn("location.hash.slice(1)", script)
+        self.assertIn("syncPasswordRecoveryAvailability", script)
+        self.assertNotIn("classList.toggle('hidden', !config.password_reset_enabled)", script)
+        self.assertIn("support@allasplanned.ru", script)
 
 
 if __name__ == "__main__":

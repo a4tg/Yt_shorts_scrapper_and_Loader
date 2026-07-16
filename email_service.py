@@ -91,7 +91,7 @@ def send_verification_email(recipient: str, raw_token: str) -> None:
     link = account_link("verify", raw_token)
     send_account_email(
         recipient,
-        "Подтвердите email в YT Loader",
+        "Подтвердите email в All As Planned",
         "Подтвердите адрес электронной почты, открыв ссылку:\n\n"
         f"{link}\n\nСсылка действует 24 часа. Если вы не регистрировались, проигнорируйте письмо.",
     )
@@ -101,7 +101,7 @@ def send_password_reset_email(recipient: str, raw_token: str) -> None:
     link = account_link("reset", raw_token)
     send_account_email(
         recipient,
-        "Восстановление пароля YT Loader",
+        "Восстановление пароля в All As Planned",
         "Для установки нового пароля откройте ссылку:\n\n"
         f"{link}\n\nСсылка действует 1 час и может быть использована один раз. "
         "Если вы не запрашивали восстановление, ничего не делайте.",

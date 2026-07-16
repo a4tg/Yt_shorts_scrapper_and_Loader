@@ -289,7 +289,7 @@ SMTP_PORT=587
 SMTP_SECURITY=starttls
 SMTP_USERNAME=mailer@example.com
 SMTP_PASSWORD=replace-with-smtp-password
-SMTP_FROM_EMAIL=YT Loader <mailer@example.com>
+SMTP_FROM_EMAIL=All As Planned <no-reply@allasplanned.ru>
 ```
 
 Ссылка подтверждения действует 24 часа, ссылка сброса пароля — 1 час; в базе хранится

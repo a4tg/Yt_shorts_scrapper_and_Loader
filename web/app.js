@@ -1153,6 +1153,25 @@ function showRecoveryForm(form) {
   $('#register-form').classList.toggle('hidden', Boolean(form) || !state.authConfig.registration_enabled);
   $('#forgot-form').classList.toggle('hidden', form !== 'forgot');
   $('#reset-form').classList.toggle('hidden', form !== 'reset');
+  if (form === 'forgot') syncPasswordRecoveryAvailability();
+}
+
+function syncPasswordRecoveryAvailability() {
+  const enabled = state.authConfig.password_reset_enabled === true;
+  const submit = $('#forgot-form').querySelector('button[type="submit"]');
+  const status = $('#forgot-status');
+  submit.disabled = !enabled;
+  if (enabled) {
+    if (status.dataset.configurationMessage === 'true') status.replaceChildren();
+    delete status.dataset.configurationMessage;
+    return;
+  }
+  status.className = 'auth-status error';
+  status.dataset.configurationMessage = 'true';
+  const message = document.createTextNode('Восстановление по email ещё не подключено. ');
+  const support = document.createElement('a');
+  support.href = 'mailto:support@allasplanned.ru'; support.textContent = 'Написать в поддержку';
+  status.replaceChildren(message, support);
 }
 
 $('#forgot-toggle').addEventListener('click', () => showRecoveryForm('forgot'));
@@ -1162,6 +1181,9 @@ document.querySelectorAll('.auth-back').forEach((button) => {
 
 $('#forgot-form').addEventListener('submit', async (event) => {
   event.preventDefault();
+  if (state.authConfig.password_reset_enabled !== true) {
+    syncPasswordRecoveryAvailability(); return;
+  }
   const button = event.currentTarget.querySelector('button[type="submit"]');
   const status = $('#forgot-status'); button.disabled = true;
   status.className = 'auth-status'; status.textContent = 'Отправляю…';
@@ -1758,7 +1780,11 @@ async function bootstrapAuth() {
     const config = await api('/api/auth/config');
     state.authConfig = config;
     $('#register-form').classList.toggle('hidden', !config.registration_enabled);
-    $('#forgot-toggle').classList.toggle('hidden', !config.password_reset_enabled);
+    $('#forgot-toggle').dataset.available = String(config.password_reset_enabled);
+    $('#forgot-toggle').title = config.password_reset_enabled
+      ? 'Получить одноразовую ссылку по email'
+      : 'Почтовая доставка ещё не настроена';
+    if (!$('#forgot-form').classList.contains('hidden')) syncPasswordRecoveryAvailability();
   } catch (_) {}
   const fragment = new URLSearchParams(location.hash.slice(1));
   const verificationToken = fragment.get('verify');
