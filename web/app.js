@@ -1999,16 +1999,81 @@ $('#archive-content-button').addEventListener('click', async () => {
   } catch (error) { showWorkspaceError(error); }
 });
 
-$('#content-file-input').addEventListener('change', async (event) => {
-  const file = event.target.files[0]; const itemId = $('#content-id').value;
-  if (!file || !itemId) return;
-  const form = new FormData(); form.append('file', file);
-  event.target.disabled = true;
+const supportedProjectFileExtensions = new Set([
+  'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tif', 'tiff', 'mp4', 'm4v', 'mov', 'webm',
+  'mkv', 'avi', 'mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg', 'opus', 'pdf', 'docx', 'xlsx',
+  'pptx', 'odt', 'ods', 'odp', 'rtf', 'txt', 'md', 'csv', 'tsv', 'json', 'srt', 'vtt'
+]);
+
+function uploadContentFile(file, itemId, onProgress) {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest(); const form = new FormData(); form.append('file', file);
+    request.open('POST', `/api/content/${itemId}/attachments`); request.withCredentials = true;
+    const csrfToken = readCookie('yt_loader_csrf');
+    if (csrfToken) request.setRequestHeader('X-CSRF-Token', csrfToken);
+    request.upload.addEventListener('progress', (event) => {
+      if (event.lengthComputable) onProgress(event.loaded / event.total);
+    });
+    request.addEventListener('load', () => {
+      let body = null; try { body = JSON.parse(request.responseText); } catch (_) {}
+      if (request.status >= 200 && request.status < 300) resolve(body);
+      else reject(new Error(body?.detail || `Ошибка ${request.status}`));
+    });
+    request.addEventListener('error', () => reject(new Error('Не удалось загрузить файл.')));
+    request.send(form);
+  });
+}
+
+async function uploadContentFiles(fileList) {
+  const files = [...fileList]; const itemId = $('#content-id').value;
+  if (!files.length || !itemId) return;
+  for (const file of files) {
+    const extension = file.name.split('.').pop()?.toLowerCase() || '';
+    if (!supportedProjectFileExtensions.has(extension)) {
+      showWorkspaceError(new Error(`Формат файла «${file.name}» не поддерживается.`)); return;
+    }
+    if (!file.size) { showWorkspaceError(new Error(`Файл «${file.name}» пуст.`)); return; }
+    if (file.size > 250 * 1024 * 1024) { showWorkspaceError(new Error(`Файл «${file.name}» больше 250 МБ.`)); return; }
+  }
+  const input = $('#content-file-input'); const dropzone = $('#content-file-dropzone');
+  const panel = $('#content-upload-progress'); const progress = panel.querySelector('progress');
+  const label = panel.querySelector('span'); const value = panel.querySelector('b');
+  input.disabled = true; dropzone.setAttribute('aria-disabled', 'true'); panel.classList.remove('hidden');
   try {
-    await api(`/api/content/${itemId}/attachments`, { method: 'POST', body: form });
-    await refreshOpenContent(); await loadLibrary(); showToast('Файл прикреплён к материалу.');
+    for (let index = 0; index < files.length; index += 1) {
+      label.textContent = files.length > 1 ? `Загрузка ${index + 1} из ${files.length} · ${files[index].name}` : `Загрузка · ${files[index].name}`;
+      await uploadContentFile(files[index], itemId, (fraction) => {
+        const percent = Math.round(((index + fraction) / files.length) * 100);
+        progress.value = percent; value.textContent = `${percent}%`;
+      });
+    }
+    await refreshOpenContent(); await loadLibrary();
+    showToast(files.length > 1 ? `Загружено файлов: ${files.length}.` : 'Файл прикреплён к материалу.');
   } catch (error) { showWorkspaceError(error); }
-  finally { event.target.value = ''; event.target.disabled = !canEditContent(); }
+  finally {
+    input.value = ''; input.disabled = !canEditContent(); dropzone.removeAttribute('aria-disabled');
+    setTimeout(() => panel.classList.add('hidden'), 500); progress.value = 0; value.textContent = '0%';
+  }
+}
+
+$('#content-file-input').addEventListener('change', (event) => uploadContentFiles(event.target.files));
+const contentFileDropzone = $('#content-file-dropzone');
+contentFileDropzone.addEventListener('click', () => { if (canEditContent()) $('#content-file-input').click(); });
+contentFileDropzone.addEventListener('keydown', (event) => {
+  if (['Enter', ' '].includes(event.key) && canEditContent()) { event.preventDefault(); $('#content-file-input').click(); }
+});
+for (const eventName of ['dragenter', 'dragover']) {
+  contentFileDropzone.addEventListener(eventName, (event) => {
+    event.preventDefault(); if (canEditContent()) contentFileDropzone.classList.add('drag-active');
+  });
+}
+for (const eventName of ['dragleave', 'drop']) {
+  contentFileDropzone.addEventListener(eventName, (event) => {
+    event.preventDefault(); contentFileDropzone.classList.remove('drag-active');
+  });
+}
+contentFileDropzone.addEventListener('drop', (event) => {
+  if (canEditContent()) uploadContentFiles(event.dataTransfer.files);
 });
 
 $('#ai-text-form').addEventListener('submit', async (event) => {

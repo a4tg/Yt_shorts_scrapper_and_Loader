@@ -136,12 +136,12 @@ def test_content_attachments_feed_project_library(tmp_path, monkeypatch) -> None
     uploaded = client.post(
         f"/api/content/{created['id']}/attachments",
         headers=csrf(client),
-        files={"file": ("brief.pdf", b"example-pdf-data", "application/pdf")},
+        files={"file": ("brief.pdf", b"%PDF-1.7\nexample-pdf-data", "application/pdf")},
     )
     assert uploaded.status_code == 201, uploaded.text
     attachment = uploaded.json()
     assert attachment["name"] == "brief.pdf"
-    assert attachment["size_bytes"] == len(b"example-pdf-data")
+    assert attachment["size_bytes"] == len(b"%PDF-1.7\nexample-pdf-data")
 
     detail = client.get(f"/api/content/{created['id']}").json()
     assert detail["attachments"][0]["id"] == attachment["id"]
@@ -151,12 +151,39 @@ def test_content_attachments_feed_project_library(tmp_path, monkeypatch) -> None
 
     downloaded = client.get(attachment["download_url"])
     assert downloaded.status_code == 200
-    assert downloaded.content == b"example-pdf-data"
+    assert downloaded.content == b"%PDF-1.7\nexample-pdf-data"
     deleted = client.delete(
         f"/api/content-attachments/{attachment['id']}", headers=csrf(client)
     )
     assert deleted.status_code == 204
     assert client.get(f"/api/projects/{project['id']}/library").json() == []
+
+
+def test_content_attachment_rejects_unsupported_and_disguised_files(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(content_routes, "CONTENT_DIR", tmp_path)
+    client, _ = register_user()
+    _, project = current_project(client)
+    item = client.post(
+        f"/api/projects/{project['id']}/content",
+        headers=csrf(client),
+        json={"title": "Безопасная загрузка", "item_type": "document"},
+    ).json()
+
+    unsupported = client.post(
+        f"/api/content/{item['id']}/attachments",
+        headers=csrf(client),
+        files={"file": ("payload.exe", b"MZ-not-allowed", "application/octet-stream")},
+    )
+    disguised = client.post(
+        f"/api/content/{item['id']}/attachments",
+        headers=csrf(client),
+        files={"file": ("photo.png", b"MZ-not-a-png", "image/png")},
+    )
+
+    assert unsupported.status_code == 415
+    assert disguised.status_code == 415
+    assert client.get(f"/api/projects/{project['id']}/library").json() == []
+    assert not list(tmp_path.rglob("*.part"))
 
 
 def test_imported_video_can_be_linked_once_to_the_content_plan() -> None:

@@ -419,7 +419,11 @@
       <textarea id="content-body-input" class="content-editor" maxlength="2000000" rows="12" placeholder="Пишите текст в Markdown…" aria-label="Текст или заметка"></textarea>
       <div id="content-body-preview" class="content-preview hidden"></div>
       <section id="content-files-section" class="content-files hidden">
-        <div><h3>Файлы</h3><label class="file-upload-button">+ Прикрепить файл<input id="content-file-input" type="file"></label></div>
+        <div><div><h3>Файлы</h3><small>Медиа, PDF, Office и текстовые документы</small></div><label class="file-upload-button">+ Выбрать файлы<input id="content-file-input" type="file" multiple accept="image/*,video/*,audio/*,.pdf,.docx,.xlsx,.pptx,.odt,.ods,.odp,.rtf,.txt,.md,.csv,.tsv,.json,.srt,.vtt"></label></div>
+        <div id="content-file-dropzone" class="content-file-dropzone" tabindex="0" role="button" aria-label="Перетащите файлы сюда или нажмите для выбора">
+          <span aria-hidden="true">⇧</span><div><strong>Перетащите файлы сюда</strong><small>или нажмите, чтобы выбрать · до 250 МБ на файл</small></div>
+        </div>
+        <div id="content-upload-progress" class="content-upload-progress hidden" aria-live="polite"><div><span>Загрузка</span><b>0%</b></div><progress max="100" value="0"></progress></div>
         <div id="content-attachments" class="attachment-list"></div>
       </section>
       <details id="content-history-section" class="content-history hidden"><summary>История изменений</summary><div id="content-revisions"></div></details>

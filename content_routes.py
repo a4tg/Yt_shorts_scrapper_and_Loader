@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from billing_service import require_entitlement
+from file_validation import FileValidationError, validate_file
 from saas_models import (
     ApprovalStage,
     ApprovalWorkflow,
@@ -392,6 +393,7 @@ async def upload_attachment(
     target = directory / f"{token}_{safe_name}"
     temporary = target.with_suffix(target.suffix + ".part")
     size = 0
+    validated = None
     try:
         with temporary.open("wb") as output:
             while chunk := await file.read(UPLOAD_CHUNK_BYTES):
@@ -403,6 +405,12 @@ async def upload_attachment(
                 if storage_limit and int(used_storage) + size > storage_limit:
                     raise HTTPException(413, "Достигнут лимит хранилища текущего тарифа.")
                 output.write(chunk)
+        if size == 0:
+            raise HTTPException(400, "Пустые файлы не поддерживаются.")
+        try:
+            validated = validate_file(temporary, original_name)
+        except FileValidationError as exc:
+            raise HTTPException(415, str(exc)) from exc
         temporary.replace(target)
     except Exception:
         temporary.unlink(missing_ok=True)
@@ -415,7 +423,7 @@ async def upload_attachment(
         uploaded_by_user_id=request.state.user.id,
         original_name=original_name,
         storage_path=str(target),
-        mime_type=(file.content_type or "application/octet-stream")[:160],
+        mime_type=validated.mime_type,
         size_bytes=size,
     )
     db.add(attachment)
