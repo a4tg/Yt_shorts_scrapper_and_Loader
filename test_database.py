@@ -39,6 +39,7 @@ EXPECTED_TABLES = {
     "conversations",
     "conversation_participants",
     "messages",
+    "message_reactions",
 }
 
 
@@ -80,6 +81,10 @@ class DatabaseMigrationTests(unittest.TestCase):
             {"plan_id", "subscription_id", "credits", "billing_period_key"}.issubset(
                 payment_columns
             )
+        )
+        message_columns = {column["name"] for column in inspect(engine).get_columns("messages")}
+        self.assertTrue(
+            {"mentioned_user_ids", "pinned_at", "pinned_by_user_id"}.issubset(message_columns)
         )
         self.assertTrue(check_database(engine))
 

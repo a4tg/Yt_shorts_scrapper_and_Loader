@@ -37,6 +37,7 @@ class ContainerManifestTests(unittest.TestCase):
             "content_routes.py",
             "file_validation.py",
             "messaging_routes.py",
+            "realtime_service.py",
         ):
             self.assertIn(module, dockerfile)
 

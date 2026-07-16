@@ -1,20 +1,25 @@
 from __future__ import annotations
 
+import asyncio
+import json
 from datetime import datetime, timezone
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.orm import Session
+from starlette.responses import StreamingResponse
 
 from database import get_db
+from realtime_service import project_events
 from saas_models import (
     ContentAttachment,
     ContentItem,
     Conversation,
     ConversationParticipant,
     Message,
+    MessageReaction,
     Project,
     User,
     WorkspaceMember,
@@ -41,10 +46,19 @@ class MessageCreate(BaseModel):
     body: str | None = Field(default=None, max_length=10_000)
     reply_to_message_id: str | None = Field(default=None, max_length=36)
     attachment_id: str | None = Field(default=None, max_length=36)
+    mentioned_user_ids: list[str] = Field(default_factory=list, max_length=50)
 
 
 class MessageUpdate(BaseModel):
     body: str = Field(min_length=1, max_length=10_000)
+    mentioned_user_ids: list[str] | None = Field(default=None, max_length=50)
+
+
+class ReactionCreate(BaseModel):
+    emoji: str = Field(min_length=1, max_length=16)
+
+
+SUPPORTED_REACTIONS = {"👍", "❤️", "🔥", "🎉", "👀", "✅"}
 
 
 def _now() -> datetime:
@@ -117,12 +131,64 @@ def _attachment_payload(attachment: ContentAttachment | None) -> dict[str, objec
     }
 
 
+def _mention_ids(
+    db: Session, conversation: Conversation, requested: list[str]
+) -> list[str]:
+    project = db.get(Project, conversation.project_id)
+    if project is None:
+        raise HTTPException(404, "Проект не найден")
+    user_ids = _workspace_users(db, project.workspace_id, requested)
+    if not conversation.is_project_wide and user_ids:
+        participants = set(db.scalars(select(ConversationParticipant.user_id).where(
+            ConversationParticipant.conversation_id == conversation.id
+        )).all())
+        if not set(user_ids).issubset(participants):
+            raise HTTPException(400, "Упоминать можно только участников диалога.")
+    return user_ids
+
+
+def _publish_message_event(
+    conversation: Conversation,
+    event_type: str,
+    actor_user_id: str,
+    message_id: str | None = None,
+) -> None:
+    project_events.publish(conversation.project_id, {
+        "type": event_type,
+        "project_id": conversation.project_id,
+        "conversation_id": conversation.id,
+        "message_id": message_id,
+        "actor_user_id": actor_user_id,
+        "created_at": _now().isoformat(),
+    })
+
+
 def _message_payload(db: Session, message: Message, current_user_id: str) -> dict[str, object]:
     author = db.get(User, message.author_user_id)
     attachment = db.get(ContentAttachment, message.attachment_id) if message.attachment_id else None
     reply = db.get(Message, message.reply_to_message_id) if message.reply_to_message_id else None
     reply_author = db.get(User, reply.author_user_id) if reply else None
     deleted = message.deleted_at is not None
+    reaction_rows = db.execute(
+        select(MessageReaction, User)
+        .join(User, User.id == MessageReaction.user_id)
+        .where(MessageReaction.message_id == message.id)
+        .order_by(MessageReaction.created_at, MessageReaction.id)
+    ).all() if not deleted else []
+    grouped_reactions: dict[str, dict[str, object]] = {}
+    for reaction, user in reaction_rows:
+        group = grouped_reactions.setdefault(reaction.emoji, {
+            "emoji": reaction.emoji, "count": 0, "reacted_by_me": False, "users": [],
+        })
+        group["count"] = int(group["count"]) + 1
+        group["reacted_by_me"] = bool(group["reacted_by_me"] or user.id == current_user_id)
+        group["users"].append({"id": user.id, "name": user.display_name or user.email})
+    mentioned_users = []
+    for user_id in message.mentioned_user_ids or []:
+        user = db.get(User, user_id)
+        if user is not None:
+            mentioned_users.append({"id": user.id, "name": user.display_name or user.email})
+    pinned_by = db.get(User, message.pinned_by_user_id) if message.pinned_by_user_id else None
     return {
         "id": message.id,
         "conversation_id": message.conversation_id,
@@ -140,11 +206,45 @@ def _message_payload(db: Session, message: Message, current_user_id: str) -> dic
         } if reply and reply_author else None),
         "attachment": None if deleted else _attachment_payload(attachment),
         "attachment_name": None if deleted else message.attachment_name,
+        "mentions": [] if deleted else mentioned_users,
+        "reactions": list(grouped_reactions.values()),
+        "is_pinned": not deleted and message.pinned_at is not None,
+        "pinned_at": message.pinned_at.isoformat() if not deleted and message.pinned_at else None,
+        "pinned_by": ({
+            "id": pinned_by.id,
+            "name": pinned_by.display_name or pinned_by.email,
+        } if not deleted and pinned_by else None),
         "created_at": message.created_at.isoformat(),
         "edited_at": message.edited_at.isoformat() if message.edited_at else None,
         "deleted_at": message.deleted_at.isoformat() if message.deleted_at else None,
         "is_own": message.author_user_id == current_user_id,
     }
+
+
+@router.get("/projects/{project_id}/message-events")
+async def message_events(
+    project_id: str, request: Request, db: Session = Depends(get_db)
+) -> StreamingResponse:
+    _project_access(db, project_id, request.state.user.id)
+    user_id = request.state.user.id
+
+    async def stream():
+        yield f"event: ready\ndata: {json.dumps({'project_id': project_id})}\n\n"
+        async with project_events.subscribe(project_id) as queue:
+            while not await request.is_disconnected():
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=20)
+                except asyncio.TimeoutError:
+                    yield ": keep-alive\n\n"
+                    continue
+                # The payload contains identifiers only; authorization remains endpoint-based.
+                event = {**event, "viewer_user_id": user_id}
+                yield f"event: project-message\ndata: {json.dumps(event)}\n\n"
+
+    return StreamingResponse(
+        stream(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 def _conversation_payload(
@@ -278,6 +378,7 @@ def create_conversation(
     for user_id in [request.state.user.id, *participants]:
         _participant(db, conversation.id, user_id, create=True)
     db.commit()
+    _publish_message_event(conversation, "conversation.created", request.state.user.id)
     return _conversation_payload(db, conversation, request.state.user.id)
 
 
@@ -294,6 +395,7 @@ def content_conversation(
         Conversation.project_id == project.id,
         Conversation.conversation_key == key,
     ))
+    created = conversation is None
     if conversation is None:
         conversation = Conversation(
             project_id=project.id,
@@ -308,6 +410,8 @@ def content_conversation(
         db.flush()
     _participant(db, conversation.id, request.state.user.id, create=True)
     db.commit()
+    if created:
+        _publish_message_event(conversation, "conversation.created", request.state.user.id)
     return _conversation_payload(db, conversation, request.state.user.id)
 
 
@@ -341,7 +445,9 @@ def update_conversation(
         for user_id in keep:
             _participant(db, conversation.id, user_id, create=True)
     db.commit()
-    return _conversation_payload(db, conversation, request.state.user.id)
+    result = _conversation_payload(db, conversation, request.state.user.id)
+    _publish_message_event(conversation, "conversation.updated", request.state.user.id)
+    return result
 
 
 @router.get("/conversations/{conversation_id}/messages")
@@ -405,13 +511,16 @@ def create_message(
         attachment_id=attachment.id if attachment else None,
         attachment_name=attachment.original_name if attachment else None,
         body=body,
+        mentioned_user_ids=_mention_ids(db, conversation, payload.mentioned_user_ids),
         created_at=_now(),
     )
     db.add(message)
     db.flush()
     participant.last_read_at = _now()
     db.commit()
-    return _message_payload(db, message, request.state.user.id)
+    result = _message_payload(db, message, request.state.user.id)
+    _publish_message_event(conversation, "message.created", request.state.user.id, message.id)
+    return result
 
 
 @router.patch("/messages/{message_id}")
@@ -431,9 +540,14 @@ def update_message(
     if not body:
         raise HTTPException(400, "Сообщение не может быть пустым.")
     message.body = body
+    if payload.mentioned_user_ids is not None:
+        message.mentioned_user_ids = _mention_ids(db, db.get(Conversation, message.conversation_id), payload.mentioned_user_ids)
     message.edited_at = _now()
     db.commit()
-    return _message_payload(db, message, request.state.user.id)
+    result = _message_payload(db, message, request.state.user.id)
+    conversation = db.get(Conversation, message.conversation_id)
+    _publish_message_event(conversation, "message.updated", request.state.user.id, message.id)
+    return result
 
 
 @router.delete("/messages/{message_id}", status_code=204)
@@ -443,13 +557,109 @@ def delete_message(
     message = db.get(Message, message_id)
     if message is None:
         raise HTTPException(404, "Сообщение не найдено")
-    _conversation_access(db, message.conversation_id, request.state.user.id)
+    conversation, _, _, _ = _conversation_access(db, message.conversation_id, request.state.user.id)
     if message.author_user_id != request.state.user.id:
         raise HTTPException(403, "Можно удалить только своё сообщение.")
     message.body = None
     message.attachment_id = None
+    message.mentioned_user_ids = None
+    message.pinned_at = None
+    message.pinned_by_user_id = None
     message.deleted_at = _now()
+    db.execute(delete(MessageReaction).where(MessageReaction.message_id == message.id))
     db.commit()
+    _publish_message_event(conversation, "message.deleted", request.state.user.id, message.id)
+
+
+@router.get("/conversations/{conversation_id}/pinned-messages")
+def pinned_messages(
+    conversation_id: str, request: Request, db: Session = Depends(get_db)
+) -> list[dict[str, object]]:
+    conversation, _, _, _ = _conversation_access(db, conversation_id, request.state.user.id)
+    messages = db.scalars(select(Message).where(
+        Message.conversation_id == conversation.id,
+        Message.pinned_at.is_not(None),
+        Message.deleted_at.is_(None),
+    ).order_by(Message.pinned_at.desc())).all()
+    return [_message_payload(db, message, request.state.user.id) for message in messages]
+
+
+@router.post("/messages/{message_id}/pin")
+def pin_message(
+    message_id: str, request: Request, db: Session = Depends(get_db)
+) -> dict[str, object]:
+    message = db.get(Message, message_id)
+    if message is None or message.deleted_at is not None:
+        raise HTTPException(404, "Сообщение не найдено")
+    conversation, _, _, _ = _conversation_access(db, message.conversation_id, request.state.user.id)
+    message.pinned_at = _now()
+    message.pinned_by_user_id = request.state.user.id
+    db.commit()
+    result = _message_payload(db, message, request.state.user.id)
+    _publish_message_event(conversation, "message.pinned", request.state.user.id, message.id)
+    return result
+
+
+@router.delete("/messages/{message_id}/pin", status_code=204)
+def unpin_message(
+    message_id: str, request: Request, db: Session = Depends(get_db)
+) -> None:
+    message = db.get(Message, message_id)
+    if message is None or message.deleted_at is not None:
+        raise HTTPException(404, "Сообщение не найдено")
+    conversation, _, _, _ = _conversation_access(db, message.conversation_id, request.state.user.id)
+    message.pinned_at = None
+    message.pinned_by_user_id = None
+    db.commit()
+    _publish_message_event(conversation, "message.unpinned", request.state.user.id, message.id)
+
+
+@router.post("/messages/{message_id}/reactions", status_code=201)
+def add_reaction(
+    message_id: str,
+    payload: ReactionCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    if payload.emoji not in SUPPORTED_REACTIONS:
+        raise HTTPException(400, "Эта реакция не поддерживается.")
+    message = db.get(Message, message_id)
+    if message is None or message.deleted_at is not None:
+        raise HTTPException(404, "Сообщение не найдено")
+    conversation, _, _, _ = _conversation_access(db, message.conversation_id, request.state.user.id)
+    existing = db.scalar(select(MessageReaction).where(
+        MessageReaction.message_id == message.id,
+        MessageReaction.user_id == request.state.user.id,
+        MessageReaction.emoji == payload.emoji,
+    ))
+    if existing is None:
+        db.add(MessageReaction(
+            message_id=message.id, user_id=request.state.user.id, emoji=payload.emoji
+        ))
+        db.commit()
+    result = _message_payload(db, message, request.state.user.id)
+    _publish_message_event(conversation, "message.reacted", request.state.user.id, message.id)
+    return result
+
+
+@router.delete("/messages/{message_id}/reactions", status_code=204)
+def remove_reaction(
+    message_id: str,
+    emoji: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> None:
+    message = db.get(Message, message_id)
+    if message is None or message.deleted_at is not None:
+        raise HTTPException(404, "Сообщение не найдено")
+    conversation, _, _, _ = _conversation_access(db, message.conversation_id, request.state.user.id)
+    db.execute(delete(MessageReaction).where(
+        MessageReaction.message_id == message.id,
+        MessageReaction.user_id == request.state.user.id,
+        MessageReaction.emoji == emoji,
+    ))
+    db.commit()
+    _publish_message_event(conversation, "message.reaction_removed", request.state.user.id, message.id)
 
 
 @router.post("/conversations/{conversation_id}/read", status_code=204)

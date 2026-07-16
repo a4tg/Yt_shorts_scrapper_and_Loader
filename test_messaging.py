@@ -175,3 +175,55 @@ def test_message_reply_attachment_edit_delete_and_content_context(tmp_path, monk
     assert context.json()["content_title"] == "Ролик для запуска"
     repeated = owner.post(f"/api/content/{item['id']}/conversation", headers=csrf(owner))
     assert repeated.json()["id"] == context.json()["id"]
+
+
+def test_mentions_reactions_pins_and_realtime_access() -> None:
+    owner, _ = register_user("owner")
+    member, member_user = register_user("member")
+    outsider, outsider_user = register_user("outsider")
+    workspace, project = workspace_project(owner)
+    add_member(owner, workspace["id"], member_user)
+    conversation = owner.get(f"/api/projects/{project['id']}/conversations").json()[0]
+
+    created = owner.post(
+        f"/api/conversations/{conversation['id']}/messages",
+        headers=csrf(owner),
+        json={"body": "@Member проверьте материал", "mentioned_user_ids": [member_user["id"]]},
+    )
+    assert created.status_code == 201, created.text
+    message = created.json()
+    assert message["mentions"] == [{"id": member_user["id"], "name": "Member"}]
+
+    invalid_mention = owner.post(
+        f"/api/conversations/{conversation['id']}/messages",
+        headers=csrf(owner),
+        json={"body": "Чужое упоминание", "mentioned_user_ids": [outsider_user["id"]]},
+    )
+    assert invalid_mention.status_code == 400
+
+    reacted = member.post(
+        f"/api/messages/{message['id']}/reactions",
+        headers=csrf(member), json={"emoji": "👍"},
+    )
+    assert reacted.status_code == 201, reacted.text
+    assert reacted.json()["reactions"][0]["count"] == 1
+    assert reacted.json()["reactions"][0]["reacted_by_me"] is True
+    duplicate = member.post(
+        f"/api/messages/{message['id']}/reactions",
+        headers=csrf(member), json={"emoji": "👍"},
+    )
+    assert duplicate.json()["reactions"][0]["count"] == 1
+    assert member.delete(
+        f"/api/messages/{message['id']}/reactions",
+        headers=csrf(member), params={"emoji": "👍"},
+    ).status_code == 204
+
+    pinned = member.post(f"/api/messages/{message['id']}/pin", headers=csrf(member))
+    assert pinned.status_code == 200
+    assert pinned.json()["is_pinned"] is True
+    assert pinned.json()["pinned_by"]["id"] == member_user["id"]
+    pins = owner.get(f"/api/conversations/{conversation['id']}/pinned-messages")
+    assert [item["id"] for item in pins.json()] == [message["id"]]
+    assert member.delete(f"/api/messages/{message['id']}/pin", headers=csrf(member)).status_code == 204
+
+    assert outsider.get(f"/api/projects/{project['id']}/message-events").status_code == 404
