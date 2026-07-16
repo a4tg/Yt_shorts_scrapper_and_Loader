@@ -40,6 +40,8 @@ EXPECTED_TABLES = {
     "conversation_participants",
     "messages",
     "message_reactions",
+    "asset_reviews",
+    "asset_approvals",
 }
 
 
@@ -85,6 +87,10 @@ class DatabaseMigrationTests(unittest.TestCase):
         message_columns = {column["name"] for column in inspect(engine).get_columns("messages")}
         self.assertTrue(
             {"mentioned_user_ids", "pinned_at", "pinned_by_user_id"}.issubset(message_columns)
+        )
+        attachment_columns = {column["name"] for column in inspect(engine).get_columns("content_attachments")}
+        self.assertTrue(
+            {"asset_key", "version_number", "version_label", "version_notes", "supersedes_attachment_id", "is_current"}.issubset(attachment_columns)
         )
         self.assertTrue(check_database(engine))
 

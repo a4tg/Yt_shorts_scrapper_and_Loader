@@ -189,7 +189,7 @@ export function initAssetViewer({ bus, bridge }) {
     try {
       if (kind === 'image') {
         const image = node('img', 'asset-viewer-image'); image.alt = asset.name; image.draggable = false;
-        image.addEventListener('load', () => { if (token === state.loadToken) { stage.replaceChildren(image); applyImageTransform(); } });
+        image.addEventListener('load', () => { if (token === state.loadToken) { stage.replaceChildren(image); applyImageTransform(); bus.emit('asset:media-ready', { asset, shell, stage }); } });
         image.addEventListener('error', () => { if (token === state.loadToken) showFailure(new Error('Изображение не удалось прочитать.')); }); image.src = asset.preview_url;
       } else if (kind === 'video') {
         const video = node('video', 'asset-viewer-video'); video.controls = true; video.playsInline = true; video.preload = 'metadata'; video.src = asset.preview_url; stage.replaceChildren(video);
@@ -203,6 +203,7 @@ export function initAssetViewer({ bus, bridge }) {
         stage.replaceChildren(); if (payload.kind === 'table') renderTable(payload); else renderText(payload);
       } else showFailure(new Error('Предварительный просмотр этого формата ещё не поддерживается.'));
     } catch (error) { if (token === state.loadToken) showFailure(error); }
+    bus.emit('asset:change', { asset, assets: state.assets, projectId: state.projectId, shell, stage });
   }
 
   async function resolveAsset(payload) {
@@ -232,7 +233,7 @@ export function initAssetViewer({ bus, bridge }) {
 
   function closeViewer() {
     if (!state.open) return; state.open = false; state.loadToken += 1; shell.classList.add('hidden'); document.body.classList.remove('asset-viewer-open');
-    stage.replaceChildren(); updateDeepLink(null); focusBeforeOpen?.focus?.();
+    stage.replaceChildren(); updateDeepLink(null); bus.emit('asset:close', { asset: state.asset }); focusBeforeOpen?.focus?.();
   }
 
   async function move(offset) {

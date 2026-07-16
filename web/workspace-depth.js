@@ -3,6 +3,7 @@ import { FeatureFlags } from './core/feature-flags.js';
 import { ContextRouter } from './core/context-router.js';
 import { initChatAnywhere } from './modules/chat-anywhere.js';
 import { initAssetViewer } from './modules/asset-viewer.js';
+import { initAssetReviews } from './modules/asset-reviews.js';
 
 const flags = new FeatureFlags(window.AAPLegacyApp?.getAuthConfig?.() || {});
 const router = new ContextRouter({ bus: workspaceBus });
@@ -39,6 +40,7 @@ window.AAPWorkspaceDepth = Object.freeze({
 
 registerModule('chat-anywhere', initChatAnywhere, 'chat_anywhere');
 registerModule('asset-viewer', initAssetViewer, 'asset_viewer');
+registerModule('asset-reviews', initAssetReviews, 'asset_reviews');
 
 window.addEventListener('aap:auth-config', (event) => hydrateFeatures(event.detail));
 window.addEventListener('aap:context-change', (event) => workspaceBus.emit('context:change', event.detail));

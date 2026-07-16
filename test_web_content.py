@@ -58,6 +58,21 @@ class WebContentWorkspaceTests(unittest.TestCase):
         self.assertIn("dataset.assetId", app)
         self.assertIn("@media(max-width:900px)", styles)
 
+    def test_asset_review_workspace_supports_versions_annotations_compare_and_approval(self) -> None:
+        html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
+        entrypoint = (ROOT / "web" / "workspace-depth.js").read_text(encoding="utf-8")
+        reviews = (ROOT / "web" / "modules" / "asset-reviews.js").read_text(encoding="utf-8")
+        styles = (ROOT / "web" / "asset-reviews.css").read_text(encoding="utf-8")
+        self.assertIn('/assets/asset-reviews.css', html)
+        self.assertIn("registerModule('asset-reviews'", entrypoint)
+        for marker in (
+            "annotation_type", "asset-review-overlay", "time_seconds", "page_number",
+            "uploadVersion", "asset-compare", "changes_requested", "EventSource",
+        ):
+            self.assertIn(marker, reviews)
+        for selector in (".asset-review-panel", ".asset-review-marker", ".asset-compare-side", ".asset-approval-state"):
+            self.assertIn(selector, styles)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -160,6 +160,7 @@ def _ensure_unique_file_name(
 ) -> None:
     statement = select(ContentAttachment.id).where(
         ContentAttachment.project_id == project_id,
+        ContentAttachment.is_current.is_(True),
         ContentAttachment.folder_id.is_(None) if folder_id is None else ContentAttachment.folder_id == folder_id,
         func.lower(ContentAttachment.original_name) == name.casefold(),
     )
@@ -221,6 +222,12 @@ def _attachment_payload(attachment: ContentAttachment) -> dict[str, object]:
         "preview_url": f"/api/content-attachments/{attachment.id}/preview",
         "preview_data_url": f"/api/content-attachments/{attachment.id}/preview-data",
         "preview": preview_capabilities(attachment.original_name),
+        "asset_key": attachment.asset_key,
+        "version_number": attachment.version_number,
+        "version_label": attachment.version_label,
+        "version_notes": attachment.version_notes,
+        "supersedes_attachment_id": attachment.supersedes_attachment_id,
+        "is_current": attachment.is_current,
     }
 
 
@@ -369,7 +376,7 @@ def get_content(item_id: str, request: Request, db: Session = Depends(get_db)) -
     payload = _item_payload(db, item)
     attachments = db.scalars(
         select(ContentAttachment)
-        .where(ContentAttachment.content_item_id == item.id)
+        .where(ContentAttachment.content_item_id == item.id, ContentAttachment.is_current.is_(True))
         .order_by(ContentAttachment.created_at.desc())
     ).all()
     payload["attachments"] = [_attachment_payload(attachment) for attachment in attachments]
@@ -452,6 +459,12 @@ async def _store_upload(
     db: Session,
     content_item_id: str | None = None,
     folder_id: str | None = None,
+    ensure_unique_name: bool = True,
+    asset_key: str | None = None,
+    version_number: int = 1,
+    version_label: str | None = None,
+    version_notes: str | None = None,
+    supersedes_attachment_id: str | None = None,
 ) -> ContentAttachment:
     entitlement = require_entitlement(db, user_id)
     storage_limit = entitlement.limits.get("storage_mb", 0) * 1024 * 1024
@@ -461,7 +474,8 @@ async def _store_upload(
         )
     ) or 0
     original_name = _safe_display_name(Path(file.filename or "file").name)
-    _ensure_unique_file_name(db, project_id, folder_id, original_name)
+    if ensure_unique_name:
+        _ensure_unique_file_name(db, project_id, folder_id, original_name)
     safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", original_name).strip("._") or "file"
     directory = CONTENT_DIR / project_id / "files"
     directory.mkdir(parents=True, exist_ok=True)
@@ -504,6 +518,12 @@ async def _store_upload(
         mime_type=validated.mime_type,
         source_type="upload",
         size_bytes=size,
+        asset_key=asset_key or str(uuid.uuid4()),
+        version_number=version_number,
+        version_label=version_label,
+        version_notes=version_notes,
+        supersedes_attachment_id=supersedes_attachment_id,
+        is_current=True,
     )
     db.add(attachment)
     db.commit()
@@ -615,6 +635,17 @@ def delete_attachment(
     attachment, _, member = _attachment_access(db, attachment_id, request.state.user.id)
     _require_editor(member)
     path = Path(attachment.storage_path)
+    if attachment.is_current:
+        previous = db.scalar(
+            select(ContentAttachment)
+            .where(
+                ContentAttachment.asset_key == attachment.asset_key,
+                ContentAttachment.id != attachment.id,
+            )
+            .order_by(ContentAttachment.version_number.desc())
+        )
+        if previous is not None:
+            previous.is_current = True
     db.delete(attachment)
     db.commit()
     path.unlink(missing_ok=True)
@@ -740,6 +771,7 @@ def project_library(
         .outerjoin(ContentItem, ContentItem.id == ContentAttachment.content_item_id)
         .where(
             ContentAttachment.project_id == project_id,
+            ContentAttachment.is_current.is_(True),
             or_(ContentItem.id.is_(None), ContentItem.status == "active"),
         )
         .order_by(ContentAttachment.created_at.desc())

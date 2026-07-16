@@ -125,6 +125,7 @@ def _attachment_payload(attachment: ContentAttachment | None) -> dict[str, objec
         return None
     return {
         "id": attachment.id,
+        "project_id": attachment.project_id,
         "name": attachment.original_name,
         "mime_type": attachment.mime_type,
         "size_bytes": attachment.size_bytes,
@@ -132,6 +133,12 @@ def _attachment_payload(attachment: ContentAttachment | None) -> dict[str, objec
         "preview_url": f"/api/content-attachments/{attachment.id}/preview",
         "preview_data_url": f"/api/content-attachments/{attachment.id}/preview-data",
         "preview": preview_capabilities(attachment.original_name),
+        "asset_key": attachment.asset_key,
+        "version_number": attachment.version_number,
+        "version_label": attachment.version_label,
+        "version_notes": attachment.version_notes,
+        "supersedes_attachment_id": attachment.supersedes_attachment_id,
+        "is_current": attachment.is_current,
     }
 
 

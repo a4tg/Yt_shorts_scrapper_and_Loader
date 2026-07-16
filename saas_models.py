@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, false, func
+from sqlalchemy import JSON, BigInteger, Boolean, CheckConstraint, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, false, func, true
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -220,6 +220,9 @@ class ProjectFolder(TimestampMixin, Base):
 
 class ContentAttachment(Base):
     __tablename__ = "content_attachments"
+    __table_args__ = (
+        UniqueConstraint("asset_key", "version_number", name="uq_content_attachment_asset_version"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     project_id: Mapped[str] = mapped_column(
@@ -239,7 +242,84 @@ class ContentAttachment(Base):
     mime_type: Mapped[str | None] = mapped_column(String(160))
     source_type: Mapped[str] = mapped_column(String(24), nullable=False, default="upload", index=True)
     size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    asset_key: Mapped[str] = mapped_column(String(36), nullable=False, default=new_id, index=True)
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    version_label: Mapped[str | None] = mapped_column(String(120))
+    version_notes: Mapped[str | None] = mapped_column(Text)
+    supersedes_attachment_id: Mapped[str | None] = mapped_column(
+        ForeignKey("content_attachments.id", ondelete="SET NULL"), index=True
+    )
+    is_current: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=true(), index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+
+
+class AssetReview(TimestampMixin, Base):
+    __tablename__ = "asset_reviews"
+    __table_args__ = (
+        CheckConstraint(
+            "annotation_type IN ('general', 'point', 'region', 'timestamp', 'page', 'drawing')",
+            name="ck_asset_reviews_annotation_type",
+        ),
+        CheckConstraint(
+            "status IN ('open', 'in_progress', 'resolved', 'wont_fix')",
+            name="ck_asset_reviews_status",
+        ),
+        CheckConstraint("visibility IN ('team', 'client')", name="ck_asset_reviews_visibility"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    attachment_id: Mapped[str] = mapped_column(
+        ForeignKey("content_attachments.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    parent_review_id: Mapped[str | None] = mapped_column(
+        ForeignKey("asset_reviews.id", ondelete="CASCADE"), index=True
+    )
+    author_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    assignee_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    annotation_type: Mapped[str] = mapped_column(String(24), nullable=False, default="general")
+    x: Mapped[float | None] = mapped_column(Float)
+    y: Mapped[float | None] = mapped_column(Float)
+    width: Mapped[float | None] = mapped_column(Float)
+    height: Mapped[float | None] = mapped_column(Float)
+    time_seconds: Mapped[float | None] = mapped_column(Float)
+    page_number: Mapped[int | None] = mapped_column(Integer)
+    annotation_data: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="open", index=True)
+    visibility: Mapped[str] = mapped_column(String(16), nullable=False, default="team", index=True)
+    resolved_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class AssetApproval(Base):
+    __tablename__ = "asset_approvals"
+    __table_args__ = (
+        UniqueConstraint("attachment_id", "user_id", name="uq_asset_approval_user"),
+        CheckConstraint(
+            "decision IN ('approved', 'changes_requested')", name="ck_asset_approvals_decision"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    attachment_id: Mapped[str] = mapped_column(
+        ForeignKey("content_attachments.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    decision: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
+    comment: Mapped[str | None] = mapped_column(Text)
+    decided_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
     )
 
