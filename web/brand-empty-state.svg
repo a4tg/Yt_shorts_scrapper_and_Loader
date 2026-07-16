@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 210" role="img" aria-labelledby="title">
+  <title id="title">Пустое рабочее пространство All As Planned</title>
+  <defs>
+    <linearGradient id="accent" x1="80" y1="60" x2="290" y2="170" gradientUnits="userSpaceOnUse"><stop stop-color="#806dff"/><stop offset="1" stop-color="#40d9a0"/></linearGradient>
+    <radialGradient id="aura"><stop stop-color="#806dff" stop-opacity=".18"/><stop offset="1" stop-color="#806dff" stop-opacity="0"/></radialGradient>
+  </defs>
+  <ellipse cx="180" cy="112" rx="150" ry="92" fill="url(#aura)"/>
+  <g fill="none" stroke="url(#accent)" stroke-linecap="round" opacity=".42"><path d="M38 64c70-23 78 72 139 42s74-70 145-31" stroke-dasharray="5 10"/><path d="M55 164c54 17 83-47 135-32s62 43 118 21" stroke-dasharray="4 9"/></g>
+  <g transform="translate(108 48)">
+    <rect x="16" y="12" width="124" height="102" rx="17" fill="#0d1722" stroke="#34475a" transform="rotate(5 78 63)"/>
+    <rect x="3" y="3" width="124" height="102" rx="17" fill="#111d29" stroke="#806dff" stroke-opacity=".52" transform="rotate(-4 65 54)"/>
+    <rect x="18" y="21" width="92" height="70" rx="12" fill="#152333" stroke="#3a4c60"/>
+    <circle cx="38" cy="41" r="8" fill="#806dff" fill-opacity=".28"/><rect x="54" y="36" width="39" height="6" rx="3" fill="#dce4ed" fill-opacity=".6"/><rect x="28" y="61" width="69" height="5" rx="2.5" fill="#718397" fill-opacity=".42"/><rect x="28" y="73" width="47" height="5" rx="2.5" fill="#40d9a0" fill-opacity=".4"/>
+    <circle cx="122" cy="99" r="18" fill="#101a26" stroke="#40d9a0" stroke-opacity=".58"/><path d="M122 91v16m-8-8h16" stroke="#60dcb0" stroke-width="3" stroke-linecap="round"/>
+  </g>
+  <g fill="#0b141e" stroke-width="2"><circle cx="38" cy="64" r="5" stroke="#806dff"/><circle cx="322" cy="75" r="5" stroke="#40d9a0"/><circle cx="55" cy="164" r="4" stroke="#40d9a0"/><circle cx="308" cy="153" r="4" stroke="#806dff"/></g>
+</svg>

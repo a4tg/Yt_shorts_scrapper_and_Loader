@@ -117,6 +117,15 @@ function sourceThumbnailUrl(value) {
   return `/api/sources/thumbnail?url=${encodeURIComponent(value)}`;
 }
 
+function createBrandedEmptyState(title, detail) {
+  const empty = document.createElement('div'); empty.className = 'empty-brand-state';
+  const image = document.createElement('img'); image.src = '/assets/brand-empty-state.svg';
+  image.alt = ''; image.width = 360; image.height = 210; image.loading = 'lazy';
+  const heading = document.createElement('h3'); heading.textContent = title;
+  const description = document.createElement('p'); description.textContent = detail;
+  empty.append(image, heading, description); return empty;
+}
+
 function showSourceVideo(url, thumbnail = '', title = '') {
   const videoId = youtubeVideoId(url);
   if ((!videoId || videoId.length !== 11) && !thumbnail) return;
@@ -370,8 +379,10 @@ async function loadAdmin(force = false) {
 function renderWorkspaceProjects() {
   const container = $('#workspace-projects'); container.replaceChildren();
   if (!state.projects.length) {
-    const empty = document.createElement('p'); empty.className = 'meta';
-    empty.textContent = 'В этом пространстве пока нет проектов.'; container.append(empty); return;
+    container.append(createBrandedEmptyState(
+      'Здесь появится первый проект',
+      'Создайте проект для бренда, кампании или отдельного направления.'
+    )); return;
   }
   for (const project of state.projects) {
     const card = document.createElement('article');
@@ -649,8 +660,10 @@ function renderDocuments() {
   const container = $('#documents-list'); container.replaceChildren();
   const documents = state.contentItems.filter((item) => ['document', 'note'].includes(item.item_type));
   if (!documents.length) {
-    const empty = document.createElement('div'); empty.className = 'empty-column';
-    empty.textContent = 'Создайте первый документ или рабочую заметку.'; container.append(empty); return;
+    container.append(createBrandedEmptyState(
+      'База знаний пока пуста',
+      'Создайте первый документ, бриф или рабочую заметку проекта.'
+    )); return;
   }
   for (const item of documents) {
     const card = document.createElement('article'); card.className = 'document-card'; card.tabIndex = 0;
@@ -682,8 +695,10 @@ function renderLibrary() {
   const total = state.libraryItems.reduce((sum, item) => sum + Number(item.size_bytes || 0), 0);
   $('#library-summary').textContent = `${state.libraryItems.length} файлов · ${humanFileSize(total)}`;
   if (!state.libraryItems.length) {
-    const empty = document.createElement('div'); empty.className = 'empty-column';
-    empty.textContent = 'Прикрепляйте файлы к материалам — они появятся здесь.'; container.append(empty); return;
+    container.append(createBrandedEmptyState(
+      'Медиатека ждёт материалы',
+      'Прикрепите файл к карточке контента — он автоматически появится здесь.'
+    )); return;
   }
   for (const item of state.libraryItems) {
     const card = document.createElement('article'); card.className = 'library-card';

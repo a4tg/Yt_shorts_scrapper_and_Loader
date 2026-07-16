@@ -21,6 +21,7 @@
     '.content-card', '.calendar-day', '.document-card', '.library-card', '.approval-stage-row',
     '.plan-card', '.ledger-row', '.admin-stat', '.onboarding-step', '.item', '.attachment-row',
     '.revision-row', '.ai-result', '.billing-limit', '.credit-summary > div', 'tbody > tr',
+    '.empty-brand-state',
   ].join(',');
 
   const surfaceSelector = [

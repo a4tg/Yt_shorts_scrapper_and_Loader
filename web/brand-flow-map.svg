@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 600" role="img" aria-labelledby="title desc">
+  <title id="title">Связанный контент-процесс All As Planned</title>
+  <desc id="desc">Абстрактная карта, связывающая идеи, документы, видео и публикации в единую систему.</desc>
+  <style>
+    .route{stroke-dasharray:8 15;animation:routeFlow 13s linear infinite}.route.slow{animation-duration:19s;animation-direction:reverse}.node{transform-box:fill-box;transform-origin:center;animation:nodePulse 4s ease-in-out infinite}.card{transform-box:fill-box;transform-origin:center;animation:cardFloat 6s ease-in-out infinite}.card.two{animation-delay:-2s}.card.three{animation-delay:-4s}
+    @keyframes routeFlow{to{stroke-dashoffset:-230}}@keyframes nodePulse{50%{transform:scale(1.3);opacity:1}}@keyframes cardFloat{50%{transform:translateY(-8px)}}
+    @media(prefers-reduced-motion:reduce){.route,.node,.card{animation:none}}
+  </style>
+  <defs>
+    <linearGradient id="route" x1="100" y1="80" x2="1100" y2="520" gradientUnits="userSpaceOnUse"><stop stop-color="#806dff"/><stop offset=".55" stop-color="#9b8fff"/><stop offset="1" stop-color="#40d9a0"/></linearGradient>
+    <radialGradient id="aura"><stop stop-color="#806dff" stop-opacity=".2"/><stop offset="1" stop-color="#806dff" stop-opacity="0"/></radialGradient>
+    <filter id="glow" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="6" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <ellipse cx="620" cy="300" rx="330" ry="270" fill="url(#aura)"/>
+  <g fill="none" stroke="url(#route)" stroke-linecap="round">
+    <path class="route" d="M67 123C233 97 238 254 385 268S533 154 614 158s118 153 224 139 132-155 293-120" opacity=".54"/>
+    <path class="route slow" d="M45 464c154 7 178-120 315-111s161 131 286 104 194-144 323-82 103 98 192 106" opacity=".34"/>
+    <path class="route" d="M155 71c15 153 132 173 175 286s181 111 284 44 183-9 249 81" opacity=".24"/>
+  </g>
+  <g fill="#0b141e" stroke="url(#route)" stroke-width="3" filter="url(#glow)">
+    <circle class="node" cx="67" cy="123" r="8"/><circle class="node" cx="385" cy="268" r="7"/><circle class="node" cx="614" cy="158" r="8"/><circle class="node" cx="838" cy="297" r="7"/><circle class="node" cx="1131" cy="177" r="8"/>
+    <circle class="node" cx="45" cy="464" r="7"/><circle class="node" cx="360" cy="353" r="8"/><circle class="node" cx="646" cy="457" r="7"/><circle class="node" cx="969" cy="375" r="8"/><circle class="node" cx="1161" cy="481" r="7"/>
+  </g>
+  <g class="card" transform="translate(120 177)"><rect width="152" height="92" rx="18" fill="#111d29" stroke="#34465a"/><rect x="18" y="19" width="32" height="32" rx="9" fill="#806dff" fill-opacity=".18" stroke="#806dff" stroke-opacity=".45"/><path d="m29 28 12 7-12 7Z" fill="#a99fff"/><rect x="61" y="22" width="65" height="8" rx="4" fill="#dce4ed" fill-opacity=".65"/><rect x="61" y="38" width="42" height="6" rx="3" fill="#718397" fill-opacity=".55"/><rect x="18" y="68" width="105" height="5" rx="2.5" fill="#718397" fill-opacity=".32"/></g>
+  <g class="card two" transform="translate(525 235)"><rect width="164" height="104" rx="20" fill="#121d2a" stroke="#806dff" stroke-opacity=".55"/><circle cx="31" cy="31" r="13" fill="#40d9a0" fill-opacity=".12" stroke="#40d9a0" stroke-opacity=".45"/><path d="m25 31 4 4 8-9" fill="none" stroke="#67deb3" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><rect x="55" y="23" width="84" height="8" rx="4" fill="#e5e9f0" fill-opacity=".72"/><rect x="55" y="40" width="55" height="6" rx="3" fill="#718397" fill-opacity=".5"/><rect x="20" y="69" width="124" height="16" rx="8" fill="#806dff" fill-opacity=".1"/><circle cx="31" cy="77" r="4" fill="#806dff"/><rect x="42" y="74" width="74" height="6" rx="3" fill="#9f94f7" fill-opacity=".5"/></g>
+  <g class="card three" transform="translate(862 189)"><rect width="166" height="98" rx="19" fill="#111c28" stroke="#35475a"/><rect x="18" y="17" width="50" height="64" rx="11" fill="#192940"/><circle cx="43" cy="42" r="13" fill="#806dff" fill-opacity=".3"/><path d="m39 36 11 6-11 6Z" fill="#fff" fill-opacity=".8"/><rect x="82" y="21" width="60" height="8" rx="4" fill="#e0e6ee" fill-opacity=".68"/><rect x="82" y="38" width="45" height="6" rx="3" fill="#718397" fill-opacity=".5"/><rect x="82" y="63" width="62" height="5" rx="2.5" fill="#40d9a0" fill-opacity=".46"/></g>
+</svg>
