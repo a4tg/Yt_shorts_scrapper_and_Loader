@@ -31,7 +31,13 @@ class FirstSaasUpgradeScriptTests(unittest.TestCase):
 class ContainerManifestTests(unittest.TestCase):
     def test_saas_routes_are_copied_into_production_image(self) -> None:
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
-        for module in ("workspace_service.py", "workspace_routes.py", "content_routes.py"):
+        for module in (
+            "workspace_service.py",
+            "workspace_routes.py",
+            "content_routes.py",
+            "file_validation.py",
+            "messaging_routes.py",
+        ):
             self.assertIn(module, dockerfile)
 
     def test_all_supported_source_cookie_paths_are_mounted(self) -> None:
