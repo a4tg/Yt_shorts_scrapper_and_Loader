@@ -144,6 +144,7 @@ class VisualQualityTests(unittest.TestCase):
         motion_files = [
             "motion-system.css", "landing-motion.css", "product-demo.css", "commercial.css",
             "scroll-story.css", "app-motion.css", "brand-graphics.css", "performance.css",
+            "ambient-particles.css",
         ]
         for name in motion_files:
             with self.subTest(stylesheet=name):
@@ -156,6 +157,15 @@ class VisualQualityTests(unittest.TestCase):
         self.assertIn("prefers-contrast: more", performance)
         self.assertIn("forced-colors: active", performance)
         self.assertIn(".skip-link", performance)
+
+    def test_ambient_particles_respect_performance_preferences(self) -> None:
+        landing = (WEB / "landing.html").read_text(encoding="utf-8")
+        particles = (WEB / "ambient-particles.js").read_text(encoding="utf-8")
+        self.assertIn('/assets/ambient-particles.js', landing)
+        self.assertIn("prefers-reduced-motion: reduce", particles)
+        self.assertIn("document.hidden", particles)
+        self.assertIn("navigator.connection?.saveData", particles)
+        self.assertIn("Math.min(window.devicePixelRatio || 1, 1.5)", particles)
 
     def test_brand_assets_stay_within_delivery_budget(self) -> None:
         budgets = {
