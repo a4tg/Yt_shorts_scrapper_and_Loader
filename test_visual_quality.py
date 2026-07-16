@@ -144,7 +144,7 @@ class VisualQualityTests(unittest.TestCase):
         motion_files = [
             "motion-system.css", "landing-motion.css", "product-demo.css", "commercial.css",
             "scroll-story.css", "app-motion.css", "brand-graphics.css", "performance.css",
-            "ambient-particles.css",
+            "ambient-particles.css", "app-shell-premium.css",
         ]
         for name in motion_files:
             with self.subTest(stylesheet=name):
@@ -166,6 +166,17 @@ class VisualQualityTests(unittest.TestCase):
         self.assertIn("document.hidden", particles)
         self.assertIn("navigator.connection?.saveData", particles)
         self.assertIn("Math.min(window.devicePixelRatio || 1, 1.5)", particles)
+
+    def test_premium_app_shell_has_progressive_transitions(self) -> None:
+        index = (WEB / "index.html").read_text(encoding="utf-8")
+        app = (WEB / "app.js").read_text(encoding="utf-8")
+        motion = (WEB / "app-motion.js").read_text(encoding="utf-8")
+        styles = (WEB / "app-shell-premium.css").read_text(encoding="utf-8")
+        self.assertIn('/assets/app-shell-premium.css', index)
+        self.assertIn("document.startViewTransition", app)
+        self.assertIn("syncNavigationIndicator", motion)
+        self.assertIn("prefers-reduced-motion: reduce", styles)
+        self.assertIn("view-transition-name: workspace-page", styles)
 
     def test_brand_assets_stay_within_delivery_budget(self) -> None:
         budgets = {

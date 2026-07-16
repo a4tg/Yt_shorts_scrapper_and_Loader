@@ -17,6 +17,22 @@ const workspacePageTitles = {
   ai: 'AI-помощник', billing: 'Тариф и кредиты', admin: 'Управление SaaS'
 };
 
+const workspacePageContexts = {
+  dashboard: 'Пульс рабочего пространства',
+  content: 'Планирование и производство',
+  documents: 'Тексты, заметки и брифы',
+  library: 'Единый архив материалов',
+  video: 'Подготовка и обработка видео',
+  approvals: 'Контроль качества и согласование',
+  ai: 'AI-инструменты для контента',
+  billing: 'Ресурсы рабочего пространства',
+  admin: 'Контроль SaaS-платформы',
+};
+
+const workspacePageOrder = [
+  'dashboard', 'content', 'documents', 'library', 'video', 'approvals', 'ai', 'billing', 'admin',
+];
+
 function workspacePageFromHash() {
   if (!location.hash.startsWith('#/')) return null;
   return location.hash.slice(2).split(/[/?]/, 1)[0] || null;
@@ -24,22 +40,44 @@ function workspacePageFromHash() {
 
 function showWorkspacePage(page, syncUrl = false) {
   if (page === 'admin' && !state.currentUser?.is_admin) page = 'dashboard';
-  const target = document.querySelector(`[data-page="${page}"]`);
-  if (!target || !workspacePageTitles[page]) page = 'dashboard';
-  state.currentPage = page;
-  document.querySelectorAll('[data-page]').forEach((element) => {
-    element.classList.toggle('hidden', element.dataset.page !== page);
-  });
-  document.querySelectorAll('.workspace-nav-item[data-navigate]').forEach((element) => {
-    const active = element.dataset.navigate === page;
-    element.classList.toggle('active', active);
-    if (active) element.setAttribute('aria-current', 'page');
-    else element.removeAttribute('aria-current');
-  });
-  const title = $('#workspace-page-title');
-  if (title) title.textContent = workspacePageTitles[page];
-  window.AAPAppMotion?.pageEntered(target, page, title);
-  document.title = `${workspacePageTitles[page]} · All As Planned`;
+  if (!document.querySelector(`[data-page="${page}"]`) || !workspacePageTitles[page]) page = 'dashboard';
+  const previousPage = state.currentPage;
+  const nativeTransition = previousPage !== page
+    && typeof document.startViewTransition === 'function'
+    && !window.AAPMotion?.reduced?.();
+  const previousIndex = workspacePageOrder.indexOf(previousPage);
+  const nextIndex = workspacePageOrder.indexOf(page);
+  document.documentElement.dataset.pageDirection = nextIndex < previousIndex ? 'backward' : 'forward';
+
+  const applyPage = () => {
+    const target = document.querySelector(`[data-page="${page}"]`);
+    state.currentPage = page;
+    document.querySelectorAll('[data-page]').forEach((element) => {
+      element.classList.toggle('hidden', element.dataset.page !== page);
+    });
+    document.querySelectorAll('.workspace-nav-item[data-navigate]').forEach((element) => {
+      const active = element.dataset.navigate === page;
+      element.classList.toggle('active', active);
+      if (active) element.setAttribute('aria-current', 'page');
+      else element.removeAttribute('aria-current');
+    });
+    const title = $('#workspace-page-title');
+    if (title) title.textContent = workspacePageTitles[page];
+    const context = $('#workspace-page-context');
+    const contextText = context?.querySelector('span');
+    if (contextText) contextText.textContent = workspacePageContexts[page] || 'Рабочее пространство';
+    window.AAPAppMotion?.pageEntered(target, page, title, { nativeTransition });
+    window.AAPAppMotion?.contextUpdated(context);
+    document.title = `${workspacePageTitles[page]} · All As Planned`;
+  };
+
+  if (nativeTransition) {
+    const transition = document.startViewTransition(applyPage);
+    transition.finished.finally(() => delete document.documentElement.dataset.pageDirection);
+  } else {
+    applyPage();
+    delete document.documentElement.dataset.pageDirection;
+  }
   if (syncUrl && workspacePageFromHash() !== page) {
     history.pushState({ page }, '', `${location.pathname}${location.search}#/${page}`);
   }

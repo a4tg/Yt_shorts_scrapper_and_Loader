@@ -6,6 +6,7 @@
   const activeRequests = new Set();
   let requestSequence = 0;
   let networkHideTimer = 0;
+  let navigationFrame = 0;
 
   const networkBar = document.createElement('div');
   networkBar.className = 'app-network-progress';
@@ -68,6 +69,26 @@
     });
   }
 
+  function syncNavigationIndicator() {
+    if (navigationFrame) cancelAnimationFrame(navigationFrame);
+    navigationFrame = requestAnimationFrame(() => {
+      navigationFrame = 0;
+      const sidebar = document.querySelector('.workspace-sidebar');
+      const active = sidebar?.querySelector('.workspace-nav-item.active:not(.hidden)');
+      if (!sidebar || !active || appShell?.classList.contains('hidden')) {
+        sidebar?.style.setProperty('--nav-indicator-opacity', '0');
+        return;
+      }
+      const sidebarRect = sidebar.getBoundingClientRect();
+      const activeRect = active.getBoundingClientRect();
+      sidebar.style.setProperty('--nav-indicator-x', `${activeRect.left - sidebarRect.left}px`);
+      sidebar.style.setProperty('--nav-indicator-y', `${activeRect.top - sidebarRect.top}px`);
+      sidebar.style.setProperty('--nav-indicator-width', `${activeRect.width}px`);
+      sidebar.style.setProperty('--nav-indicator-height', `${activeRect.height}px`);
+      sidebar.style.setProperty('--nav-indicator-opacity', '1');
+    });
+  }
+
   function prepareSurface(element) {
     if (!(element instanceof Element)) return;
     const surfaces = element.matches(surfaceSelector)
@@ -100,10 +121,11 @@
     });
   }
 
-  function pageEntered(page, pageName, title) {
+  function pageEntered(page, pageName, title, options = {}) {
     if (!page) return;
     prepareSurface(page);
-    if (reduced()) return;
+    syncNavigationIndicator();
+    if (reduced() || options.nativeTransition) return;
     replayClass(page, 'app-page-enter', 620);
     page.dataset.motionPage = pageName;
     const sections = [...page.children].filter((child) => !child.classList.contains('story-chapter-ambient'));
@@ -116,6 +138,7 @@
 
   function appEntered() {
     root.classList.add('app-motion-active');
+    syncNavigationIndicator();
     if (reduced()) return;
     replayClass(appShell, 'app-shell-enter', 900);
   }
@@ -123,6 +146,10 @@
   function authEntered() {
     if (reduced()) return;
     replayClass(authScreen, 'app-auth-enter', 720);
+  }
+
+  function contextUpdated(context) {
+    replayClass(context, 'context-updated', 520);
   }
 
   function toastIn(toast, tone = 'neutral') {
@@ -180,9 +207,12 @@
 
   requestAnimationFrame(() => {
     if (!authScreen?.classList.contains('hidden')) authEntered();
+    syncNavigationIndicator();
   });
+  window.addEventListener('resize', syncNavigationIndicator, { passive: true });
 
   window.AAPAppMotion = Object.freeze({
-    appEntered, authEntered, networkEnd, networkStart, pageEntered, toastIn, toastOut,
+    appEntered, authEntered, contextUpdated, networkEnd, networkStart, pageEntered,
+    syncNavigationIndicator, toastIn, toastOut,
   });
 })();

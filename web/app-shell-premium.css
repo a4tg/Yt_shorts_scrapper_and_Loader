@@ -1,0 +1,225 @@
+.app-shell {
+  --nav-indicator-x: 16px;
+  --nav-indicator-y: 0px;
+  --nav-indicator-width: calc(100% - 32px);
+  --nav-indicator-height: 42px;
+  isolation: isolate;
+}
+
+.workspace-main {
+  position: relative;
+  z-index: 1;
+}
+
+.workspace-main::before {
+  position: fixed;
+  z-index: -1;
+  inset: 0 0 0 250px;
+  content: "";
+  pointer-events: none;
+  opacity: .52;
+  background:
+    radial-gradient(600px circle at 88% 8%, rgba(128, 109, 255, .105), transparent 68%),
+    linear-gradient(rgba(255, 255, 255, .018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, .018) 1px, transparent 1px);
+  background-size: auto, 48px 48px, 48px 48px;
+  mask-image: linear-gradient(to bottom, #000 0, rgba(0, 0, 0, .58) 42%, transparent 92%);
+}
+
+.workspace-sidebar::after {
+  position: absolute;
+  z-index: 0;
+  width: var(--nav-indicator-width);
+  height: var(--nav-indicator-height);
+  left: 0;
+  top: 0;
+  content: "";
+  pointer-events: none;
+  border: 1px solid rgba(151, 137, 255, .28);
+  border-radius: 11px;
+  background:
+    linear-gradient(90deg, rgba(128, 109, 255, .19), rgba(128, 109, 255, .075)),
+    radial-gradient(circle at 14% 50%, rgba(187, 177, 255, .13), transparent 42%);
+  box-shadow: 0 9px 28px rgba(1, 4, 10, .2), 0 0 22px rgba(128, 109, 255, .055) inset;
+  opacity: var(--nav-indicator-opacity, 0);
+  transform: translate(var(--nav-indicator-x), var(--nav-indicator-y));
+  transition:
+    width 360ms var(--motion-ease-enter),
+    height 360ms var(--motion-ease-enter),
+    opacity 180ms ease,
+    transform 520ms var(--motion-ease-spring);
+}
+
+.workspace-nav-item.active {
+  border-color: transparent;
+  background: transparent;
+}
+
+.workspace-nav-item.active::before {
+  box-shadow: 0 0 16px rgba(128, 109, 255, .78);
+}
+
+.workspace-page-context {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 18px;
+}
+
+.workspace-page-context i {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #40d9a0;
+  box-shadow: 0 0 0 4px rgba(64, 217, 160, .09), 0 0 13px rgba(64, 217, 160, .5);
+  animation: workspaceContextPulse 2.8s ease-in-out infinite;
+}
+
+.workspace-page-context.context-updated span {
+  animation: workspaceContextIn 440ms var(--motion-ease-enter) both;
+}
+
+.workspace-topbar {
+  background: linear-gradient(180deg, rgba(8, 16, 24, .78), rgba(8, 16, 24, .28));
+  backdrop-filter: blur(14px) saturate(125%);
+}
+
+.workspace-topbar::before {
+  position: absolute;
+  width: min(420px, 42vw);
+  height: 1px;
+  right: 0;
+  bottom: -1px;
+  content: "";
+  pointer-events: none;
+  opacity: .72;
+  background: linear-gradient(90deg, transparent, rgba(64, 217, 160, .28), rgba(128, 109, 255, .52));
+}
+
+.workspace-main :where(button.primary, a.primary, button.secondary, a.secondary) {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.workspace-main :where(button.primary, a.primary, button.secondary, a.secondary)::after {
+  position: absolute;
+  z-index: -1;
+  width: 42%;
+  height: 180%;
+  left: -72%;
+  top: -42%;
+  content: "";
+  pointer-events: none;
+  rotate: 16deg;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .16), transparent);
+  transition: left 620ms var(--motion-ease-enter);
+}
+
+.workspace-main :where(button.primary, a.primary, button.secondary, a.secondary):hover::after {
+  left: 130%;
+}
+
+.workspace-page:not(.hidden) {
+  view-transition-name: workspace-page;
+}
+
+#workspace-page-title {
+  view-transition-name: workspace-title;
+}
+
+::view-transition-old(workspace-page),
+::view-transition-new(workspace-page),
+::view-transition-old(workspace-title),
+::view-transition-new(workspace-title) {
+  mix-blend-mode: normal;
+}
+
+::view-transition-old(workspace-page) {
+  animation: workspacePageOut 180ms var(--motion-ease-exit) both;
+}
+
+::view-transition-new(workspace-page) {
+  animation: workspacePageIn 500ms var(--motion-ease-enter) both;
+}
+
+::view-transition-old(workspace-title) {
+  animation: workspaceTitleOut 150ms var(--motion-ease-exit) both;
+}
+
+::view-transition-new(workspace-title) {
+  animation: workspaceTitleIn 430ms var(--motion-ease-enter) both;
+}
+
+html[data-page-direction="backward"]::view-transition-old(workspace-page) {
+  animation-name: workspacePageOutBackward;
+}
+
+html[data-page-direction="backward"]::view-transition-new(workspace-page) {
+  animation-name: workspacePageInBackward;
+}
+
+@keyframes workspaceContextPulse {
+  0%, 100% { opacity: .72; scale: .88; }
+  50% { opacity: 1; scale: 1.08; }
+}
+
+@keyframes workspaceContextIn {
+  from { opacity: 0; translate: 0 6px; filter: blur(2px); }
+  to { opacity: 1; translate: 0; filter: blur(0); }
+}
+
+@keyframes workspacePageOut {
+  to { opacity: 0; translate: -18px 0; scale: .992; filter: blur(2px); }
+}
+
+@keyframes workspacePageIn {
+  from { opacity: 0; translate: 24px 0; scale: .992; filter: blur(3px); }
+  to { opacity: 1; translate: 0; scale: 1; filter: blur(0); }
+}
+
+@keyframes workspacePageOutBackward {
+  to { opacity: 0; translate: 18px 0; scale: .992; filter: blur(2px); }
+}
+
+@keyframes workspacePageInBackward {
+  from { opacity: 0; translate: -24px 0; scale: .992; filter: blur(3px); }
+  to { opacity: 1; translate: 0; scale: 1; filter: blur(0); }
+}
+
+@keyframes workspaceTitleOut {
+  to { opacity: 0; translate: 0 -7px; }
+}
+
+@keyframes workspaceTitleIn {
+  from { opacity: 0; translate: 0 9px; filter: blur(2px); }
+  to { opacity: 1; translate: 0; filter: blur(0); }
+}
+
+@media (max-width: 1050px) {
+  .workspace-main::before { inset: 0 0 0 78px; }
+}
+
+@media (max-width: 760px) {
+  .workspace-main::before { inset: 0; }
+  .workspace-sidebar::after {
+    width: var(--nav-indicator-width);
+    height: var(--nav-indicator-height);
+    border-radius: 10px;
+  }
+  .workspace-topbar { backdrop-filter: blur(10px); }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .workspace-topbar { backdrop-filter: none; background: #081018; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-sidebar::after { transition: none; }
+  .workspace-page-context i,
+  .workspace-page-context.context-updated span { animation: none; }
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) { animation-duration: .001ms !important; }
+}
