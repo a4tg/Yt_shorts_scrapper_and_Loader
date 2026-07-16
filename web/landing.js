@@ -95,6 +95,7 @@ if (!window.AAPMotion.reduced()) {
     ['.story-chapter-marker'],
     ['.landing-section > .kicker', '.landing-section > h2'],
     ['.feature-grid article'],
+    ['.product-demo-intro > *', '.demo-shell'],
     ['.video-feature > div:not(.story-chapter-marker):not(.story-chapter-ambient)'],
     ['.price-grid article'],
     ['.faq details'],

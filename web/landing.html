@@ -11,13 +11,71 @@
   <link rel="stylesheet" href="/assets/landing-motion.css">
   <link rel="stylesheet" href="/assets/hero-scene.css">
   <link rel="stylesheet" href="/assets/scroll-story.css">
+  <link rel="stylesheet" href="/assets/product-demo.css">
 </head>
 <body>
   <header class="landing-header"><a class="landing-brand" href="/"><span>A</span><b>All As Planned</b></a><nav><a href="#features">Возможности</a><a href="#pricing">Тарифы</a><a href="#faq">Вопросы</a></nav><a class="button secondary" href="/app">Войти</a></header>
   <main>
     <section class="hero"><div class="hero-copy"><p class="kicker">Рабочее пространство маркетолога</p><h1>Контент больше не живёт <em>в десяти разных местах</em></h1><p class="hero-lead">Планы, тексты, видео, баннеры, документы и согласования по всем брендам — в одной системе. От идеи до публикации.</p><div class="hero-actions"><a class="button primary" href="/app">Попробовать 14 дней</a><a class="button ghost" href="#features">Посмотреть возможности</a></div><small>Без привязки карты · 5 стартовых кредитов · данные остаются вашими</small></div><div class="hero-board" aria-label="Макет контент-плана"><div class="mock-top"><i></i><i></i><i></i><b>Запуск продукта · Июль</b></div><div class="mock-columns"><section><span>Идеи</span><article><b>История продукта</b><small>Telegram · 18 июля</small></article><article><b>Серия коротких видео</b><small>VK · YouTube</small></article></section><section><span>На согласовании</span><article class="accent"><b>Главный ролик</b><small>Комментарий клиента · 2</small></article></section><section><span>Готово</span><article class="done"><b>Промо-баннеры</b><small>4 файла</small></article></section></div></div></section>
     <section class="proof"><span>Контент-план</span><span>Медиатека</span><span>Согласования</span><span>Видео</span><span>AI-студия</span></section>
-    <section id="features" class="landing-section"><p class="kicker">Всё связано с проектом</p><h2>Один процесс вместо набора разрозненных инструментов</h2><div class="feature-grid"><article><b>01</b><h3>Планируйте</h3><p>Канбан и календарь, статусы, дедлайны, ответственные и каналы публикации.</p></article><article><b>02</b><h3>Создавайте</h3><p>Тексты, документы, изображения, оверлеи и короткие видео в одной системе.</p></article><article><b>03</b><h3>Согласовывайте</h3><p>Собственные этапы проверки, роли команды и клиентский доступ без лишних чатов.</p></article><article><b>04</b><h3>Переиспользуйте</h3><p>Импорт YouTube, VK и Rutube, единая медиатека и история версий материалов.</p></article></div></section>
+    <section id="features" class="landing-section"><p class="kicker">Всё связано с проектом</p><h2>Один процесс вместо набора разрозненных инструментов</h2><div class="feature-grid"><article><b>01</b><h3>Планируйте</h3><p>Канбан и календарь, статусы, дедлайны, ответственные и каналы публикации.</p></article><article><b>02</b><h3>Создавайте</h3><p>Тексты, документы, изображения, оверлеи и короткие видео в одной системе.</p></article><article><b>03</b><h3>Согласовывайте</h3><p>Собственные этапы проверки, роли команды и клиентский доступ без лишних чатов.</p></article><article><b>04</b><h3>Переиспользуйте</h3><p>Импорт YouTube, VK и Rutube, единая медиатека и история версий материалов.</p></article></div>
+      <div id="product-demo" class="product-demo">
+        <div class="product-demo-intro">
+          <div><p class="kicker">Попробуйте прямо здесь</p><h3>Не скриншот. Маленькая рабочая версия.</h3></div>
+          <p>Перемещайте материалы, пройдите согласование и настройте оверлей — регистрация для демо не нужна.</p>
+        </div>
+        <div class="demo-shell">
+          <div class="demo-shell-topbar"><div class="demo-window-dots" aria-hidden="true"><i></i><i></i><i></i></div><b>All As Planned</b><span>Запуск продукта · Июль</span><em><i></i> Все изменения сохранены</em></div>
+          <div class="demo-shell-body">
+            <div class="demo-tabs" role="tablist" aria-label="Интерактивные возможности продукта">
+              <button type="button" role="tab" id="demo-tab-plan" aria-controls="demo-panel-plan" aria-selected="true" tabindex="0" data-demo-target="plan"><span>01</span><div><b>Контент-план</b><small>Перемещайте карточки</small></div></button>
+              <button type="button" role="tab" id="demo-tab-approval" aria-controls="demo-panel-approval" aria-selected="false" tabindex="-1" data-demo-target="approval"><span>02</span><div><b>Согласование</b><small>Пройдите процесс</small></div></button>
+              <button type="button" role="tab" id="demo-tab-studio" aria-controls="demo-panel-studio" aria-selected="false" tabindex="-1" data-demo-target="studio"><span>03</span><div><b>Видеостудия</b><small>Настройте оверлей</small></div></button>
+            </div>
+            <div class="demo-workspace">
+              <section id="demo-panel-plan" class="demo-panel demo-plan-panel is-active" role="tabpanel" aria-labelledby="demo-tab-plan" data-demo-panel="plan">
+                <div class="demo-panel-heading"><div><small>Контент-план</small><h4>Запуск продукта</h4></div><div class="demo-view-switch" aria-hidden="true"><b>Доска</b><span>Календарь</span></div></div>
+                <p class="demo-instruction"><i></i> Нажмите на карточку, чтобы перевести её на следующий этап</p>
+                <div class="demo-kanban" data-demo-board>
+                  <div data-demo-column="ideas"><header><span>Идеи</span><b>2</b></header><button type="button" class="demo-content-card violet" data-demo-card><small>Telegram · сегодня</small><b>История создания продукта</b><span><i>АК</i> Текст · 80%</span></button><button type="button" class="demo-content-card" data-demo-card><small>VK · 18 июля</small><b>Серия карточек о команде</b><span><i>МС</i> Баннеры · 4</span></button></div>
+                  <div data-demo-column="review"><header><span>На согласовании</span><b>1</b></header><button type="button" class="demo-content-card mint" data-demo-card><small>YouTube · завтра</small><b>Главный промо-ролик</b><span><i>АП</i> Комментарии · 2</span></button></div>
+                  <div data-demo-column="ready"><header><span>Готово</span><b>1</b></header><button type="button" class="demo-content-card done" data-demo-card><small>Telegram · 15 июля</small><b>Анонс новой функции</b><span><i>✓</i> Опубликовано</span></button></div>
+                </div>
+              </section>
+              <section id="demo-panel-approval" class="demo-panel demo-approval-panel" role="tabpanel" aria-labelledby="demo-tab-approval" data-demo-panel="approval" hidden>
+                <div class="demo-panel-heading"><div><small>Процесс согласования</small><h4>Главный промо-ролик</h4></div><span class="demo-status-pill" data-approval-status>Ожидает редактуру</span></div>
+                <div class="demo-approval-layout">
+                  <div class="demo-asset-preview"><div class="demo-play"><i></i></div><span>00:24 / 01:00</span><b>Летняя кампания</b></div>
+                  <div class="demo-approval-flow">
+                    <p>Выберите этап, чтобы увидеть движение материала</p>
+                    <div class="demo-approval-steps">
+                      <button type="button" class="is-current" data-approval-step="0"><i>1</i><div><b>Редактура</b><small>Мария · сейчас</small></div></button>
+                      <button type="button" data-approval-step="1"><i>2</i><div><b>Клиент</b><small>Алексей · следующий</small></div></button>
+                      <button type="button" data-approval-step="2"><i>3</i><div><b>Готово</b><small>Можно публиковать</small></div></button>
+                    </div>
+                    <blockquote data-approval-message>«Проверяю текст и тайминг финального кадра»<small>Мария, редактор</small></blockquote>
+                  </div>
+                </div>
+              </section>
+              <section id="demo-panel-studio" class="demo-panel demo-studio-panel" role="tabpanel" aria-labelledby="demo-tab-studio" data-demo-panel="studio" hidden>
+                <div class="demo-panel-heading"><div><small>Видеостудия</small><h4>Оверлей в реальном времени</h4></div><span class="demo-status-pill ready"><i></i> Предпросмотр</span></div>
+                <div class="demo-studio-layout">
+                  <div class="demo-video-stage" data-demo-stage><div class="demo-video-scene"><span>ALL AS PLANNED</span><small>Контент без хаоса</small></div><button type="button" class="demo-overlay-object" data-demo-overlay aria-label="Перетащите оверлей по видео"><i></i><b>AAP</b><span>перетащите</span></button><div class="demo-video-time"><i></i><span>00:12</span></div></div>
+                  <div class="demo-studio-controls">
+                    <p>Перетащите логотип или используйте настройки</p>
+                    <label><span>Размер <b data-demo-size-value>42%</b></span><input type="range" min="20" max="100" value="42" data-demo-size></label>
+                    <label><span>По вертикали <b data-demo-y-value>72%</b></span><input type="range" min="8" max="92" value="72" data-demo-y></label>
+                    <label><span>Прозрачность <b data-demo-opacity-value>68%</b></span><input type="range" min="15" max="100" value="68" data-demo-opacity></label>
+                    <div class="demo-formats"><span>PNG</span><span>GIF</span><span>MOV</span><span>MP4</span></div>
+                  </div>
+                </div>
+              </section>
+              <p class="demo-live-region" aria-live="polite" data-demo-live></p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
     <section class="video-feature"><div><p class="kicker">Не только менеджер задач</p><h2>Видеообработка уже внутри</h2><p>Скачивайте ролики, накладывайте несколько оверлеев, очищайте метаданные и превращайте длинное видео в вертикальные клипы с помощью AI.</p><ul><li>Конструктор положения и размера в реальном времени</li><li>PNG, GIF, MOV и MP4-оверлеи</li><li>Пакетная последовательная обработка</li><li>Автоудаление готовых файлов по таймеру</li></ul></div><div class="phone"><div><span>Ваш ролик</span><b>ALL AS<br>PLANNED</b><small>Оверлей · 42%</small></div></div></section>
     <section id="pricing" class="landing-section pricing"><p class="kicker">Понятные тарифы</p><h2>Начните бесплатно, платите по мере роста</h2><div class="price-grid"><article><h3>Пробный</h3><strong>0 ₽</strong><p>14 дней и 5 кредитов</p><ul><li>До 3 проектов</li><li>До 3 участников</li><li>1 ГБ файлов</li></ul><a class="button ghost" href="/app">Начать</a></article><article class="popular"><span>Для старта</span><h3>Creator</h3><strong>1 490 ₽<small>/мес</small></strong><p>200 кредитов ежемесячно</p><ul><li>До 5 проектов</li><li>До 5 участников</li><li>25 ГБ файлов</li></ul><a class="button primary" href="/app">Попробовать</a></article><article><h3>Studio</h3><strong>3 990 ₽<small>/мес</small></strong><p>1 000 кредитов ежемесячно</p><ul><li>До 25 проектов</li><li>До 20 участников</li><li>200 ГБ файлов</li></ul><a class="button ghost" href="/app">Начать</a></article></div></section>
     <section id="faq" class="landing-section faq"><p class="kicker">Частые вопросы</p><h2>До начала работы</h2><details><summary>Что произойдёт после пробного периода?</summary><p>Материалы останутся доступны для просмотра. Создание и обработка возобновятся после выбора тарифа.</p></details><details><summary>Нужна ли видеокарта?</summary><p>Нет. Основной рендер выполняет FFmpeg на CPU, а AI-задачи обращаются к внешнему API.</p></details><details><summary>Можно работать с командой и клиентами?</summary><p>Да. Доступны роли владельца, администратора, редактора, наблюдателя и клиента.</p></details></section>
@@ -25,6 +83,7 @@
   </main>
   <footer><a class="landing-brand" href="/"><span>A</span><b>All As Planned</b></a><p>Контент в одном месте.</p><nav><a href="/privacy">Конфиденциальность</a><a href="/terms">Условия использования</a><a href="mailto:support@allasplanned.ru">Поддержка</a></nav></footer>
   <script src="/assets/motion-system.js" defer></script>
+  <script src="/assets/product-demo.js" defer></script>
   <script src="/assets/scroll-story.js" defer></script>
   <script src="/assets/landing.js" defer></script>
 </body></html>
