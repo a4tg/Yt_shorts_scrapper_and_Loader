@@ -70,6 +70,28 @@ def test_workspace_depth_feature_can_be_enabled(monkeypatch) -> None:
     assert response.json()["features"]["asset_viewer"] is True
 
 
+def test_malformed_unicode_validation_returns_422_without_reflecting_input() -> None:
+    response = TestClient(server.app).post(
+        "/api/auth/login",
+        headers={
+            "Content-Type": "application/json",
+            "Origin": "http://testserver",
+        },
+        content=(
+            b'{"email":"\\udcd1load-test@example.com",'
+            b'"password":"correct horse battery staple"}'
+        ),
+    )
+
+    assert response.status_code == 422
+    assert response.headers["content-type"].startswith("application/json")
+    details = response.json()["detail"]
+    assert details[0]["type"] == "string_unicode"
+    assert details[0]["loc"] == ["body", "email"]
+    assert "input" not in details[0]
+    assert "\\udcd1load-test@example.com" not in response.text
+
+
 def test_registration_uses_argon2_and_server_side_session() -> None:
     client, payload = register_client()
 

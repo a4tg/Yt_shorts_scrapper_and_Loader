@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request, Response, UploadFile
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -345,6 +346,32 @@ app = FastAPI(
     lifespan=application_lifespan,
 )
 app.add_middleware(SelectiveGZipMiddleware, minimum_size=1024, compresslevel=5)
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_handler(_request: Request, exc: RequestValidationError):
+    """Return validation details without reflecting malformed input bytes.
+
+    FastAPI's default handler includes the rejected value in the response. A
+    JSON string containing an unpaired surrogate cannot then be encoded as
+    UTF-8, turning a client-side 422 into a server-side 500.
+    """
+    metrics.increment("request_validation_errors_total")
+    details = []
+    for error in exc.errors():
+        details.append({
+            "type": str(error.get("type") or "validation_error"),
+            "loc": [
+                part if isinstance(part, int) else str(part).encode(
+                    "utf-8", errors="replace"
+                ).decode("utf-8")
+                for part in error.get("loc", ())
+            ],
+            "msg": str(error.get("msg") or "Invalid request data").encode(
+                "utf-8", errors="replace"
+            ).decode("utf-8"),
+        })
+    return JSONResponse({"detail": details}, status_code=422)
 
 
 @app.exception_handler(SubscriptionRequiredError)
