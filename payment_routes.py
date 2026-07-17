@@ -32,6 +32,7 @@ MAX_WEBHOOK_BYTES = 128 * 1024
 
 class CheckoutRequest(BaseModel):
     plan_id: str = Field(min_length=1, max_length=40, pattern=r"^[a-z0-9_-]+$")
+    recurring_consent: bool = False
 
 
 def get_provider() -> YooKassaClient:
@@ -56,6 +57,11 @@ def payment_config() -> dict[str, object]:
 
 @router.post("/checkout", status_code=201)
 def create_checkout(payload: CheckoutRequest, request: Request) -> dict[str, object]:
+    if not payload.recurring_consent:
+        raise HTTPException(
+            400,
+            "Подтвердите ежемесячное автопродление перед переходом к оплате.",
+        )
     limiter_key = f"checkout:{request.state.user.id}"
     if not attempt_limiter.allow(limiter_key, limit=10, window_seconds=10 * 60):
         raise HTTPException(429, "Слишком много попыток оплаты. Повтори позже.")

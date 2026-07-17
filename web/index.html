@@ -574,6 +574,31 @@
       <div id="change-password-status" class="auth-status" aria-live="polite"></div>
     </form>
   </dialog>
+  <dialog id="checkout-dialog" class="account-dialog checkout-dialog">
+    <form id="checkout-confirm-form">
+      <p class="eyebrow">Подтверждение подписки</p>
+      <h2 id="checkout-dialog-title">Тариф</h2>
+      <div class="checkout-total">
+        <span>К оплате сейчас</span>
+        <strong id="checkout-dialog-price">—</strong>
+        <small>Далее — та же сумма каждый месяц</small>
+      </div>
+      <p class="checkout-copy">
+        После первой оплаты способ оплаты будет сохранён в ЮKassa для ежемесячного
+        продления. Автопродление можно отключить в любой момент на странице тарифа;
+        доступ сохранится до конца оплаченного периода.
+      </p>
+      <label class="checkout-consent">
+        <input id="checkout-recurring-consent" type="checkbox" required>
+        <span>Я понимаю условия и согласен на ежемесячное автопродление подписки.</span>
+      </label>
+      <div class="dialog-actions">
+        <button id="checkout-dialog-cancel" class="ghost" type="button">Отмена</button>
+        <button id="checkout-dialog-submit" class="primary" type="submit" disabled>Перейти к оплате</button>
+      </div>
+      <div id="checkout-dialog-status" class="auth-status" aria-live="polite"></div>
+    </form>
+  </dialog>
   <div id="toast" class="toast hidden" role="status" aria-live="polite" aria-atomic="true"></div>
   <script src="/assets/motion-system.js" defer></script>
   <script src="/assets/app-motion.js" defer></script>

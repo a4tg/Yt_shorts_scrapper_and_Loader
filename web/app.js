@@ -1568,7 +1568,7 @@ async function loadBilling() {
       action.className = 'secondary plan-action'; action.type = 'button';
       action.disabled = !paymentConfig.enabled;
       action.textContent = paymentConfig.enabled ? 'Выбрать тариф' : 'Оплата пока не настроена';
-      action.addEventListener('click', () => beginCheckout(plan.id, action));
+      action.addEventListener('click', () => openCheckoutDialog(plan, action));
       card.append(action);
     }
     planContainer.append(card);
@@ -1593,20 +1593,58 @@ async function loadBilling() {
   }
 }
 
-async function beginCheckout(planId, button) {
+let pendingCheckout = null;
+
+function openCheckoutDialog(plan, sourceButton) {
+  pendingCheckout = { plan, sourceButton };
+  $('#checkout-dialog-title').textContent = `Тариф «${plan.name}»`;
+  $('#checkout-dialog-price').textContent = `${formatPlanPrice(plan)} / месяц`;
+  $('#checkout-dialog-status').textContent = '';
+  $('#checkout-recurring-consent').checked = false;
+  $('#checkout-dialog-submit').disabled = true;
+  $('#checkout-dialog').showModal();
+  window.AAPAppMotion?.dialogFromSource?.(
+    $('#checkout-dialog'), sourceButton.getBoundingClientRect()
+  );
+}
+
+$('#checkout-recurring-consent').addEventListener('change', (event) => {
+  $('#checkout-dialog-submit').disabled = !event.currentTarget.checked;
+});
+
+$('#checkout-dialog-cancel').addEventListener('click', () => {
+  pendingCheckout = null;
+  $('#checkout-dialog').close();
+});
+
+$('#checkout-confirm-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!pendingCheckout || !$('#checkout-recurring-consent').checked) return;
+  const { plan, sourceButton } = pendingCheckout;
+  await beginCheckout(plan.id, $('#checkout-dialog-submit'), sourceButton);
+});
+
+async function beginCheckout(planId, button, sourceButton = button) {
   const oldText = button.textContent; button.disabled = true; button.textContent = 'Создаю платёж…';
   try {
     const payment = await api('/api/payments/checkout', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ plan_id: planId })
+      body: JSON.stringify({ plan_id: planId, recurring_consent: true })
     });
     if (payment.status === 'succeeded') {
-      showToast('Оплата подтверждена, кредиты начислены.'); await loadBilling(); return;
+      pendingCheckout = null;
+      $('#checkout-dialog').close();
+      showToast('Оплата подтверждена, кредиты начислены.');
+      await loadBilling();
+      return;
     }
     if (!payment.confirmation_url) throw new Error('ЮKassa не вернула ссылку подтверждения.');
     location.assign(payment.confirmation_url);
   } catch (error) {
-    showToast(error.message); button.disabled = false; button.textContent = oldText;
+    showToast(error.message);
+    $('#checkout-dialog-status').textContent = error.message;
+    button.disabled = false; button.textContent = oldText;
+    sourceButton.disabled = false;
   }
 }
 

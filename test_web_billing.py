@@ -13,11 +13,15 @@ class WebBillingTests(unittest.TestCase):
         self.assertIn('id="billing-plans"', html)
         self.assertIn('id="billing-entitlement"', html)
         self.assertIn('id="billing-limits"', html)
+        self.assertIn('id="checkout-dialog"', html)
+        self.assertIn('id="checkout-recurring-consent"', html)
         self.assertIn('/assets/billing.css', html)
         self.assertIn("api('/api/billing/summary')", script)
         self.assertIn("api('/api/billing/plans')", script)
         self.assertIn("api('/api/billing/ledger?limit=8')", script)
         self.assertIn("summary.trial_expires_at", script)
+        self.assertIn("recurring_consent: true", script)
+        self.assertIn("function openCheckoutDialog(plan, sourceButton)", script)
 
 
 if __name__ == "__main__":

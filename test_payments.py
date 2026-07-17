@@ -106,7 +106,26 @@ def create_checkout(client: TestClient, provider: FakeYooKassa, plan_id: str = "
             "YOOKASSA_WEBHOOK_ENFORCE_IP": "false",
         },
     ), patch("payment_routes.get_provider", return_value=provider):
-        return client.post("/api/payments/checkout", json={"plan_id": plan_id})
+        return client.post(
+            "/api/payments/checkout",
+            json={"plan_id": plan_id, "recurring_consent": True},
+        )
+
+
+def test_checkout_requires_explicit_recurring_consent() -> None:
+    client, _user = registered_client()
+    provider = FakeYooKassa()
+    with patch.dict(
+        os.environ,
+        {"YT_LOADER_PUBLIC_BASE_URL": "https://shorts.example.test"},
+    ), patch("payment_routes.get_provider", return_value=provider):
+        response = client.post(
+            "/api/payments/checkout",
+            json={"plan_id": "creator", "recurring_consent": False},
+        )
+    assert response.status_code == 400
+    assert "автопродление" in response.json()["detail"]
+    assert provider.create_calls == []
 
 
 def test_checkout_is_idempotent_for_double_click_and_scoped_to_user() -> None:
