@@ -262,6 +262,8 @@ class ConstructorPayloadTests(unittest.TestCase):
                     "position_y": 34,
                     "width_percent": 40,
                     "metadata_mode": "synthetic",
+                    "channel_name": "Канал для медиатеки",
+                    "video_title": "Название для медиатеки",
                 },
             )
 
@@ -271,6 +273,8 @@ class ConstructorPayloadTests(unittest.TestCase):
         self.assertEqual(worker_args["position_y"], 34)
         self.assertEqual(worker_args["width_percent"], 40)
         self.assertEqual(worker_args["metadata_mode"], "synthetic")
+        self.assertEqual(worker_args["channel_name"], "Канал для медиатеки")
+        self.assertEqual(worker_args["video_title"], "Название для медиатеки")
         self.assertEqual(create_batch.call_args.kwargs["owner_id"], user_id)
 
     def test_api_forwards_multiple_overlays_in_selection_order(self) -> None:
