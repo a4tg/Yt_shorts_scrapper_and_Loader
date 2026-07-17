@@ -45,6 +45,9 @@ def test_admin_can_read_commercial_overview() -> None:
     assert overview.json()["users"] == 1
     assert overview.json()["workspaces"] == 1
     assert overview.json()["mrr_minor"] == 0
+    assert overview.json()["active_users_7d"] == 0
+    assert overview.json()["completed_onboarding"] == 0
+    assert overview.json()["open_feedback"] == 0
     assert users.status_code == 200
     assert users.json()[0]["email"] == payload["email"]
     assert users.json()[0]["is_admin"] is True

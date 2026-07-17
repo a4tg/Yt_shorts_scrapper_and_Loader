@@ -1,11 +1,21 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from database import get_db
-from saas_models import ContentAttachment, Job, Payment, Plan, Subscription, User, Workspace
+from saas_models import (
+    ContentAttachment,
+    FeedbackTicket,
+    Job,
+    Payment,
+    Plan,
+    ProductEvent,
+    Subscription,
+    User,
+    Workspace,
+)
 
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -31,6 +41,11 @@ def overview(request: Request, db: Session = Depends(get_db)) -> dict[str, objec
         .where(Subscription.status == "active", Subscription.current_period_end > now)
     ) or 0
     job_rows = db.execute(select(Job.status, func.count(Job.id)).group_by(Job.status)).all()
+    active_users_7d = db.scalar(
+        select(func.count(func.distinct(ProductEvent.user_id))).where(
+            ProductEvent.created_at >= now - timedelta(days=7)
+        )
+    ) or 0
     return {
         "users": int(db.scalar(select(func.count(User.id))) or 0),
         "verified_users": int(db.scalar(select(func.count(User.id)).where(User.email_verified_at.is_not(None))) or 0),
@@ -38,6 +53,17 @@ def overview(request: Request, db: Session = Depends(get_db)) -> dict[str, objec
         "active_subscriptions": int(active_subscriptions),
         "mrr_minor": int(mrr_minor),
         "storage_bytes": int(db.scalar(select(func.coalesce(func.sum(ContentAttachment.size_bytes), 0))) or 0),
+        "active_users_7d": int(active_users_7d),
+        "completed_onboarding": int(db.scalar(
+            select(func.count(func.distinct(ProductEvent.user_id))).where(
+                ProductEvent.event_name == "onboarding_completed"
+            )
+        ) or 0),
+        "open_feedback": int(db.scalar(
+            select(func.count(FeedbackTicket.id)).where(
+                FeedbackTicket.status.in_(["open", "in_progress"])
+            )
+        ) or 0),
         "jobs": {str(status): int(count) for status, count in job_rows},
     }
 

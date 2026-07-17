@@ -21,6 +21,7 @@ class WebWorkspaceTests(unittest.TestCase):
             "messages",
             "ai",
             "billing",
+            "support",
             "admin",
         ):
             self.assertIn(f'data-page="{page}"', html)
@@ -78,11 +79,16 @@ class WebWorkspaceTests(unittest.TestCase):
             "admin-stats",
             "admin-users-body",
             "admin-payments-body",
+            "support-form",
+            "support-tickets",
+            "create-demo-project",
         ):
             self.assertIn(f'id="{element_id}"', html)
         self.assertIn("!state.currentUser?.is_admin", script)
         self.assertIn("api('/api/admin/overview')", script)
         self.assertIn("loadOnboarding()", script)
+        self.assertIn("api('/api/onboarding/demo'", script)
+        self.assertIn("api('/api/feedback'", script)
 
 
 if __name__ == "__main__":

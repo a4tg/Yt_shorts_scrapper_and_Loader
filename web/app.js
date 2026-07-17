@@ -12,7 +12,8 @@ const state = {
   videoLibraryJobs: [], directSourceChannel: '', directSourceTitle: '',
   conversations: [], activeConversationId: null, messages: [], messageReplyTo: null,
   messageHasMore: false, messagePollTimer: null, messageLocalFiles: [],
-  editingContentId: null, aiConfig: null, aiResultJobs: {}, adminLoaded: false
+  editingContentId: null, aiConfig: null, aiResultJobs: {}, adminLoaded: false,
+  productEvents: new Set(), supportTickets: [], supportSourcePage: 'dashboard'
 };
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const importPageSize = 12;
@@ -20,7 +21,8 @@ const importPageSize = 12;
 const workspacePageTitles = {
   dashboard: 'Обзор', content: 'Контент-план', documents: 'Документы',
   library: 'Медиатека', video: 'Видео', approvals: 'Согласования', messages: 'Обсуждения',
-  graph: 'Карта проекта', attention: 'Центр внимания', ai: 'AI-помощник', billing: 'Тариф и кредиты', admin: 'Управление SaaS'
+  graph: 'Карта проекта', attention: 'Центр внимания', ai: 'AI-помощник',
+  support: 'Поддержка', billing: 'Тариф и кредиты', admin: 'Управление SaaS'
 };
 
 const workspacePageContexts = {
@@ -34,12 +36,13 @@ const workspacePageContexts = {
   graph: 'Связи материалов, команды и процессов',
   attention: 'Решения, риски и следующие действия',
   ai: 'AI-инструменты для контента',
+  support: 'Помощь и обратная связь',
   billing: 'Ресурсы рабочего пространства',
   admin: 'Контроль SaaS-платформы',
 };
 
 const workspacePageOrder = [
-  'dashboard', 'content', 'documents', 'library', 'video', 'approvals', 'messages', 'attention', 'graph', 'ai', 'billing', 'admin',
+  'dashboard', 'content', 'documents', 'library', 'video', 'approvals', 'messages', 'attention', 'graph', 'ai', 'support', 'billing', 'admin',
 ];
 
 function workspacePageFromHash() {
@@ -51,6 +54,7 @@ function showWorkspacePage(page, syncUrl = false) {
   if (page === 'admin' && !state.currentUser?.is_admin) page = 'dashboard';
   if (!document.querySelector(`[data-page="${page}"]`) || !workspacePageTitles[page]) page = 'dashboard';
   const previousPage = state.currentPage;
+  if (page === 'support' && previousPage !== 'support') state.supportSourcePage = previousPage;
   const nativeTransition = previousPage !== page
     && typeof document.startViewTransition === 'function'
     && !window.AAPMotion?.reduced?.();
@@ -99,7 +103,9 @@ function showWorkspacePage(page, syncUrl = false) {
   else stopMessagePolling();
   if (page === 'ai' && state.currentProjectId) loadAIStudio().catch(showWorkspaceError);
   if (page === 'dashboard' && state.currentWorkspaceId) loadOnboarding().catch(() => {});
+  if (page === 'support') loadSupport().catch(showWorkspaceError);
   if (page === 'admin' && state.currentUser?.is_admin) loadAdmin().catch(showWorkspaceError);
+  recordProductEvent('page_view', page);
   emitWorkspaceContext('page');
   window.scrollTo({ top: 0, behavior: 'instant' });
 }
@@ -363,15 +369,14 @@ function selectProject(projectId) {
   emitWorkspaceContext('project');
 }
 
-const onboardingStorageKey = 'allAsPlannedOnboardingV1';
-
-function renderOnboarding(steps) {
+function renderOnboarding(payload) {
   const panel = $('#onboarding-panel');
-  if (localStorage.getItem(onboardingStorageKey) === 'dismissed') {
+  if (payload.dismissed) {
     panel.classList.add('hidden'); return;
   }
   panel.classList.remove('hidden');
   const container = $('#onboarding-steps'); container.replaceChildren();
+  const steps = payload.steps || [];
   for (const [index, step] of steps.entries()) {
     const button = document.createElement('button'); button.type = 'button';
     button.className = `onboarding-step${step.done ? ' done' : ''}`;
@@ -379,28 +384,85 @@ function renderOnboarding(steps) {
     const marker = document.createElement('span'); marker.textContent = step.done ? '✓' : String(index + 1);
     const title = document.createElement('strong'); title.textContent = step.title;
     const detail = document.createElement('small'); detail.textContent = step.detail;
+    button.addEventListener('click', () => recordProductEvent('onboarding_step_opened', step.page));
     button.append(marker, title, detail); container.append(button);
   }
+  const demoButton = $('#create-demo-project');
+  demoButton.textContent = payload.demo_project_id ? 'Открыть демо-проект' : 'Создать демо-проект';
+  demoButton.dataset.projectId = payload.demo_project_id || '';
   if (steps.every((step) => step.done)) {
     $('#dismiss-onboarding').textContent = 'Готово';
+    recordProductEvent('onboarding_completed', 'dashboard');
+  } else {
+    $('#dismiss-onboarding').textContent = 'Скрыть';
   }
 }
 
 async function loadOnboarding() {
   if (!state.currentWorkspaceId) return;
-  let content = []; let library = [];
-  if (state.currentProjectId) {
-    [content, library] = await Promise.all([
-      api(`/api/projects/${state.currentProjectId}/content`),
-      api(`/api/projects/${state.currentProjectId}/library`)
-    ]);
+  const params = new URLSearchParams({ workspace_id: state.currentWorkspaceId });
+  if (state.currentProjectId) params.set('project_id', state.currentProjectId);
+  renderOnboarding(await api(`/api/onboarding?${params}`));
+}
+
+function recordProductEvent(eventName, page = state.currentPage) {
+  if (!state.currentUser || !state.currentWorkspaceId) return;
+  const key = `${eventName}:${page}:${state.currentWorkspaceId}:${state.currentProjectId || ''}`;
+  if (eventName === 'page_view' && state.productEvents.has(key)) return;
+  state.productEvents.add(key);
+  api('/api/product-events', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      event_name: eventName,
+      workspace_id: state.currentWorkspaceId,
+      project_id: state.currentProjectId,
+      page
+    })
+  }).catch(() => {});
+}
+
+const supportCategoryLabels = {
+  bug: 'Ошибка', idea: 'Предложение', question: 'Вопрос', billing: 'Оплата'
+};
+const supportStatusLabels = {
+  open: 'Открыто', in_progress: 'В работе', resolved: 'Решено', closed: 'Закрыто'
+};
+
+function renderSupportTickets() {
+  const container = $('#support-tickets'); container.replaceChildren();
+  if (!state.supportTickets.length) {
+    container.append(createBrandedEmptyState(
+      'Обращений пока нет',
+      'Если появится вопрос, отправьте его через форму выше.'
+    ));
+    return;
   }
-  renderOnboarding([
-    { done: Boolean(state.currentProjectId), page: 'dashboard', title: 'Создайте проект', detail: 'Разделите работу по брендам или направлениям.' },
-    { done: content.length > 0, page: 'content', title: 'Добавьте материал', detail: 'Запланируйте первый пост, ролик или баннер.' },
-    { done: library.length > 0, page: 'library', title: 'Соберите медиатеку', detail: 'Прикрепите исходник к карточке контента.' },
-    { done: state.workspaceMembers.length > 1, page: 'dashboard', title: 'Пригласите команду', detail: 'Назначьте редактора, клиента или наблюдателя.' }
-  ]);
+  for (const ticket of state.supportTickets) {
+    const card = document.createElement('article'); card.className = 'support-ticket';
+    const header = document.createElement('header');
+    const category = document.createElement('strong');
+    category.textContent = supportCategoryLabels[ticket.category] || ticket.category;
+    const status = document.createElement('span');
+    status.className = `support-ticket-status ${ticket.status}`;
+    status.textContent = supportStatusLabels[ticket.status] || ticket.status;
+    header.append(category, status);
+    const date = document.createElement('small');
+    date.textContent = new Date(ticket.created_at).toLocaleString('ru-RU');
+    const message = document.createElement('p'); message.textContent = ticket.message;
+    card.append(header, date, message);
+    if (ticket.resolution_note) {
+      const resolution = document.createElement('div');
+      resolution.className = 'support-ticket-resolution';
+      resolution.textContent = ticket.resolution_note;
+      card.append(resolution);
+    }
+    container.append(card);
+  }
+}
+
+async function loadSupport() {
+  state.supportTickets = await api('/api/feedback?limit=50');
+  renderSupportTickets();
 }
 
 function adminDate(value) {
@@ -420,7 +482,9 @@ function renderAdminOverview(overview) {
   const cards = [
     ['Пользователи', overview.users], ['Подтвердили email', overview.verified_users],
     ['Рабочие пространства', overview.workspaces], ['Активные подписки', overview.active_subscriptions],
-    ['MRR', adminMoney(overview.mrr_minor)], ['Файлы', humanFileSize(overview.storage_bytes)]
+    ['Активны 7 дней', overview.active_users_7d], ['Завершили старт', overview.completed_onboarding],
+    ['Открытые обращения', overview.open_feedback], ['MRR', adminMoney(overview.mrr_minor)],
+    ['Файлы', humanFileSize(overview.storage_bytes)]
   ];
   const container = $('#admin-stats'); container.replaceChildren();
   for (const [label, value] of cards) {
@@ -2803,9 +2867,81 @@ $('#workspace-select').addEventListener('change', (event) => {
   activateWorkspace(event.target.value).catch(showWorkspaceError);
 });
 
-$('#dismiss-onboarding').addEventListener('click', () => {
-  localStorage.setItem(onboardingStorageKey, 'dismissed');
-  $('#onboarding-panel').classList.add('hidden');
+$('#dismiss-onboarding').addEventListener('click', async (event) => {
+  const button = event.currentTarget; button.disabled = true;
+  try {
+    await api('/api/onboarding', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workspace_id: state.currentWorkspaceId, dismissed: true })
+    });
+    $('#onboarding-panel').classList.add('hidden');
+  } catch (error) {
+    showWorkspaceError(error);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+$('#create-demo-project').addEventListener('click', async (event) => {
+  const button = event.currentTarget;
+  const existingId = button.dataset.projectId;
+  if (existingId && state.projects.some((project) => project.id === existingId)) {
+    selectProject(existingId); showWorkspacePage('content', true); return;
+  }
+  button.disabled = true; button.textContent = 'Создаю демо…';
+  try {
+    const project = await api('/api/onboarding/demo', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workspace_id: state.currentWorkspaceId })
+    });
+    await activateWorkspace(state.currentWorkspaceId);
+    selectProject(project.id);
+    showWorkspacePage('content', true);
+    showToast(project.created ? 'Демо-проект готов.' : 'Открываю существующий демо-проект.');
+  } catch (error) {
+    showWorkspaceError(error);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+$('#support-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector('button[type="submit"]');
+  const status = $('#support-form-status');
+  button.disabled = true; status.textContent = 'Отправляю…';
+  try {
+    await api('/api/feedback', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        workspace_id: state.currentWorkspaceId,
+        project_id: state.currentProjectId,
+        category: $('#support-category').value,
+        page: state.supportSourcePage || state.currentPage,
+        message: $('#support-message').value.trim()
+      })
+    });
+    form.reset(); status.textContent = 'Обращение принято. Ответ придёт на email аккаунта.';
+    await loadSupport();
+    showToast('Обращение отправлено.');
+  } catch (error) {
+    status.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+});
+
+$('#refresh-support').addEventListener('click', async (event) => {
+  const button = event.currentTarget; button.disabled = true;
+  try {
+    await loadSupport();
+    showToast('История обращений обновлена.');
+  } catch (error) {
+    showWorkspaceError(error);
+  } finally {
+    button.disabled = false;
+  }
 });
 
 $('#refresh-admin').addEventListener('click', () => {
