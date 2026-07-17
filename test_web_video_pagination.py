@@ -28,6 +28,11 @@ class WebVideoPaginationTests(unittest.TestCase):
             self.script,
         )
 
+    def test_partial_import_results_are_rendered_before_job_finishes(self) -> None:
+        self.assertIn("current.items_url", self.script)
+        self.assertIn("previewLoaded", self.script)
+        self.assertIn("Уже можно работать", self.script)
+
     def test_batch_selection_is_explicitly_limited_to_page(self) -> None:
         self.assertIn(">Выбрать страницу</button>", self.html)
         self.assertIn("$('#video-pagination').classList.add('disabled')", self.script)

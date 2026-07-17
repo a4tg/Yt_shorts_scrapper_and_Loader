@@ -263,6 +263,7 @@ def process_media_job(
             csv_path,
             int(args["limit"]),
             str(args.get("platform") or "youtube"),
+            progress=log,
         )
         return ProcessedJob(
             result={"count": count, "platform": platform},
@@ -784,9 +785,10 @@ def require_job_access(job_id: str, request: Request) -> dict[str, object]:
 
 def decorate_job_urls(job: dict[str, object]) -> dict[str, object]:
     job_id = str(job["id"])
+    if job.get("kind") == "import" and job.get("status") in {"running", "done"}:
+        job["items_url"] = f"/api/imports/{job_id}/items"
     if job.get("status") == "done":
         if job.get("kind") == "import":
-            job["items_url"] = f"/api/imports/{job_id}/items"
             job["csv_url"] = f"/api/imports/{job_id}/metadata.csv"
         elif job.get("kind") in {"download", "ai_image", "ai_clips"}:
             job["download_ticket_url"] = f"/api/videos/{job_id}/download-ticket"

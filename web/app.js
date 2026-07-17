@@ -2054,7 +2054,22 @@ $('#channel-form').addEventListener('submit', async (event) => {
     });
     state.importId = created.id;
     localStorage.setItem('ytLoaderImportJob', created.id);
-    const job = await pollJob(created.id, (current) => { status.textContent = current.message || current.status; });
+    let previewLoaded = false;
+    const job = await pollJob(created.id, (current) => {
+      status.textContent = current.message || current.status;
+      if (current.items_url && !previewLoaded) {
+        loadImportPage(current.items_url, created.id, 1).then((partial) => {
+          previewLoaded = partial.pagination.total > 0;
+          if (previewLoaded) {
+            status.textContent = `${current.message || 'Уточняю данные'} Уже можно работать: ${partial.pagination.total} роликов.`;
+          }
+        }).catch((error) => {
+          if (error.status !== 404) {
+            console.warn('Не удалось обновить предварительные результаты', error);
+          }
+        });
+      }
+    });
     const page = await loadImportPage(job.items_url, created.id);
     $('#csv-link').href = job.csv_url;
     status.textContent = `Готово: найдено ${page.pagination.total} видео`;

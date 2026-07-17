@@ -262,52 +262,28 @@ def playlist_limit_args(limit: int) -> list[str]:
     return ["--playlist-end", str(limit)] if limit > 0 else []
 
 
-def run_source_import(
-    source_url: str,
+IMPORT_FIELDS = [
+    "platform", "url", "title", "description", "tags", "uploader",
+    "published_at", "upload_date", "view_count",
+]
+
+
+def write_import_records(
+    records: list[dict[str, object]],
     json_path: Path,
     csv_path: Path,
-    limit: int = 50,
-    platform: str = "auto",
-) -> tuple[int, str]:
-    normalized_url, detected_platform = normalize_source_import_url(source_url, platform)
-    command = [
-        resolve_tool("yt-dlp"),
-        "--ignore-config",
-        "--ignore-errors",
-        "--skip-download",
-        "--no-warnings",
-        "--no-update",
-        "--js-runtimes", "node",
-        *playlist_limit_args(limit),
-        "--print",
-        "%(.{id,webpage_url,original_url,title,description,tags,uploader,upload_date,timestamp,release_timestamp,view_count,duration,thumbnail})j",
-    ]
-    cookies = source_cookies(detected_platform)
-    if cookies:
-        command.extend(["--cookies", str(cookies)])
-    command.append(normalized_url)
-    result = subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        creationflags=CREATE_NO_WINDOW,
-    )
-    records = parse_metadata_lines(result.stdout, detected_platform)
-    if not records and result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or "yt-dlp не смог прочитать источник")
+) -> None:
+    """Atomically publish results while a detailed import is still running."""
     json_path.parent.mkdir(parents=True, exist_ok=True)
-    json_path.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
-    with csv_path.open("w", encoding="utf-8-sig", newline="") as csv_file:
-        writer = csv.DictWriter(
-            csv_file,
-            fieldnames=[
-                "platform", "url", "title", "description", "tags", "uploader",
-                "published_at", "upload_date", "view_count",
-            ],
-            delimiter=";",
-        )
+    json_temp = json_path.with_suffix(f"{json_path.suffix}.tmp")
+    json_temp.write_text(
+        json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    json_temp.replace(json_path)
+
+    csv_temp = csv_path.with_suffix(f"{csv_path.suffix}.tmp")
+    with csv_temp.open("w", encoding="utf-8-sig", newline="") as csv_file:
+        writer = csv.DictWriter(csv_file, fieldnames=IMPORT_FIELDS, delimiter=";")
         writer.writeheader()
         for record in records:
             writer.writerow(
@@ -323,6 +299,82 @@ def run_source_import(
                     "view_count": record["view_count"],
                 }
             )
+    csv_temp.replace(csv_path)
+
+
+def merge_import_records(
+    preliminary: list[dict[str, object]],
+    detailed: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    """Preserve fast playlist order and replace entries with detailed metadata."""
+    details_by_id = {str(record["id"]): record for record in detailed}
+    merged = [details_by_id.pop(str(record["id"]), record) for record in preliminary]
+    merged.extend(details_by_id.values())
+    return merged
+
+
+def run_source_import(
+    source_url: str,
+    json_path: Path,
+    csv_path: Path,
+    limit: int = 50,
+    platform: str = "auto",
+    progress: Callable[[str], None] | None = None,
+) -> tuple[int, str]:
+    normalized_url, detected_platform = normalize_source_import_url(source_url, platform)
+    progress = progress or (lambda _message: None)
+    base_command = [
+        resolve_tool("yt-dlp"),
+        "--ignore-config",
+        "--ignore-errors",
+        "--skip-download",
+        "--no-warnings",
+        "--no-update",
+        "--js-runtimes", "node",
+        *playlist_limit_args(limit),
+    ]
+    print_args = [
+        "--print",
+        "%(.{id,webpage_url,original_url,title,description,tags,uploader,upload_date,timestamp,release_timestamp,view_count,duration,thumbnail})j",
+    ]
+    cookies = source_cookies(detected_platform)
+    if cookies:
+        base_command.extend(["--cookies", str(cookies)])
+
+    progress("Получаю список роликов…")
+    fast_command = [
+        *base_command, "--flat-playlist", "--lazy-playlist", *print_args, normalized_url,
+    ]
+    fast_result = subprocess.run(
+        fast_command,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        creationflags=CREATE_NO_WINDOW,
+    )
+    preliminary = parse_metadata_lines(fast_result.stdout, detected_platform)
+    if preliminary:
+        write_import_records(preliminary, json_path, csv_path)
+        progress(
+            f"Найдено {len(preliminary)} роликов. Уточняю просмотры, даты и описания…"
+        )
+
+    command = [*base_command, *print_args, normalized_url]
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        creationflags=CREATE_NO_WINDOW,
+    )
+    detailed = parse_metadata_lines(result.stdout, detected_platform)
+    records = merge_import_records(preliminary, detailed)
+    if not records and (result.returncode != 0 or fast_result.returncode != 0):
+        error = result.stderr.strip() or fast_result.stderr.strip()
+        raise RuntimeError(error or "yt-dlp не смог прочитать источник")
+    write_import_records(records, json_path, csv_path)
     return len(records), detected_platform
 
 

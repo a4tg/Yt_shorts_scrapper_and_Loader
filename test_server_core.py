@@ -16,6 +16,7 @@ from server_core import (
     normalize_source_video_url,
     normalize_video_url,
     overlay_preview_seek_seconds,
+    merge_import_records,
     parse_metadata_lines,
     playlist_limit_args,
     run_source_import,
@@ -91,6 +92,18 @@ class OverlayPreviewTests(unittest.TestCase):
 
 
 class MetadataParserTests(unittest.TestCase):
+    def test_detailed_metadata_replaces_fast_record_without_changing_order(self) -> None:
+        preliminary = [
+            {"id": "first", "title": "Fast first"},
+            {"id": "second", "title": "Fast second"},
+        ]
+        detailed = [
+            {"id": "second", "title": "Detailed second", "view_count": 25},
+        ]
+        merged = merge_import_records(preliminary, detailed)
+        self.assertEqual([record["id"] for record in merged], ["first", "second"])
+        self.assertEqual(merged[1]["view_count"], 25)
+
     def test_parses_compact_json(self) -> None:
         payload = {
             "id": "abcdefghijk",
@@ -153,11 +166,14 @@ class MetadataParserTests(unittest.TestCase):
             )
             saved = json.loads((root / "items.json").read_text(encoding="utf-8"))
             csv_text = (root / "items.csv").read_text(encoding="utf-8-sig")
-        command = execute.call_args.args[0]
+        commands = [call.args[0] for call in execute.call_args_list]
         self.assertEqual((count, platform), (1, "vk"))
-        self.assertIn("--playlist-end", command)
-        self.assertIn("25", command)
-        self.assertIn("view_count", " ".join(command))
+        self.assertEqual(len(commands), 2)
+        self.assertIn("--flat-playlist", commands[0])
+        self.assertIn("--lazy-playlist", commands[0])
+        self.assertIn("--playlist-end", commands[1])
+        self.assertIn("25", commands[1])
+        self.assertIn("view_count", " ".join(commands[1]))
         self.assertEqual(saved[0]["platform"], "vk")
         self.assertIn("platform;url;title", csv_text)
         self.assertIn("published_at", csv_text)
