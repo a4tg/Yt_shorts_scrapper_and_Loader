@@ -23,6 +23,13 @@
 .item.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .item.processing { border-color: #e0a93b; }
 .item.ready { border-color: var(--ok); }
+.item.queued { border-color: #6c79ff; }
+.item.failed { border-color: var(--danger); }
+.batch-actions { display: flex; gap: 9px; }
+.job-note[data-job-status="queued"] { color: #aeb7ff; }
+.job-note[data-job-status="running"] { color: #ffd37a; }
+.job-note[data-job-status="done"] { color: var(--ok); }
+.job-note[data-job-status="error"] { color: #ff9ba8; }
 
 .video-pagination {
   display: flex;
@@ -77,5 +84,6 @@
 
 @media (max-width: 700px) {
   .batch-toolbar { align-items: stretch; flex-direction: column; }
-  .batch-toolbar > .primary { width: 100%; }
+  .batch-actions { display: grid; grid-template-columns: 1fr; }
+  .batch-actions button { width: 100%; }
 }

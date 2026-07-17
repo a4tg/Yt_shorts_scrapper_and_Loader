@@ -198,9 +198,12 @@ class ConstructorPayloadTests(unittest.TestCase):
         client, user_id = authenticated_client()
         with patch.object(
             server.manager,
-            "create",
-            return_value={"id": "test-job", "status": "queued"},
-        ) as create:
+            "create_batch",
+            return_value={
+                "jobs": [{"id": "test-job", "status": "queued"}],
+                "batch_id": "batch",
+            },
+        ) as create_batch:
             response = client.post(
                 "/api/videos/download",
                 json={
@@ -213,12 +216,12 @@ class ConstructorPayloadTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 202)
-        worker_args = create.call_args.args[1]
+        worker_args = create_batch.call_args.args[1][0]
         self.assertEqual(worker_args["position_x"], 12)
         self.assertEqual(worker_args["position_y"], 34)
         self.assertEqual(worker_args["width_percent"], 40)
         self.assertEqual(worker_args["metadata_mode"], "synthetic")
-        self.assertEqual(create.call_args.kwargs["owner_id"], user_id)
+        self.assertEqual(create_batch.call_args.kwargs["owner_id"], user_id)
 
     def test_api_forwards_multiple_overlays_in_selection_order(self) -> None:
         client, user_id = authenticated_client()
@@ -248,9 +251,12 @@ class ConstructorPayloadTests(unittest.TestCase):
         try:
             with patch.object(
                 server.manager,
-                "create",
-                return_value={"id": "batch-job", "status": "queued"},
-            ) as create:
+                "create_batch",
+                return_value={
+                    "jobs": [{"id": "batch-job", "status": "queued"}],
+                    "batch_id": "batch",
+                },
+            ) as create_batch:
                 response = client.post(
                     "/api/videos/download",
                     json={
@@ -270,7 +276,7 @@ class ConstructorPayloadTests(unittest.TestCase):
             user_logos_dir.rmdir()
 
         self.assertEqual(response.status_code, 202)
-        overlays = create.call_args.args[1]["overlays"]
+        overlays = create_batch.call_args.args[1][0]["overlays"]
         self.assertEqual([item["name"] for item in overlays], ["first.png", "second.gif"])
         self.assertEqual([item["path"] for item in overlays], [str(path) for path in paths])
 

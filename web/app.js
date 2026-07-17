@@ -2166,7 +2166,10 @@ function renderItems(items, importId, pagination = null) {
     });
     const metadata = document.createElement('a'); metadata.className = 'ghost'; metadata.textContent = 'Теги и описание'; metadata.href = `/api/imports/${importId}/${item.id}/metadata.txt`;
     const note = document.createElement('div'); note.className = 'job-note';
-    const record = { item, card, checkbox, videoButton, note, completed: false };
+    const record = {
+      item, card, checkbox, videoButton, note,
+      completed: false, failed: false, jobId: null, jobStatus: null
+    };
     checkbox.addEventListener('change', () => {
       card.classList.toggle('selected', checkbox.checked);
       if (checkbox.checked) showSourceVideo(item.url, item.thumbnail, item.title);
@@ -2189,10 +2192,19 @@ function renderItems(items, importId, pagination = null) {
   updateBatchSelection();
   $('#results-section').classList.remove('hidden');
   window.AAPAppMotion?.videoPhase?.('results');
+  restoreDownloadJobs().catch((error) => {
+    console.warn('Не удалось восстановить очередь видео', error);
+  });
 }
 
 function selectableRecords() {
-  return [...state.itemCards.values()].filter((record) => !record.completed);
+  return [...state.itemCards.values()].filter(
+    (record) => (
+      !record.completed
+      && !record.failed
+      && !['queued', 'running'].includes(record.jobStatus)
+    )
+  );
 }
 
 function selectedRecords() {
@@ -2201,16 +2213,22 @@ function selectedRecords() {
 
 function updateBatchSelection() {
   const count = selectedRecords().length;
+  const failed = [...state.itemCards.values()].filter((record) => record.failed).length;
   $('#selected-count').textContent = `Выбрано: ${count}`;
   const button = $('#prepare-selected');
   button.textContent = count ? `Подготовить выбранные · ${count}` : 'Подготовить выбранные';
   button.disabled = state.batchRunning || count === 0;
+  const retry = $('#retry-failed');
+  retry.classList.toggle('hidden', failed === 0);
+  retry.textContent = `Повторить ошибки${failed ? ` · ${failed}` : ''}`;
+  retry.disabled = state.batchRunning || failed === 0;
   $('#select-all-videos').disabled = state.batchRunning || selectableRecords().length === 0;
   $('#clear-video-selection').disabled = state.batchRunning || count === 0;
 }
 
 function markVideoCompleted(record) {
-  record.completed = true; record.checkbox.checked = false; record.checkbox.disabled = true;
+  record.completed = true; record.failed = false;
+  record.checkbox.checked = false; record.checkbox.disabled = true;
   record.card.classList.remove('selected', 'processing'); record.card.classList.add('ready');
   updateBatchSelection();
   if (!state.batchRunning) window.AAPAppMotion?.videoPhase?.('ready');
@@ -2234,10 +2252,141 @@ $('#clear-video-selection').addEventListener('click', () => {
   updateBatchSelection();
 });
 
-$('#prepare-selected').addEventListener('click', async () => {
-  const records = selectedRecords(); if (!records.length || state.batchRunning) return;
+function sourceJobKey(url) {
+  const youtubeId = youtubeVideoId(url);
+  return youtubeId ? `youtube:${youtubeId}` : String(url || '').trim();
+}
+
+async function restoreDownloadJobs() {
+  if (!state.currentProjectId || !state.itemCards.size) return;
+  const jobs = await api(
+    `/api/jobs?kind=download&project_id=${encodeURIComponent(state.currentProjectId)}&limit=200`
+  );
+  const latestBySource = new Map();
+  for (const job of jobs) {
+    if (job.status === 'deleted' || !job.source_url) continue;
+    const key = sourceJobKey(job.source_url);
+    if (!latestBySource.has(key)) latestBySource.set(key, job);
+  }
+  const restored = [];
+  for (const record of state.itemCards.values()) {
+    const job = latestBySource.get(sourceJobKey(record.item.url));
+    if (!job) continue;
+    setRecordJobState(record, job);
+    restored.push(record);
+  }
+  const active = restored.filter(
+    (record) => ['queued', 'running'].includes(record.jobStatus)
+  );
+  if (active.length) {
+    const status = $('#batch-status');
+    status.className = 'status';
+    status.textContent = `Восстановлена очередь: ${active.length} активных заданий.`;
+    await pollBatchRecords(active);
+  }
+}
+
+function setRecordJobState(record, job) {
+  record.jobId = job.id;
+  record.jobStatus = job.status;
+  record.note.dataset.jobStatus = job.status;
+  record.card.classList.remove('queued', 'processing', 'failed');
+  if (job.status === 'queued') {
+    record.card.classList.add('queued');
+    record.note.textContent = job.queue_position
+      ? `В очереди · позиция ${job.queue_position}`
+      : 'В очереди';
+    record.checkbox.checked = false;
+    record.checkbox.disabled = true;
+    record.videoButton.disabled = true;
+    record.failed = false;
+  } else if (job.status === 'running') {
+    record.card.classList.add('processing');
+    record.note.textContent = 'Обрабатывается';
+    record.checkbox.checked = false;
+    record.checkbox.disabled = true;
+    record.videoButton.disabled = true;
+    record.failed = false;
+  } else if (job.status === 'done') {
+    record.note.textContent = 'Готово';
+    record.failed = false;
+    if (!record.completed) {
+      showReadyDownload(job, record.videoButton, record.note);
+      markVideoCompleted(record);
+    }
+  } else if (job.status === 'error') {
+    record.card.classList.add('failed');
+    record.note.textContent = job.message || job.error || 'Ошибка';
+    record.videoButton.disabled = false;
+    record.videoButton.textContent = 'Повторить';
+    record.checkbox.checked = false;
+    record.checkbox.disabled = true;
+    record.failed = true;
+  }
+  window.AAPAppMotion?.videoJobUpdated?.(record.note, job);
+}
+
+async function pollBatchRecords(records) {
+  const active = () => records.filter(
+    (record) => record.jobId && !['done', 'error', 'deleted'].includes(record.jobStatus)
+  );
+  state.batchRunning = active().length > 0;
+  $('#video-pagination').classList.toggle('disabled', state.batchRunning);
+  let allTerminal = false;
+  try {
+    while (active().length) {
+      const jobs = await api('/api/jobs/statuses', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: [...new Set(active().map((record) => record.jobId))] })
+      });
+      const byId = new Map(jobs.map((job) => [job.id, job]));
+      for (const record of records) {
+        const job = byId.get(record.jobId);
+        if (job) setRecordJobState(record, job);
+      }
+      const finished = records.filter(
+        (record) => ['done', 'error', 'deleted'].includes(record.jobStatus)
+      ).length;
+      const running = records.find((record) => record.jobStatus === 'running');
+      window.AAPAppMotion?.batchProgress?.(
+        finished,
+        records.length,
+        running ? `Обрабатывается: ${running.item.title}` : 'Задания ожидают в очереди'
+      );
+      updateBatchSelection();
+      if (active().length) await sleep(1500);
+    }
+    allTerminal = true;
+  } finally {
+    state.batchRunning = false;
+    $('#video-pagination').classList.remove('disabled');
+    if (allTerminal) {
+      const failed = records.filter((record) => record.jobStatus === 'error').length;
+      const done = records.filter((record) => record.jobStatus === 'done').length;
+      const status = $('#batch-status');
+      status.className = `status${failed ? ' error' : ''}`;
+      status.textContent = failed
+        ? `Пакет завершён: готово ${done}, ошибок ${failed}. Можно повторить только ошибки.`
+        : `Пакет завершён: готово ${done} из ${records.length}.`;
+      window.AAPAppMotion?.batchProgress?.(
+        records.length, records.length,
+        failed ? `Готово ${done}, ошибок ${failed}` : 'Все выбранные видео готовы',
+        failed ? 'error' : 'complete'
+      );
+      localStorage.removeItem('ytLoaderVideoBatch');
+      loadBilling().catch(() => {});
+    }
+    updateBatchSelection();
+  }
+}
+
+async function submitVideoBatch(records) {
+  if (!records.length || state.batchRunning) return;
+  if (records.length > 20) {
+    showToast('За один запуск можно подготовить не более 20 роликов.');
+    return;
+  }
   const status = $('#batch-status');
-  const withoutOverlayConfirmed = !state.overlayFiles.length;
   if (!confirmDownloadWithoutOverlay(records.length)) {
     status.className = 'status';
     status.textContent = 'Пакетная обработка отменена: добавьте логотип или повторите запуск без оверлея.';
@@ -2249,40 +2398,34 @@ $('#prepare-selected').addEventListener('click', async () => {
   updateBatchSelection();
   window.AAPAppMotion?.videoPhase?.('processing');
   window.AAPAppMotion?.batchProgress?.(0, records.length, 'Подготавливаю очередь');
-  let completed = 0; let failed = 0;
   try {
     const batchSettings = currentDownloadSettings();
     status.textContent = `Загружаю оверлеи и готовлю очередь из ${records.length} роликов…`;
     const logoTokens = await ensureOverlaysUploaded();
-    for (let index = 0; index < records.length; index += 1) {
-      const record = records[index]; record.card.classList.add('processing');
-      window.AAPAppMotion?.batchProgress?.(index, records.length, `Сейчас: ${record.item.title}`);
-      showSourceVideo(record.item.url, record.item.thumbnail, record.item.title);
-      status.textContent = `Обрабатывается ${index + 1} из ${records.length}: ${record.item.title}`;
-      const success = await startDownloadUrl(
-        record.item.url, record.videoButton, record.note, logoTokens, batchSettings,
-        withoutOverlayConfirmed
-      );
-      record.card.classList.remove('processing');
-      if (success) { completed += 1; markVideoCompleted(record); }
-      else { failed += 1; }
-      window.AAPAppMotion?.batchProgress?.(index + 1, records.length, `Завершено ${index + 1} из ${records.length}`);
-    }
-    status.classList.toggle('error', failed > 0);
-    status.textContent = failed
-      ? `Очередь завершена: готово ${completed}, с ошибкой ${failed}. Ошибочные ролики можно выбрать повторно.`
-      : `Очередь завершена: готово ${completed} из ${records.length}. Скачайте файлы кнопками в карточках.`;
-    window.AAPAppMotion?.batchProgress?.(
-      records.length, records.length,
-      failed ? `Готово ${completed}, ошибок ${failed}` : 'Все выбранные видео готовы',
-      failed ? 'error' : 'complete'
+    const batch = await api('/api/videos/download/batch', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        items: records.map((record) => downloadPayload(
+          record.item.url, logoTokens, batchSettings
+        ))
+      })
+    });
+    localStorage.setItem('ytLoaderVideoBatch', batch.batch_id);
+    const recordsBySource = new Map(
+      records.map((record) => [sourceJobKey(record.item.url), record])
     );
-    window.AAPAppMotion?.videoPhase?.(failed && !completed ? 'error' : 'ready');
+    for (const job of batch.jobs) {
+      const record = recordsBySource.get(sourceJobKey(job.source_url));
+      if (record) setRecordJobState(record, job);
+    }
+    status.textContent = batch.duplicate_count
+      ? `В очередь добавлено ${batch.created_count}; ${batch.duplicate_count} уже выполнялось.`
+      : `В очередь поставлено ${batch.created_count} роликов.`;
+    await pollBatchRecords(records);
   } catch (error) {
     status.classList.add('error'); status.textContent = error.message;
-    window.AAPAppMotion?.batchProgress?.(completed, records.length, error.message, 'error');
+    window.AAPAppMotion?.batchProgress?.(0, records.length, error.message, 'error');
     window.AAPAppMotion?.videoPhase?.('error');
-  } finally {
     state.batchRunning = false;
     $('#video-pagination').classList.remove('disabled');
     for (const record of selectableRecords()) {
@@ -2290,6 +2433,16 @@ $('#prepare-selected').addEventListener('click', async () => {
     }
     updateBatchSelection();
   }
+}
+
+$('#prepare-selected').addEventListener('click', async () => {
+  await submitVideoBatch(selectedRecords());
+});
+
+$('#retry-failed').addEventListener('click', async () => {
+  const records = [...state.itemCards.values()].filter((record) => record.failed);
+  for (const record of records) record.failed = false;
+  await submitVideoBatch(records);
 });
 
 function currentDownloadSettings() {
@@ -2330,6 +2483,15 @@ function showReadyDownload(job, oldButton, note) {
   note.textContent = overlayCount > 1
     ? `Готово ${overlayCount} вариантов. В ZIP каждый оверлей лежит в своей папке.`
     : `Видео готово, ${modeLabel}. Таймер удаления запустится при скачивании.`;
+  const timings = [
+    Number.isFinite(Number(job.queue_seconds))
+      ? `ожидание ${Number(job.queue_seconds).toFixed(1)} с`
+      : '',
+    Number.isFinite(Number(job.processing_seconds))
+      ? `обработка ${Number(job.processing_seconds).toFixed(1)} с`
+      : ''
+  ].filter(Boolean).join(', ');
+  if (timings) note.textContent += ` Время: ${timings}.`;
 
   const markDeleted = (message = 'Видео удалено') => {
     downloadButton.disabled = true; downloadButton.textContent = 'Файл удалён';

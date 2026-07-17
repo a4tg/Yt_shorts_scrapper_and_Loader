@@ -2,9 +2,13 @@ import tempfile
 import time
 import uuid
 import json
+import os
+import threading
 from datetime import timedelta
 from pathlib import Path
+from unittest.mock import patch
 
+import pytest
 from sqlalchemy import delete, func, select
 from fastapi.testclient import TestClient
 
@@ -13,6 +17,7 @@ from job_queue import DatabaseJobManager, ProcessedJob, utc_now
 from saas_models import CreditLedger, Job, JobFile, User
 from auth_service import attempt_limiter
 from billing_service import credit_snapshot
+from billing_service import InsufficientCreditsError
 
 
 def create_user() -> str:
@@ -149,6 +154,114 @@ def test_worker_completes_job_and_registers_result_file() -> None:
                     select(func.count()).select_from(JobFile).where(JobFile.job_id == job["id"])
                 )
                 assert file_count == 1
+        finally:
+            manager.stop()
+            delete_user(user_id)
+
+
+def test_download_batch_is_created_atomically_with_positions_and_deduplication() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        user_id = create_user()
+        manager = make_manager(root)
+        try:
+            batch = manager.create_batch(
+                "download",
+                [
+                    {"url": "https://example.test/one", "overlays": []},
+                    {"url": "https://example.test/two", "overlays": []},
+                    {"url": "https://example.test/two", "overlays": []},
+                ],
+                user_id,
+            )
+            assert batch["created_count"] == 2
+            assert batch["duplicate_count"] == 1
+            assert batch["credits_reserved"] == 2
+            positions = [job["queue_position"] for job in batch["jobs"]]
+            assert positions[1] == positions[0] + 1
+            assert positions[2] == positions[1]
+            assert batch["jobs"][1]["id"] == batch["jobs"][2]["id"]
+            assert all(job["batch_id"] == batch["batch_id"] for job in batch["jobs"])
+            with server.SessionLocal() as db:
+                assert credit_snapshot(db, user_id).available == 98
+        finally:
+            delete_user(user_id)
+
+
+def test_download_batch_reserves_all_credits_or_creates_nothing() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        user_id = create_user()
+        with server.SessionLocal() as db:
+            user = db.get(User, user_id)
+            user.credit_balance = 2
+            db.commit()
+        manager = make_manager(root)
+        try:
+            with pytest.raises(InsufficientCreditsError):
+                manager.create_batch(
+                    "download",
+                    [
+                        {"url": "https://example.test/one", "overlays": []},
+                        {"url": "https://example.test/two", "overlays": []},
+                        {"url": "https://example.test/three", "overlays": []},
+                    ],
+                    user_id,
+                )
+            with server.SessionLocal() as db:
+                count = db.scalar(
+                    select(func.count(Job.id)).where(Job.user_id == user_id)
+                )
+                assert count == 0
+                assert credit_snapshot(db, user_id).available == 2
+        finally:
+            delete_user(user_id)
+
+
+def test_download_batch_runs_sequentially_and_reports_accumulated_wait() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        user_id = create_user()
+        active = 0
+        maximum_active = 0
+        lock = threading.Lock()
+
+        def processor(_job_id, kind, _args, _log):
+            nonlocal active, maximum_active
+            assert kind == "download"
+            with lock:
+                active += 1
+                maximum_active = max(maximum_active, active)
+            time.sleep(0.08)
+            with lock:
+                active -= 1
+            return ProcessedJob(result={"filename": "ready.mp4"})
+
+        with patch.dict(os.environ, {"YT_LOADER_JOB_POLL_SECONDS": "0.01"}):
+            manager = make_manager(root, processor, auto_start=True)
+        try:
+            batch = manager.create_batch(
+                "download",
+                [
+                    {"url": f"https://example.test/{index}", "overlays": []}
+                    for index in range(3)
+                ],
+                user_id,
+            )
+            deadline = time.monotonic() + 5
+            jobs = [manager.get(job["id"]) for job in batch["jobs"]]
+            while (
+                any(job["status"] not in {"done", "error"} for job in jobs)
+                and time.monotonic() < deadline
+            ):
+                time.sleep(0.03)
+                jobs = [manager.get(job["id"]) for job in batch["jobs"]]
+
+            assert [job["status"] for job in jobs] == ["done", "done", "done"]
+            assert maximum_active == 1
+            waits = [float(job["queue_seconds"]) for job in jobs]
+            assert waits[1] >= waits[0] + 0.05
+            assert waits[2] >= waits[1] + 0.05
         finally:
             manager.stop()
             delete_user(user_id)

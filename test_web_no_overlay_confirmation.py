@@ -24,15 +24,18 @@ class WebNoOverlayConfirmationTests(unittest.TestCase):
 
     def test_batch_asks_once_before_disabling_controls(self) -> None:
         handler = self.source[
-            self.source.index("$('#prepare-selected').addEventListener") :
+            self.source.index("async function submitVideoBatch(records)") :
             self.source.index("function currentDownloadSettings()")
         ]
         confirmation = handler.index("confirmDownloadWithoutOverlay(records.length)")
         running = handler.index("state.batchRunning = true")
-        loop = handler.index("for (let index = 0; index < records.length; index += 1)")
+        request = handler.index("api('/api/videos/download/batch'")
         self.assertLess(confirmation, running)
-        self.assertLess(running, loop)
-        self.assertIn("withoutOverlayConfirmed", handler[loop:])
+        self.assertLess(running, request)
+        self.assertEqual(
+            handler.count("confirmDownloadWithoutOverlay(records.length)"),
+            1,
+        )
 
 
 if __name__ == "__main__":

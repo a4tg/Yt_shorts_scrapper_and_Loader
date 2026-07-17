@@ -469,7 +469,10 @@
           <button id="select-all-videos" class="ghost" type="button">Выбрать страницу</button>
           <button id="clear-video-selection" class="ghost" type="button">Снять выбор</button>
         </div>
-        <button id="prepare-selected" class="primary" type="button" disabled>Подготовить выбранные</button>
+        <div class="batch-actions">
+          <button id="retry-failed" class="ghost hidden" type="button">Повторить ошибки</button>
+          <button id="prepare-selected" class="primary" type="button" disabled>Подготовить выбранные</button>
+        </div>
       </div>
       <div id="batch-progress" class="batch-progress hidden" role="progressbar" aria-label="Прогресс пакетной обработки" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
         <div><span id="batch-progress-label">Очередь готова</span><b id="batch-progress-count">0 / 0</b></div>

@@ -15,31 +15,35 @@ class WebBatchUiTests(unittest.TestCase):
         self.assertIn('id="prepare-selected"', html)
         self.assertIn('id="batch-status"', html)
 
-    def test_selected_videos_are_awaited_sequentially(self) -> None:
+    def test_selected_videos_are_sent_in_one_server_batch(self) -> None:
         source = (BASE_DIR / "web" / "app.js").read_text(encoding="utf-8")
         handler = source[source.index("$('#prepare-selected').addEventListener"):]
-        loop_position = handler.index("for (let index = 0; index < records.length; index += 1)")
-        await_position = handler.index("await startDownloadUrl", loop_position)
-
-        self.assertGreater(await_position, loop_position)
-        self.assertNotIn("Promise.all", handler[:await_position])
+        self.assertIn("submitVideoBatch(selectedRecords())", handler)
+        self.assertIn("api('/api/videos/download/batch'", source)
+        self.assertIn("items: records.map", source)
+        self.assertNotIn("await startDownloadUrl(\n        record.item.url", handler)
 
     def test_overlays_are_uploaded_once_before_batch_loop(self) -> None:
         source = (BASE_DIR / "web" / "app.js").read_text(encoding="utf-8")
-        handler = source[source.index("$('#prepare-selected').addEventListener"):]
-
-        upload_position = handler.index("await ensureOverlaysUploaded()")
-        loop_position = handler.index("for (let index = 0; index < records.length; index += 1)")
-        self.assertLess(upload_position, loop_position)
+        function = source[source.index("async function submitVideoBatch(records)"):]
+        self.assertIn("const logoTokens = await ensureOverlaysUploaded()", function)
+        self.assertIn("downloadPayload(", function)
 
     def test_batch_settings_are_snapshotted_before_loop(self) -> None:
         source = (BASE_DIR / "web" / "app.js").read_text(encoding="utf-8")
-        handler = source[source.index("$('#prepare-selected').addEventListener"):]
+        function = source[source.index("async function submitVideoBatch(records)"):]
+        self.assertIn("const batchSettings = currentDownloadSettings()", function)
+        self.assertIn("record.item.url, logoTokens, batchSettings", function)
 
-        settings_position = handler.index("const batchSettings = currentDownloadSettings()")
-        loop_position = handler.index("for (let index = 0; index < records.length; index += 1)")
-        self.assertLess(settings_position, loop_position)
-        self.assertIn("logoTokens, batchSettings", handler[loop_position:])
+    def test_batch_cards_restore_status_and_retry_only_failures(self) -> None:
+        html = (BASE_DIR / "web" / "index.html").read_text(encoding="utf-8")
+        source = (BASE_DIR / "web" / "app.js").read_text(encoding="utf-8")
+        self.assertIn('id="retry-failed"', html)
+        self.assertIn("function setRecordJobState(record, job)", source)
+        self.assertIn("function restoreDownloadJobs()", source)
+        self.assertIn("queue_position", source)
+        self.assertIn("record.failed", source)
+        self.assertIn("api('/api/jobs/statuses'", source)
 
 
 if __name__ == "__main__":

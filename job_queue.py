@@ -152,6 +152,39 @@ class DatabaseJobManager:
             payload["result"] = dict(job.result_payload)
         if job.error_message:
             payload["error"] = job.error_message
+        created_at = as_utc(job.created_at)
+        started_at = as_utc(job.started_at)
+        finished_at = as_utc(job.finished_at)
+        if created_at and started_at:
+            payload["queue_seconds"] = round(
+                max(0.0, (started_at - created_at).total_seconds()), 3
+            )
+        if started_at and finished_at:
+            payload["processing_seconds"] = round(
+                max(0.0, (finished_at - started_at).total_seconds()), 3
+            )
+        if job.kind == "download" and job.request_payload:
+            payload["source_url"] = str(job.request_payload.get("url") or "")
+            if job.request_payload.get("batch_id"):
+                payload["batch_id"] = str(job.request_payload["batch_id"])
+        return payload
+
+    def _public_with_queue_position(self, db: Session, job: Job) -> dict[str, object]:
+        payload = self._public(job)
+        if job.kind == "download" and job.status == "queued":
+            ahead = db.scalar(
+                select(func.count(Job.id)).where(
+                    Job.kind == "download",
+                    Job.status == "queued",
+                    or_(
+                        Job.created_at < job.created_at,
+                        (Job.created_at == job.created_at) & (Job.id < job.id),
+                    ),
+                )
+            ) or 0
+            payload["queue_position"] = int(ahead) + 1
+        elif job.kind == "download" and job.status == "running":
+            payload["queue_position"] = 0
         return payload
 
     def create(
@@ -187,14 +220,101 @@ class DatabaseJobManager:
             )
             db.add(record)
             db.flush()
-            return self._public(record)
+            return self._public_with_queue_position(db, record)
+
+    def create_batch(
+        self,
+        kind: str,
+        args_list: list[dict[str, object]],
+        owner_id: str,
+        *,
+        workspace_id: str | None = None,
+        project_id: str | None = None,
+        maximum: int = 20,
+    ) -> dict[str, object]:
+        if not 1 <= len(args_list) <= maximum:
+            raise ValueError(f"Пакет должен содержать от 1 до {maximum} заданий.")
+        batch_id = uuid.uuid4().hex
+        ordered_job_ids: list[str] = []
+        created_count = 0
+        duplicate_count = 0
+        total_reserved = 0
+        with self.session_factory() as db, db.begin():
+            # Locking the user serializes double-clicks and concurrent batch
+            # requests before duplicate detection and credit reservation.
+            user = db.scalar(
+                select(User).where(User.id == owner_id).with_for_update()
+            )
+            if user is None:
+                raise KeyError(owner_id)
+            active = db.scalars(
+                select(Job)
+                .where(
+                    Job.user_id == owner_id,
+                    Job.status.in_(["queued", "running"]),
+                )
+                .order_by(Job.created_at, Job.id)
+                .with_for_update()
+            ).all()
+            active_by_url = {
+                str(record.request_payload.get("url") or ""): record
+                for record in active
+                if record.kind == kind and record.request_payload
+            }
+            new_by_url: dict[str, Job] = {}
+            batch_created_at = utc_now()
+            for raw_args in args_list:
+                args = dict(raw_args)
+                source_url = str(args.get("url") or "")
+                existing = active_by_url.get(source_url) or new_by_url.get(source_url)
+                if existing is not None:
+                    ordered_job_ids.append(existing.id)
+                    duplicate_count += 1
+                    continue
+                args["batch_id"] = batch_id
+                cost = job_credit_cost(kind, args)
+                record = Job(
+                    id=uuid.uuid4().hex,
+                    user_id=owner_id,
+                    workspace_id=workspace_id,
+                    project_id=project_id,
+                    kind=kind,
+                    status="queued",
+                    request_payload=args,
+                    message="В очереди",
+                    created_at=batch_created_at + timedelta(microseconds=created_count),
+                    available_at=batch_created_at,
+                    credits_reserved=cost,
+                )
+                db.add(record)
+                new_by_url[source_url] = record
+                ordered_job_ids.append(record.id)
+                total_reserved += cost
+                created_count += 1
+            require_plan_capacity(
+                db,
+                owner_id,
+                "active_jobs",
+                len(active),
+                increment=created_count,
+            )
+            reserve_credits(db, owner_id, total_reserved)
+            db.flush()
+        jobs = [self.get(job_id) for job_id in ordered_job_ids]
+        return {
+            "batch_id": batch_id,
+            "jobs": jobs,
+            "created_count": created_count,
+            "duplicate_count": duplicate_count,
+            "credits_reserved": total_reserved,
+        }
 
     def get(self, job_id: str) -> dict[str, object]:
         with self.session_factory() as db:
             record = db.get(Job, job_id)
             if record is None:
                 raise KeyError(job_id)
-            return self._public(record)
+            return self._public_with_queue_position(db, record)
 
     def list_for_user(
         self,
@@ -220,7 +340,7 @@ class DatabaseJobManager:
             records = db.scalars(
                 statement.order_by(Job.created_at.desc(), Job.id.desc()).limit(limit)
             ).all()
-            return [self._public(record) for record in records]
+            return [self._public_with_queue_position(db, record) for record in records]
 
     def update(self, job_id: str, **values: object) -> None:
         """Compatibility helper for lifecycle actions and focused tests."""

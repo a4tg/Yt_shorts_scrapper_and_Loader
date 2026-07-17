@@ -184,6 +184,14 @@ class DownloadRequest(BaseModel):
     metadata_mode: Literal["none", "strip", "synthetic"] = "strip"
 
 
+class DownloadBatchRequest(BaseModel):
+    items: list[DownloadRequest] = Field(min_length=1, max_length=20)
+
+
+class JobStatusesRequest(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=20)
+
+
 class AITextRequest(BaseModel):
     project_id: str = Field(min_length=36, max_length=36)
     action: Literal["post", "ideas", "rewrite", "shorten", "titles", "tags"] = "post"
@@ -796,6 +804,20 @@ def decorate_job_urls(job: dict[str, object]) -> dict[str, object]:
     return job
 
 
+@app.post("/api/jobs/statuses")
+def get_job_statuses(
+    payload: JobStatusesRequest,
+    request: Request,
+) -> list[dict[str, object]]:
+    unique_ids = list(dict.fromkeys(payload.ids))
+    if any(not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", job_id) for job_id in unique_ids):
+        raise HTTPException(400, "Некорректный ID задания")
+    return [
+        decorate_job_urls(require_job_access(job_id, request))
+        for job_id in unique_ids
+    ]
+
+
 @app.get("/api/jobs")
 def list_jobs(
     request: Request,
@@ -1049,8 +1071,10 @@ def overlay_preview(token: str, request: Request) -> FileResponse:
     )
 
 
-@app.post("/api/videos/download", status_code=202)
-def create_download(payload: DownloadRequest, request: Request) -> dict[str, object]:
+def prepare_download_job(
+    payload: DownloadRequest,
+    request: Request,
+) -> tuple[str, str, dict[str, object]]:
     try:
         url, _platform = normalize_source_video_url(payload.url)
     except ValueError as exc:
@@ -1069,25 +1093,57 @@ def create_download(payload: DownloadRequest, request: Request) -> dict[str, obj
         )
         overlays.append({"path": str(overlay_path), "name": display_name})
     workspace_id, project_id = resolve_media_project(payload.project_id, request)
+    return workspace_id, project_id, {
+        "url": url,
+        "overlays": overlays,
+        "opacity": payload.opacity,
+        "width_percent": payload.width_percent,
+        "position_x": payload.position_x,
+        "position_y": payload.position_y,
+        "max_height": payload.max_height,
+        "metadata_mode": payload.metadata_mode,
+    }
+
+
+@app.post("/api/videos/download", status_code=202)
+def create_download(payload: DownloadRequest, request: Request) -> dict[str, object]:
+    workspace_id, project_id, args = prepare_download_job(payload, request)
     try:
-        return manager.create(
+        batch = manager.create_batch(
             "download",
-            {
-                "url": url,
-                "overlays": overlays,
-                "opacity": payload.opacity,
-                "width_percent": payload.width_percent,
-                "position_x": payload.position_x,
-                "position_y": payload.position_y,
-                "max_height": payload.max_height,
-                "metadata_mode": payload.metadata_mode,
-            },
+            [args],
             owner_id=str(request.state.user.id),
             workspace_id=workspace_id,
             project_id=project_id,
         )
+        return dict(batch["jobs"][0])
     except InsufficientCreditsError as exc:
         raise HTTPException(402, str(exc)) from exc
+
+
+@app.post("/api/videos/download/batch", status_code=202)
+def create_download_batch(
+    payload: DownloadBatchRequest,
+    request: Request,
+) -> dict[str, object]:
+    prepared = [prepare_download_job(item, request) for item in payload.items]
+    project_ids = {item[1] for item in prepared}
+    workspace_ids = {item[0] for item in prepared}
+    if len(project_ids) != 1 or len(workspace_ids) != 1:
+        raise HTTPException(400, "Все ролики пакета должны относиться к одному проекту")
+    try:
+        return manager.create_batch(
+            "download",
+            [item[2] for item in prepared],
+            owner_id=str(request.state.user.id),
+            workspace_id=prepared[0][0],
+            project_id=prepared[0][1],
+            maximum=20,
+        )
+    except InsufficientCreditsError as exc:
+        raise HTTPException(402, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @app.get("/api/videos/{job_id}/download")
