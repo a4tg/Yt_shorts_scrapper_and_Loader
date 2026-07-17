@@ -61,6 +61,27 @@ def test_initial_payment_contains_idempotency_metadata_and_optional_receipt() ->
     assert "test-secret" not in str(body)
 
 
+def test_refund_uses_payment_amount_and_idempotency_key() -> None:
+    client = CapturingClient()
+
+    client.create_refund(
+        provider_payment_id="provider-payment",
+        amount_minor=149000,
+        currency="RUB",
+        description="Полный возврат",
+        idempotency_key="refund-idempotency",
+    )
+
+    assert client.request["method"] == "POST"
+    assert client.request["path"] == "/refunds"
+    assert client.request["idempotency_key"] == "refund-idempotency"
+    assert client.request["json"]["payment_id"] == "provider-payment"
+    assert client.request["json"]["amount"] == {
+        "value": "1490.00",
+        "currency": "RUB",
+    }
+
+
 def test_recurring_payment_uses_saved_method_without_confirmation() -> None:
     with patch.dict(
         os.environ,

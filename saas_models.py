@@ -801,6 +801,58 @@ class ProductEvent(Base):
     )
 
 
+class PaymentRefund(TimestampMixin, Base):
+    __tablename__ = "payment_refunds"
+    __table_args__ = (
+        UniqueConstraint("payment_id", name="uq_payment_refunds_payment"),
+        CheckConstraint("amount_minor > 0", name="ck_payment_refunds_amount_positive"),
+        CheckConstraint("credits_reversed >= 0", name="ck_payment_refunds_credits_nonnegative"),
+        CheckConstraint(
+            "status IN ('creating', 'pending', 'succeeded', 'canceled', 'error')",
+            name="ck_payment_refunds_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    payment_id: Mapped[str] = mapped_column(
+        ForeignKey("payments.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    requested_by_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    provider_refund_id: Mapped[str | None] = mapped_column(
+        String(160), unique=True, index=True
+    )
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False, unique=True)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="creating", index=True)
+    amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="RUB")
+    credits_reversed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    reason: Mapped[str] = mapped_column(String(500), nullable=False)
+    failure_reason: Mapped[str | None] = mapped_column(Text)
+    provider_details: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class AdminAuditLog(Base):
+    __tablename__ = "admin_audit_log"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    actor_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    action: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    target_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    target_id: Mapped[str] = mapped_column(String(160), nullable=False, index=True)
+    details: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+
+
 class Job(Base):
     __tablename__ = "jobs"
     __table_args__ = (

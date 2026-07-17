@@ -187,6 +187,51 @@ def grant_credits(
     return True
 
 
+def revoke_credits(
+    db: Session,
+    user_id: str,
+    amount: int,
+    *,
+    operation_type: str,
+    description: str,
+    idempotency_key: str,
+    payment_id: str | None = None,
+) -> bool:
+    """Atomically remove available credits and append a negative audit entry."""
+    if amount <= 0:
+        raise ValueError("Количество списываемых кредитов должно быть положительным.")
+    existing = db.scalar(
+        select(CreditLedger.id).where(CreditLedger.idempotency_key == idempotency_key)
+    )
+    if existing:
+        return False
+    snapshot = credit_snapshot(db, user_id)
+    changed = db.execute(
+        update(User)
+        .where(
+            User.id == user_id,
+            User.credit_balance - User.reserved_credits >= amount,
+        )
+        .values(credit_balance=User.credit_balance - amount)
+        .returning(User.id)
+    ).scalar_one_or_none()
+    if changed is None:
+        raise InsufficientCreditsError(amount, snapshot.available)
+    db.add(
+        CreditLedger(
+            id=str(uuid.uuid4()),
+            user_id=user_id,
+            payment_id=payment_id,
+            amount=-amount,
+            operation_type=operation_type,
+            idempotency_key=idempotency_key,
+            description=description[:500],
+        )
+    )
+    db.flush()
+    return True
+
+
 def reserve_credits(db: Session, user_id: str, cost: int) -> CreditSnapshot:
     if cost <= 0:
         return credit_snapshot(db, user_id)

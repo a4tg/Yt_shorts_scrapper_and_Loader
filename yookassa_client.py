@@ -173,3 +173,35 @@ class YooKassaClient:
         if not provider_payment_id or len(provider_payment_id) > 160:
             raise ValueError("Invalid provider payment id")
         return self._request("GET", f"/payments/{provider_payment_id}")
+
+    def create_refund(
+        self,
+        *,
+        provider_payment_id: str,
+        amount_minor: int,
+        currency: str,
+        description: str,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        if not provider_payment_id or len(provider_payment_id) > 160:
+            raise ValueError("Invalid provider payment id")
+        if amount_minor <= 0:
+            raise ValueError("Refund amount must be positive")
+        return self._request(
+            "POST",
+            "/refunds",
+            idempotency_key=idempotency_key,
+            json_body={
+                "payment_id": provider_payment_id,
+                "amount": {
+                    "value": minor_to_value(amount_minor),
+                    "currency": currency,
+                },
+                "description": description[:128],
+            },
+        )
+
+    def get_refund(self, provider_refund_id: str) -> dict[str, Any]:
+        if not provider_refund_id or len(provider_refund_id) > 160:
+            raise ValueError("Invalid provider refund id")
+        return self._request("GET", f"/refunds/{provider_refund_id}")

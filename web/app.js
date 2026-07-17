@@ -478,6 +478,14 @@ function adminCell(text, className = '') {
   cell.textContent = text == null ? '—' : String(text); return cell;
 }
 
+function adminActionButton(label, action, target, disabled = false) {
+  const button = document.createElement('button');
+  button.className = 'ghost admin-row-action'; button.type = 'button';
+  button.textContent = label; button.disabled = disabled;
+  button.addEventListener('click', () => openAdminAction(action, target));
+  return button;
+}
+
 function renderAdminOverview(overview) {
   const cards = [
     ['Пользователи', overview.users], ['Подтвердили email', overview.verified_users],
@@ -504,7 +512,9 @@ function renderAdminUsers(users) {
     const name = document.createElement('strong'); name.textContent = user.display_name || user.email;
     const email = document.createElement('small'); email.textContent = user.email; identity.append(name, email); identityCell.append(identity);
     const status = user.is_admin ? 'Администратор' : (user.email_verified ? user.subscription_status : 'Email не подтверждён');
-    row.append(identityCell, adminCell(user.plan_id), adminCell(user.credits), adminCell(status, 'admin-status'), adminCell(adminDate(user.created_at)));
+    const action = document.createElement('td');
+    action.append(adminActionButton('+ Кредиты', 'credits', user.id));
+    row.append(identityCell, adminCell(user.plan_id), adminCell(user.credits), adminCell(status, 'admin-status'), adminCell(adminDate(user.created_at)), action);
     body.append(row);
   }
 }
@@ -513,22 +523,140 @@ function renderAdminPayments(payments) {
   $('#admin-payments-count').textContent = `${payments.length} последних`;
   const body = $('#admin-payments-body'); body.replaceChildren();
   if (!payments.length) {
-    const row = document.createElement('tr'); const empty = adminCell('Платежей пока нет.'); empty.colSpan = 5; row.append(empty); body.append(row); return;
+    const row = document.createElement('tr'); const empty = adminCell('Платежей пока нет.'); empty.colSpan = 6; row.append(empty); body.append(row); return;
   }
   for (const payment of payments) {
     const row = document.createElement('tr');
-    row.append(adminCell(payment.email), adminCell(payment.plan_id), adminCell(adminMoney(payment.amount_minor, payment.currency)), adminCell(payment.status, 'admin-status'), adminCell(adminDate(payment.created_at)));
+    const action = document.createElement('td');
+    const refundable = payment.status === 'succeeded' && !payment.refunded_at
+      && !['succeeded', 'pending', 'creating'].includes(payment.refund?.status);
+    action.append(adminActionButton(
+      payment.refund ? `Возврат: ${payment.refund.status}` : 'Возврат',
+      'refund',
+      payment.id,
+      !refundable
+    ));
+    row.append(
+      adminCell(payment.email), adminCell(payment.plan_id),
+      adminCell(adminMoney(payment.amount_minor, payment.currency)),
+      adminCell(payment.refunded_at ? 'refunded' : payment.status, 'admin-status'),
+      adminCell(adminDate(payment.created_at)), action
+    );
+    body.append(row);
+  }
+}
+
+function renderAdminFeedback(items) {
+  $('#admin-feedback-count').textContent = `${items.length} последних`;
+  const body = $('#admin-feedback-body'); body.replaceChildren();
+  if (!items.length) {
+    const row = document.createElement('tr'); const empty = adminCell('Обращений пока нет.'); empty.colSpan = 5; row.append(empty); body.append(row); return;
+  }
+  for (const item of items) {
+    const row = document.createElement('tr');
+    const message = adminCell(item.message, 'admin-long-cell');
+    const action = document.createElement('td');
+    action.append(adminActionButton('Обработать', 'feedback', item.id));
+    row.append(
+      adminCell(item.email),
+      adminCell(supportCategoryLabels[item.category] || item.category),
+      message,
+      adminCell(item.status, 'admin-status'),
+      action
+    );
+    body.append(row);
+  }
+}
+
+function renderAdminJobs(items) {
+  $('#admin-jobs-count').textContent = `${items.length} ошибок`;
+  const body = $('#admin-jobs-body'); body.replaceChildren();
+  if (!items.length) {
+    const row = document.createElement('tr'); const empty = adminCell('Ошибок заданий нет.'); empty.colSpan = 5; row.append(empty); body.append(row); return;
+  }
+  for (const item of items) {
+    const row = document.createElement('tr');
+    row.append(
+      adminCell(item.id), adminCell(item.email), adminCell(item.kind),
+      adminCell(item.error || item.message || 'Неизвестная ошибка', 'admin-long-cell'),
+      adminCell(`${item.attempts}/${item.max_attempts}`)
+    );
+    body.append(row);
+  }
+}
+
+function renderAdminRefunds(items) {
+  $('#admin-refunds-count').textContent = `${items.length} последних`;
+  const body = $('#admin-refunds-body'); body.replaceChildren();
+  if (!items.length) {
+    const row = document.createElement('tr'); const empty = adminCell('Возвратов пока нет.'); empty.colSpan = 6; row.append(empty); body.append(row); return;
+  }
+  for (const item of items) {
+    const row = document.createElement('tr');
+    const action = document.createElement('td');
+    if (['pending', 'error'].includes(item.status)) {
+      action.append(adminActionButton('Сверить', 'refund-sync', item.id));
+    }
+    row.append(
+      adminCell(item.email), adminCell(adminMoney(item.amount_minor, item.currency)),
+      adminCell(item.credits_reversed), adminCell(item.status, 'admin-status'),
+      adminCell(item.reason, 'admin-long-cell'), action
+    );
+    body.append(row);
+  }
+}
+
+function renderAdminAudit(items) {
+  $('#admin-audit-count').textContent = `${items.length} действий`;
+  const body = $('#admin-audit-body'); body.replaceChildren();
+  if (!items.length) {
+    const row = document.createElement('tr'); const empty = adminCell('Административных действий пока нет.'); empty.colSpan = 4; row.append(empty); body.append(row); return;
+  }
+  for (const item of items) {
+    const row = document.createElement('tr');
+    row.append(
+      adminCell(item.actor), adminCell(item.action),
+      adminCell(`${item.target_type}:${item.target_id}`),
+      adminCell(adminDate(item.created_at))
+    );
     body.append(row);
   }
 }
 
 async function loadAdmin(force = false) {
   if (!state.currentUser?.is_admin || (state.adminLoaded && !force)) return;
-  const [overview, users, payments] = await Promise.all([
-    api('/api/admin/overview'), api('/api/admin/users?limit=100'), api('/api/admin/payments?limit=100')
+  const [overview, users, payments, feedback, jobs, refunds, audit] = await Promise.all([
+    api('/api/admin/overview'), api('/api/admin/users?limit=100'),
+    api('/api/admin/payments?limit=100'), api('/api/admin/feedback?limit=100'),
+    api('/api/admin/jobs?status=error&limit=100'), api('/api/admin/refunds?limit=100'),
+    api('/api/admin/audit?limit=100')
   ]);
   renderAdminOverview(overview); renderAdminUsers(users); renderAdminPayments(payments);
+  renderAdminFeedback(feedback); renderAdminJobs(jobs);
+  renderAdminRefunds(refunds); renderAdminAudit(audit);
   state.adminLoaded = true;
+}
+
+function openAdminAction(kind, target) {
+  const dialog = $('#admin-action-dialog');
+  $('#admin-action-kind').value = kind; $('#admin-action-target').value = target;
+  $('#admin-action-status-message').textContent = '';
+  $('#admin-action-reason').value = '';
+  $('#admin-action-amount-field').classList.toggle('hidden', kind !== 'credits');
+  $('#admin-action-status-field').classList.toggle('hidden', kind !== 'feedback');
+  $('#admin-action-reason').closest('label').classList.toggle('hidden', kind === 'refund-sync');
+  $('#admin-action-reason').required = kind !== 'refund-sync';
+  const settings = {
+    credits: ['Начислить кредиты', 'Основание начисления'],
+    refund: ['Вернуть платёж', 'Причина полного возврата'],
+    feedback: ['Обработать обращение', 'Ответ или результат'],
+    'refund-sync': ['Сверить возврат с ЮKassa', '']
+  };
+  const [title, label] = settings[kind];
+  $('#admin-action-title').textContent = title;
+  $('#admin-action-reason-label').textContent = label;
+  $('#admin-action-submit').textContent = kind === 'refund' ? 'Оформить возврат' : 'Подтвердить';
+  dialog.showModal();
 }
 
 function renderWorkspaceProjects() {
@@ -3152,6 +3280,54 @@ $('#message-composer').addEventListener('submit', async (event) => {
     renderMessages({ scrollToBottom: true });
   } catch (error) { showWorkspaceError(error); }
   finally { submit.disabled = false; submit.innerHTML = 'Отправить <span>↗</span>'; }
+});
+
+$('#admin-action-cancel').addEventListener('click', () => {
+  $('#admin-action-dialog').close();
+});
+
+$('#admin-action-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const kind = $('#admin-action-kind').value;
+  const target = $('#admin-action-target').value;
+  const reason = $('#admin-action-reason').value.trim();
+  const button = $('#admin-action-submit');
+  const status = $('#admin-action-status-message');
+  button.disabled = true; status.textContent = 'Выполняю…';
+  try {
+    if (kind === 'credits') {
+      await api(`/api/admin/users/${encodeURIComponent(target)}/credits`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount: Number($('#admin-action-amount').value), reason })
+      });
+    } else if (kind === 'refund') {
+      await api(`/api/admin/payments/${encodeURIComponent(target)}/refund`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason })
+      });
+    } else if (kind === 'feedback') {
+      await api(`/api/admin/feedback/${encodeURIComponent(target)}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: $('#admin-action-status').value,
+          resolution_note: reason || null
+        })
+      });
+    } else if (kind === 'refund-sync') {
+      await api(`/api/admin/refunds/${encodeURIComponent(target)}/sync`, { method: 'POST' });
+    } else {
+      throw new Error('Неизвестное административное действие.');
+    }
+    status.textContent = 'Готово.';
+    state.adminLoaded = false;
+    await loadAdmin(true);
+    $('#admin-action-dialog').close();
+    showToast('Административное действие выполнено.');
+  } catch (error) {
+    status.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
 });
 $('#message-body').addEventListener('keydown', (event) => {
   if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); $('#message-composer').requestSubmit(); }

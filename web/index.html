@@ -187,8 +187,12 @@
         </div>
         <div id="admin-stats" class="admin-stats" aria-live="polite"></div>
         <div class="admin-tables">
-          <section><div class="admin-table-heading"><h3>Пользователи</h3><span id="admin-users-count"></span></div><div class="admin-table-scroll"><table><thead><tr><th>Пользователь</th><th>Тариф</th><th>Кредиты</th><th>Статус</th><th>Создан</th></tr></thead><tbody id="admin-users-body"></tbody></table></div></section>
-          <section><div class="admin-table-heading"><h3>Последние платежи</h3><span id="admin-payments-count"></span></div><div class="admin-table-scroll"><table><thead><tr><th>Пользователь</th><th>Тариф</th><th>Сумма</th><th>Статус</th><th>Дата</th></tr></thead><tbody id="admin-payments-body"></tbody></table></div></section>
+          <section><div class="admin-table-heading"><h3>Пользователи</h3><span id="admin-users-count"></span></div><div class="admin-table-scroll"><table><thead><tr><th>Пользователь</th><th>Тариф</th><th>Кредиты</th><th>Статус</th><th>Создан</th><th></th></tr></thead><tbody id="admin-users-body"></tbody></table></div></section>
+          <section><div class="admin-table-heading"><h3>Последние платежи</h3><span id="admin-payments-count"></span></div><div class="admin-table-scroll"><table><thead><tr><th>Пользователь</th><th>Тариф</th><th>Сумма</th><th>Статус</th><th>Дата</th><th></th></tr></thead><tbody id="admin-payments-body"></tbody></table></div></section>
+          <section><div class="admin-table-heading"><h3>Обращения</h3><span id="admin-feedback-count"></span></div><div class="admin-table-scroll"><table><thead><tr><th>Пользователь</th><th>Тема</th><th>Сообщение</th><th>Статус</th><th></th></tr></thead><tbody id="admin-feedback-body"></tbody></table></div></section>
+          <section><div class="admin-table-heading"><h3>Ошибки заданий</h3><span id="admin-jobs-count"></span></div><div class="admin-table-scroll"><table><thead><tr><th>ID</th><th>Пользователь</th><th>Тип</th><th>Ошибка</th><th>Попытки</th></tr></thead><tbody id="admin-jobs-body"></tbody></table></div></section>
+          <section><div class="admin-table-heading"><h3>Возвраты</h3><span id="admin-refunds-count"></span></div><div class="admin-table-scroll"><table><thead><tr><th>Пользователь</th><th>Сумма</th><th>Кредиты</th><th>Статус</th><th>Причина</th><th></th></tr></thead><tbody id="admin-refunds-body"></tbody></table></div></section>
+          <section><div class="admin-table-heading"><h3>Аудит действий</h3><span id="admin-audit-count"></span></div><div class="admin-table-scroll"><table><thead><tr><th>Администратор</th><th>Действие</th><th>Цель</th><th>Дата</th></tr></thead><tbody id="admin-audit-body"></tbody></table></div></section>
         </div>
       </section>
     </section>
@@ -643,6 +647,19 @@
         <button id="checkout-dialog-submit" class="primary" type="submit" disabled>Перейти к оплате</button>
       </div>
       <div id="checkout-dialog-status" class="auth-status" aria-live="polite"></div>
+    </form>
+  </dialog>
+  <dialog id="admin-action-dialog" class="account-dialog workspace-dialog">
+    <form id="admin-action-form">
+      <p class="eyebrow">Административное действие</p>
+      <h2 id="admin-action-title">Действие</h2>
+      <input id="admin-action-kind" type="hidden">
+      <input id="admin-action-target" type="hidden">
+      <label id="admin-action-amount-field"><span>Количество кредитов</span><input id="admin-action-amount" type="number" min="1" max="100000" value="10"></label>
+      <label id="admin-action-status-field"><span>Статус обращения</span><select id="admin-action-status"><option value="in_progress">В работе</option><option value="resolved">Решено</option><option value="closed">Закрыто</option><option value="open">Открыто</option></select></label>
+      <label><span id="admin-action-reason-label">Причина</span><textarea id="admin-action-reason" rows="5" minlength="10" maxlength="2000" required></textarea></label>
+      <div class="dialog-actions"><button id="admin-action-cancel" class="ghost" type="button">Отмена</button><button id="admin-action-submit" class="primary" type="submit">Подтвердить</button></div>
+      <div id="admin-action-status-message" class="auth-status" aria-live="polite"></div>
     </form>
   </dialog>
   <div id="toast" class="toast hidden" role="status" aria-live="polite" aria-atomic="true"></div>

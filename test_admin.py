@@ -19,6 +19,10 @@ def register_client() -> tuple[TestClient, dict[str, object]]:
     )
     attempt_limiter.clear("register:testclient")
     assert response.status_code == 201, response.text
+    client.headers.update({
+        "Origin": "http://testserver",
+        "X-CSRF-Token": client.cookies.get("yt_loader_csrf"),
+    })
     return client, response.json()
 
 
@@ -28,6 +32,10 @@ def test_admin_api_is_hidden_from_regular_users() -> None:
     assert client.get("/api/admin/overview").status_code == 404
     assert client.get("/api/admin/users").status_code == 404
     assert client.get("/api/admin/payments").status_code == 404
+    assert client.get("/api/admin/jobs").status_code == 404
+    assert client.get("/api/admin/feedback").status_code == 404
+    assert client.get("/api/admin/refunds").status_code == 404
+    assert client.get("/api/admin/audit").status_code == 404
 
 
 def test_admin_can_read_commercial_overview() -> None:
@@ -53,6 +61,56 @@ def test_admin_can_read_commercial_overview() -> None:
     assert users.json()[0]["is_admin"] is True
     assert payments.status_code == 200
     assert payments.json() == []
+
+
+def test_admin_can_grant_credits_resolve_feedback_and_inspect_failed_jobs() -> None:
+    admin_client, admin = register_client()
+    user_client, user = register_client()
+    with server.SessionLocal() as db:
+        record = db.get(User, admin["id"])
+        record.is_admin = True
+        db.commit()
+    workspace = user_client.get("/api/workspaces").json()[0]
+    project = user_client.get(f"/api/workspaces/{workspace['id']}/projects").json()[0]
+    ticket = user_client.post(
+        "/api/feedback",
+        json={
+            "workspace_id": workspace["id"],
+            "project_id": project["id"],
+            "category": "question",
+            "page": "support",
+            "message": "Помогите проверить рабочий процесс пользователя.",
+        },
+    )
+    job = server.manager.create("import", {"limit": 1}, str(user["id"]))
+    server.manager.update(
+        str(job["id"]),
+        status="error",
+        error_message="Test worker error",
+    )
+    before_grant = user_client.get("/api/billing/summary").json()["available"]
+
+    granted = admin_client.post(
+        f"/api/admin/users/{user['id']}/credits",
+        json={"amount": 10, "reason": "Компенсация за тест закрытой беты."},
+    )
+    resolved = admin_client.patch(
+        f"/api/admin/feedback/{ticket.json()['id']}",
+        json={"status": "resolved", "resolution_note": "Сценарий проверен, ошибка устранена."},
+    )
+    jobs = admin_client.get("/api/admin/jobs", params={"status": "error"})
+    audit = admin_client.get("/api/admin/audit")
+
+    assert granted.status_code == 200
+    assert granted.json()["available"] == before_grant + 10
+    assert resolved.status_code == 200
+    assert resolved.json()["status"] == "resolved"
+    assert jobs.status_code == 200
+    assert jobs.json()[0]["error"] == "Test worker error"
+    assert {entry["action"] for entry in audit.json()} == {
+        "credits.grant",
+        "feedback.update",
+    }
 
 
 def test_public_commercial_pages_and_favicon_are_available() -> None:

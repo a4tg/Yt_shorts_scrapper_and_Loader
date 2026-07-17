@@ -117,6 +117,7 @@ def payment_payload(payment: Payment) -> dict[str, object]:
         "confirmation_url": payment.confirmation_url,
         "created_at": payment.created_at.isoformat(),
         "paid_at": payment.paid_at.isoformat() if payment.paid_at else None,
+        "refunded_at": payment.refunded_at.isoformat() if payment.refunded_at else None,
         "failure_reason": payment.failure_reason,
     }
 

@@ -79,6 +79,11 @@ class WebWorkspaceTests(unittest.TestCase):
             "admin-stats",
             "admin-users-body",
             "admin-payments-body",
+            "admin-feedback-body",
+            "admin-jobs-body",
+            "admin-refunds-body",
+            "admin-audit-body",
+            "admin-action-dialog",
             "support-form",
             "support-tickets",
             "create-demo-project",
@@ -86,6 +91,8 @@ class WebWorkspaceTests(unittest.TestCase):
             self.assertIn(f'id="{element_id}"', html)
         self.assertIn("!state.currentUser?.is_admin", script)
         self.assertIn("api('/api/admin/overview')", script)
+        self.assertIn("api('/api/admin/feedback?limit=100')", script)
+        self.assertIn("api('/api/admin/jobs?status=error&limit=100')", script)
         self.assertIn("loadOnboarding()", script)
         self.assertIn("api('/api/onboarding/demo'", script)
         self.assertIn("api('/api/feedback'", script)
