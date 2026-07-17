@@ -4,6 +4,7 @@ const state = {
   previewUrl: null, overlayPreviewUrls: new Map(), logoUploads: new Map(),
   sourceVideoId: null, positionX: 50, positionY: 96,
   itemCards: new Map(), batchRunning: false, currentUser: null, importResumed: false,
+  importItemsUrl: null, importPagination: null,
   paymentResumed: false, authConfig: {}, accountToken: null, currentPage: 'dashboard',
   workspaces: [], currentWorkspaceId: null, projects: [], currentProjectId: null,
   workspaceMembers: [], approvalWorkflow: null, contentItems: [], contentView: 'board',
@@ -13,6 +14,7 @@ const state = {
   editingContentId: null, aiConfig: null, aiResultJobs: {}, adminLoaded: false
 };
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const importPageSize = 12;
 
 const workspacePageTitles = {
   dashboard: 'Обзор', content: 'Контент-план', documents: 'Документы',
@@ -1959,6 +1961,80 @@ async function ensureOverlaysUploaded() {
   return tokens;
 }
 
+function formatPublicationDate(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const normalized = /^\d{8}$/.test(raw)
+    ? `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`
+    : raw;
+  const date = new Date(`${normalized}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return raw;
+  return `Опубликовано ${date.toLocaleDateString('ru-RU', {
+    day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC'
+  })}`;
+}
+
+function formatViewCount(value) {
+  if (value === null || value === undefined || value === '') return '';
+  const count = Number(value);
+  if (!Number.isFinite(count) || count < 0) return '';
+  return `${new Intl.NumberFormat('ru-RU', {
+    notation: 'compact', maximumFractionDigits: 1
+  }).format(count)} просмотров`;
+}
+
+async function loadImportPage(itemsUrl, importId, page = 1) {
+  const separator = itemsUrl.includes('?') ? '&' : '?';
+  const payload = await api(
+    `${itemsUrl}${separator}page=${page}&page_size=${importPageSize}`
+  );
+  state.importItemsUrl = itemsUrl;
+  state.importPagination = payload.pagination;
+  state.importId = importId;
+  renderItems(payload.items, importId, payload.pagination);
+  return payload;
+}
+
+function renderImportPagination(pagination) {
+  const container = $('#video-pagination'); container.replaceChildren();
+  if (!pagination || pagination.pages <= 1) {
+    container.classList.add('hidden'); return;
+  }
+  container.classList.remove('hidden');
+  const addPageButton = (label, targetPage, options = {}) => {
+    const button = document.createElement('button'); button.type = 'button';
+    button.textContent = label; button.disabled = Boolean(options.disabled);
+    if (options.current) button.setAttribute('aria-current', 'page');
+    button.addEventListener('click', async () => {
+      if (state.batchRunning || targetPage === state.importPagination?.page) return;
+      container.classList.add('disabled');
+      try {
+        await loadImportPage(state.importItemsUrl, state.importId, targetPage);
+        $('#results-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } catch (error) {
+        showToast(error.message);
+      } finally {
+        container.classList.remove('disabled');
+      }
+    });
+    container.append(button);
+  };
+  addPageButton('←', pagination.page - 1, { disabled: !pagination.has_previous });
+  const pages = new Set([1, pagination.pages]);
+  for (let page = pagination.page - 2; page <= pagination.page + 2; page += 1) {
+    if (page >= 1 && page <= pagination.pages) pages.add(page);
+  }
+  let previous = 0;
+  for (const page of [...pages].sort((left, right) => left - right)) {
+    if (previous && page - previous > 1) {
+      const gap = document.createElement('span'); gap.textContent = '…'; container.append(gap);
+    }
+    addPageButton(String(page), page, { current: page === pagination.page });
+    previous = page;
+  }
+  addPageButton('→', pagination.page + 1, { disabled: !pagination.has_next });
+}
+
 $('#channel-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   if (state.batchRunning) { showToast('Дождитесь завершения пакетной обработки.'); return; }
@@ -1979,18 +2055,23 @@ $('#channel-form').addEventListener('submit', async (event) => {
     state.importId = created.id;
     localStorage.setItem('ytLoaderImportJob', created.id);
     const job = await pollJob(created.id, (current) => { status.textContent = current.message || current.status; });
-    const items = await api(job.items_url); renderItems(items, created.id);
-    $('#csv-link').href = job.csv_url; status.textContent = `Готово: найдено ${items.length} видео`;
+    const page = await loadImportPage(job.items_url, created.id);
+    $('#csv-link').href = job.csv_url;
+    status.textContent = `Готово: найдено ${page.pagination.total} видео`;
   } catch (error) {
     window.AAPAppMotion?.videoPhase?.('error');
     status.className = 'status error'; status.textContent = error.message;
   } finally { button.disabled = false; }
 });
 
-function renderItems(items, importId) {
+function renderItems(items, importId, pagination = null) {
   const container = $('#items'); container.replaceChildren();
   state.itemCards = new Map(); state.batchRunning = false;
-  $('#result-count').textContent = `${items.length} роликов · видео обрабатываются по одному`;
+  const total = pagination?.total ?? items.length;
+  const pageLabel = pagination
+    ? ` · страница ${pagination.page} из ${pagination.pages}`
+    : '';
+  $('#result-count').textContent = `${total} роликов${pageLabel} · на странице до ${importPageSize}`;
   for (const item of items) {
     const card = document.createElement('article'); card.className = 'item';
     const selector = document.createElement('label'); selector.className = 'video-selector';
@@ -2000,7 +2081,12 @@ function renderItems(items, importId) {
     const info = document.createElement('div');
     const title = document.createElement('h3'); title.textContent = item.title;
     const meta = document.createElement('div'); meta.className = 'meta';
-    meta.textContent = [item.platform?.toUpperCase(), item.uploader, item.upload_date].filter(Boolean).join(' · ');
+    meta.textContent = [
+      item.platform?.toUpperCase(),
+      item.uploader,
+      formatViewCount(item.view_count),
+      formatPublicationDate(item.published_at || item.upload_date)
+    ].filter(Boolean).join(' · ');
     const description = document.createElement('p'); description.className = 'description'; description.textContent = item.description || 'Описание отсутствует';
     const tags = document.createElement('div'); tags.className = 'tags'; tags.textContent = item.tags.length ? item.tags.map((tag) => `#${tag}`).join(' ') : 'Теги отсутствуют';
     info.append(title, meta, description, tags);
@@ -2046,6 +2132,7 @@ function renderItems(items, importId) {
   $('#batch-toolbar').classList.toggle('hidden', items.length === 0);
   $('#batch-status').className = 'status hidden';
   $('#batch-progress').classList.add('hidden');
+  renderImportPagination(pagination);
   updateBatchSelection();
   $('#results-section').classList.remove('hidden');
   window.AAPAppMotion?.videoPhase?.('results');
@@ -2104,6 +2191,7 @@ $('#prepare-selected').addEventListener('click', async () => {
     return;
   }
   state.batchRunning = true; status.className = 'status';
+  $('#video-pagination').classList.add('disabled');
   for (const record of selectableRecords()) { record.checkbox.disabled = true; record.videoButton.disabled = true; }
   updateBatchSelection();
   window.AAPAppMotion?.videoPhase?.('processing');
@@ -2143,6 +2231,7 @@ $('#prepare-selected').addEventListener('click', async () => {
     window.AAPAppMotion?.videoPhase?.('error');
   } finally {
     state.batchRunning = false;
+    $('#video-pagination').classList.remove('disabled');
     for (const record of selectableRecords()) {
       record.checkbox.disabled = false; record.videoButton.disabled = false;
     }
@@ -2329,8 +2418,9 @@ async function resumeImport() {
   try {
     const job = await pollJob(id, (current) => { status.textContent = current.message || current.status; });
     if (job.kind !== 'import') return;
-    const items = await api(job.items_url); state.importId = id; renderItems(items, id);
-    $('#csv-link').href = job.csv_url; status.textContent = `Готово: найдено ${items.length} видео`;
+    const page = await loadImportPage(job.items_url, id);
+    $('#csv-link').href = job.csv_url;
+    status.textContent = `Готово: найдено ${page.pagination.total} видео`;
   } catch (error) {
     if (error.status === 404 && !queryJob) {
       localStorage.removeItem('ytLoaderImportJob');

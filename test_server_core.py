@@ -97,13 +97,26 @@ class MetadataParserTests(unittest.TestCase):
             "title": "Demo",
             "description": "Text",
             "tags": ["one"],
+            "upload_date": "20260717",
+            "view_count": 125400,
             "duration": 42,
             "thumbnail": "https://example.test/image.jpg",
         }
         records = parse_metadata_lines(json.dumps(payload) + "\nnot-json")
         self.assertEqual(records[0]["url"], "https://www.youtube.com/shorts/abcdefghijk")
         self.assertEqual(records[0]["tags"], ["one"])
+        self.assertEqual(records[0]["published_at"], "2026-07-17")
+        self.assertEqual(records[0]["view_count"], 125400)
         self.assertEqual(records[0]["duration"], 42)
+
+    def test_publication_date_falls_back_to_timestamp(self) -> None:
+        records = parse_metadata_lines(json.dumps({
+            "id": "abcdefghijk",
+            "timestamp": 1767225600,
+            "view_count": "42",
+        }))
+        self.assertEqual(records[0]["published_at"], "2026-01-01")
+        self.assertEqual(records[0]["view_count"], 42)
 
     def test_parses_vk_and_rutube_metadata_without_youtube_id_rules(self) -> None:
         vk = parse_metadata_lines(json.dumps({
@@ -144,8 +157,11 @@ class MetadataParserTests(unittest.TestCase):
         self.assertEqual((count, platform), (1, "vk"))
         self.assertIn("--playlist-end", command)
         self.assertIn("25", command)
+        self.assertIn("view_count", " ".join(command))
         self.assertEqual(saved[0]["platform"], "vk")
         self.assertIn("platform;url;title", csv_text)
+        self.assertIn("published_at", csv_text)
+        self.assertIn("view_count", csv_text)
 
 
 class MetadataModeTests(unittest.TestCase):

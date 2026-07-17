@@ -24,6 +24,32 @@
 .item.processing { border-color: #e0a93b; }
 .item.ready { border-color: var(--ok); }
 
+.video-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.video-pagination button {
+  min-width: 40px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  background: #0d1520;
+  color: var(--text);
+}
+
+.video-pagination button[aria-current="page"] {
+  border-color: var(--accent);
+  background: rgba(124, 108, 255, .18);
+  color: var(--accent2);
+}
+
+.video-pagination span { color: var(--muted); }
+.video-pagination.disabled { pointer-events: none; opacity: .55; }
+
 .video-selector {
   position: absolute;
   top: 14px;

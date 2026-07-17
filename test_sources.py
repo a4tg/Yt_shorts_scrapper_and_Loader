@@ -1,3 +1,4 @@
+import json
 import uuid
 from unittest.mock import MagicMock, patch
 
@@ -104,6 +105,66 @@ def test_source_preview_returns_sanitized_metadata() -> None:
     assert response.status_code == 200
     assert response.json() == expected
     preview.assert_called_once_with(VK_VIDEO)
+
+
+def test_import_items_support_paginated_web_and_legacy_responses() -> None:
+    client, user = register_user()
+    job_id = uuid.uuid4().hex
+    items = [
+        {
+            "id": f"video-{index}",
+            "title": f"Video {index}",
+            "view_count": index * 100,
+            "published_at": "2026-07-17",
+        }
+        for index in range(25)
+    ]
+    path = server.IMPORTS_DIR / f"{job_id}.json"
+    path.write_text(json.dumps(items), encoding="utf-8")
+    with server.SessionLocal() as db:
+        db.add(Job(
+            id=job_id,
+            user_id=str(user["id"]),
+            kind="import",
+            status="done",
+            request_payload={"limit": 25},
+        ))
+        db.commit()
+    try:
+        first = client.get(
+            f"/api/imports/{job_id}/items",
+            params={"page": 1, "page_size": 12},
+        )
+        assert first.status_code == 200
+        assert len(first.json()["items"]) == 12
+        assert first.json()["pagination"] == {
+            "page": 1,
+            "page_size": 12,
+            "total": 25,
+            "pages": 3,
+            "has_previous": False,
+            "has_next": True,
+        }
+        last = client.get(
+            f"/api/imports/{job_id}/items",
+            params={"page": 3, "page_size": 12},
+        )
+        assert len(last.json()["items"]) == 1
+        assert last.json()["pagination"]["has_next"] is False
+        legacy = client.get(f"/api/imports/{job_id}/items")
+        assert isinstance(legacy.json(), list)
+        assert len(legacy.json()) == 25
+        assert client.get(
+            f"/api/imports/{job_id}/items",
+            params={"page": 0},
+        ).status_code == 400
+    finally:
+        with server.SessionLocal() as db:
+            record = db.get(Job, job_id)
+            if record:
+                db.delete(record)
+                db.commit()
+        path.unlink(missing_ok=True)
 
 
 def test_thumbnail_proxy_uses_cdn_allowlist_and_image_content_type() -> None:

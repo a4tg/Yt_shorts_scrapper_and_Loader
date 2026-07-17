@@ -5,6 +5,7 @@ import re
 import shutil
 import subprocess
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 from urllib.parse import parse_qs, urlparse
@@ -198,6 +199,31 @@ def _record_video_url(raw: dict[str, object], platform: str, video_id: str) -> s
     return f"https://rutube.ru/video/{video_id}/"
 
 
+def _metadata_count(value: object) -> int | None:
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        return None
+    return count if count >= 0 else None
+
+
+def _publication_date(raw: dict[str, object]) -> str:
+    upload_date = str(raw.get("upload_date") or "").strip()
+    if re.fullmatch(r"\d{8}", upload_date):
+        return f"{upload_date[:4]}-{upload_date[4:6]}-{upload_date[6:8]}"
+    for key in ("timestamp", "release_timestamp"):
+        try:
+            timestamp = float(raw.get(key) or 0)
+        except (TypeError, ValueError):
+            continue
+        if timestamp > 0:
+            try:
+                return datetime.fromtimestamp(timestamp, timezone.utc).date().isoformat()
+            except (OSError, OverflowError, ValueError):
+                continue
+    return ""
+
+
 def parse_metadata_lines(output: str, platform: str = "youtube") -> list[dict[str, object]]:
     records: list[dict[str, object]] = []
     seen: set[str] = set()
@@ -223,6 +249,8 @@ def parse_metadata_lines(output: str, platform: str = "youtube") -> list[dict[st
                 "tags": [str(tag) for tag in tags] if isinstance(tags, list) else [],
                 "uploader": str(raw.get("uploader") or ""),
                 "upload_date": str(raw.get("upload_date") or ""),
+                "published_at": _publication_date(raw),
+                "view_count": _metadata_count(raw.get("view_count")),
                 "duration": raw.get("duration"),
                 "thumbnail": str(raw.get("thumbnail") or ""),
             }
@@ -252,7 +280,7 @@ def run_source_import(
         "--js-runtimes", "node",
         *playlist_limit_args(limit),
         "--print",
-        "%(.{id,webpage_url,original_url,title,description,tags,uploader,upload_date,duration,thumbnail})j",
+        "%(.{id,webpage_url,original_url,title,description,tags,uploader,upload_date,timestamp,release_timestamp,view_count,duration,thumbnail})j",
     ]
     cookies = source_cookies(detected_platform)
     if cookies:
@@ -274,7 +302,10 @@ def run_source_import(
     with csv_path.open("w", encoding="utf-8-sig", newline="") as csv_file:
         writer = csv.DictWriter(
             csv_file,
-            fieldnames=["platform", "url", "title", "description", "tags", "uploader", "upload_date"],
+            fieldnames=[
+                "platform", "url", "title", "description", "tags", "uploader",
+                "published_at", "upload_date", "view_count",
+            ],
             delimiter=";",
         )
         writer.writeheader()
@@ -287,7 +318,9 @@ def run_source_import(
                     "description": record["description"],
                     "tags": ", ".join(record["tags"]),
                     "uploader": record["uploader"],
+                    "published_at": record["published_at"],
                     "upload_date": record["upload_date"],
+                    "view_count": record["view_count"],
                 }
             )
     return len(records), detected_platform
@@ -339,6 +372,8 @@ def probe_source_video(value: str) -> dict[str, object]:
         "thumbnail": thumbnail,
         "duration": payload.get("duration"),
         "uploader": str(payload.get("uploader") or ""),
+        "published_at": _publication_date(payload),
+        "view_count": _metadata_count(payload.get("view_count")),
     }
 
 

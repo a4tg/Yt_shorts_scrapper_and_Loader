@@ -836,9 +836,35 @@ def load_import(job_id: str) -> list[dict[str, object]]:
 
 
 @app.get("/api/imports/{job_id}/items")
-def import_items(job_id: str, request: Request) -> list[dict[str, object]]:
+def import_items(
+    job_id: str,
+    request: Request,
+    page: int | None = None,
+    page_size: int = 12,
+) -> list[dict[str, object]] | dict[str, object]:
     require_job_access(job_id, request)
-    return load_import(job_id)
+    items = load_import(job_id)
+    # Calls without pagination remain backward-compatible with the desktop app.
+    if page is None:
+        return items
+    if page < 1:
+        raise HTTPException(400, "page должен быть не меньше 1")
+    if not 1 <= page_size <= 48:
+        raise HTTPException(400, "page_size должен быть от 1 до 48")
+    total = len(items)
+    pages = max(1, (total + page_size - 1) // page_size)
+    offset = (page - 1) * page_size
+    return {
+        "items": items[offset : offset + page_size],
+        "pagination": {
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+            "pages": pages,
+            "has_previous": page > 1,
+            "has_next": page < pages,
+        },
+    }
 
 
 @app.get("/api/imports/{job_id}/metadata.csv")
@@ -862,7 +888,8 @@ def item_metadata(job_id: str, video_id: str, request: Request) -> PlainTextResp
         f"Название: {item['title']}\n"
         f"Ссылка: {item['url']}\n"
         f"Канал: {item['uploader']}\n"
-        f"Дата: {item['upload_date']}\n\n"
+        f"Дата публикации: {item.get('published_at') or item.get('upload_date') or 'неизвестно'}\n"
+        f"Просмотры: {item.get('view_count') if item.get('view_count') is not None else 'неизвестно'}\n\n"
         f"Теги:\n{', '.join(item['tags'])}\n\n"
         f"Описание:\n{item['description']}\n"
     )
