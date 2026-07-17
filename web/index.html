@@ -395,32 +395,6 @@
       <div id="profile-video-library" class="profile-video-library" aria-live="polite"></div>
     </section>
 
-    <section class="workspace-page hidden" data-page="support">
-      <section class="support-layout">
-        <article class="support-intro panel">
-          <p class="eyebrow">Помощь без потери контекста</p>
-          <h2>Поддержка All As Planned</h2>
-          <p>Опишите вопрос прямо из рабочего пространства. Мы сохраним раздел и проект, но не отправим содержимое ваших файлов или сообщений.</p>
-          <div class="support-channels">
-            <a class="secondary" href="mailto:support@allasplanned.ru">support@allasplanned.ru</a>
-            <span>Ответ на закрытой бете — вручную по email.</span>
-          </div>
-        </article>
-        <article class="support-form-panel panel">
-          <form id="support-form">
-            <label><span>Тема</span><select id="support-category"><option value="question">Вопрос</option><option value="bug">Ошибка</option><option value="idea">Предложение</option><option value="billing">Оплата</option></select></label>
-            <label><span>Сообщение</span><textarea id="support-message" rows="7" minlength="10" maxlength="4000" placeholder="Что произошло или что вы хотите улучшить?" required></textarea></label>
-            <div class="support-form-actions"><small>Будут приложены только названия текущего раздела и идентификаторы контекста.</small><button class="primary" type="submit">Отправить</button></div>
-            <div id="support-form-status" class="auth-status" aria-live="polite"></div>
-          </form>
-        </article>
-      </section>
-      <section class="support-history panel">
-        <div class="support-history-head"><div><p class="eyebrow">История</p><h2>Мои обращения</h2></div><button id="refresh-support" class="ghost" type="button">Обновить</button></div>
-        <div id="support-tickets" class="support-ticket-list" aria-live="polite"></div>
-      </section>
-    </section>
-
     <section class="panel import-panel">
       <div class="section-title">
         <span class="step">1</span>
@@ -535,6 +509,33 @@
       <nav id="video-pagination" class="video-pagination hidden" aria-label="Страницы видео"></nav>
     </section>
     </section>
+
+    <section class="workspace-page hidden" data-page="support">
+      <section class="support-layout">
+        <article class="support-intro panel">
+          <p class="eyebrow">Помощь без потери контекста</p>
+          <h2>Поддержка All As Planned</h2>
+          <p>Опишите вопрос прямо из рабочего пространства. Мы сохраним раздел и проект, но не отправим содержимое ваших файлов или сообщений.</p>
+          <div class="support-channels">
+            <a class="secondary" href="mailto:support@allasplanned.ru">support@allasplanned.ru</a>
+            <span>Ответ на закрытой бете — вручную по email.</span>
+          </div>
+        </article>
+        <article class="support-form-panel panel">
+          <form id="support-form">
+            <label><span>Тема</span><select id="support-category"><option value="question">Вопрос</option><option value="bug">Ошибка</option><option value="idea">Предложение</option><option value="billing">Оплата</option></select></label>
+            <label><span>Сообщение</span><textarea id="support-message" rows="7" minlength="10" maxlength="4000" placeholder="Что произошло или что вы хотите улучшить?" required></textarea></label>
+            <div class="support-form-actions"><small>Будут приложены только названия текущего раздела и идентификаторы контекста.</small><button class="primary" type="submit">Отправить</button></div>
+            <div id="support-form-status" class="auth-status" aria-live="polite"></div>
+          </form>
+        </article>
+      </section>
+      <section class="support-history panel">
+        <div class="support-history-head"><div><p class="eyebrow">История</p><h2>Мои обращения</h2></div><button id="refresh-support" class="ghost" type="button">Обновить</button></div>
+        <div id="support-tickets" class="support-ticket-list" aria-live="polite"></div>
+      </section>
+    </section>
+
     </div>
   </main>
 

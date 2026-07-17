@@ -81,6 +81,36 @@ def parse_document(name: str) -> tuple[str, Node]:
 
 
 class VisualQualityTests(unittest.TestCase):
+    def test_workspace_pages_are_top_level_siblings(self) -> None:
+        _, root = parse_document("index.html")
+        pages = [
+            node
+            for node in root.descendants("section")
+            if "workspace-page" in node.attrs.get("class", "").split()
+        ]
+        self.assertTrue(pages, "Workspace needs routable pages")
+        nested = [
+            node.attrs.get("data-page", "")
+            for node in pages
+            if any(
+                "workspace-page" in ancestor.attrs.get("class", "").split()
+                for ancestor in self._ancestors(node)
+            )
+        ]
+        self.assertEqual(nested, [], f"Workspace pages cannot be nested: {nested}")
+        page_names = [node.attrs.get("data-page", "") for node in pages]
+        self.assertEqual(len(page_names), len(set(page_names)), "Workspace routes must be unique")
+        self.assertIn("support", page_names)
+
+    @staticmethod
+    def _ancestors(node: Node) -> list[Node]:
+        ancestors: list[Node] = []
+        current = node.parent
+        while current is not None:
+            ancestors.append(current)
+            current = current.parent
+        return ancestors
+
     def test_public_documents_have_accessible_structure(self) -> None:
         for name in ("landing.html", "index.html"):
             with self.subTest(document=name):
