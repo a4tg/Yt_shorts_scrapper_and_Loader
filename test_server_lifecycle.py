@@ -9,7 +9,7 @@ from pydantic import ValidationError
 
 import server
 from auth_service import attempt_limiter
-from saas_models import Job, Overlay
+from saas_models import ContentAttachment, Job, Overlay
 
 
 def authenticated_client() -> tuple[TestClient, str]:
@@ -113,6 +113,8 @@ class VideoLifecycleTests(unittest.TestCase):
 class ConstructorPayloadTests(unittest.TestCase):
     def test_mov_overlay_gets_private_browser_preview(self) -> None:
         client, user_id = authenticated_client()
+        workspace = client.get("/api/workspaces").json()[0]
+        project = client.get(f"/api/workspaces/{workspace['id']}/projects").json()[0]
 
         def write_preview(_source, destination) -> None:
             destination.write_bytes(b"png-preview")
@@ -123,6 +125,7 @@ class ConstructorPayloadTests(unittest.TestCase):
         ):
             response = client.post(
                 "/api/logos",
+                data={"project_id": project["id"]},
                 files={"file": ("animated.mov", b"mov-content", "video/quicktime")},
             )
 
@@ -130,19 +133,41 @@ class ConstructorPayloadTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["name"], "animated.mov")
         self.assertEqual(payload["preview_url"], f"/api/logos/{payload['token']}/preview")
+        self.assertEqual(len(payload["library_attachment_id"]), 36)
+        self.assertNotEqual(payload["library_attachment_id"], payload["token"])
+        self.assertEqual(payload["project_id"], project["id"])
         preview = client.get(payload["preview_url"])
         self.assertEqual(preview.status_code, 200)
         self.assertEqual(preview.headers["content-type"], "image/png")
         self.assertEqual(preview.content, b"png-preview")
 
+        library = client.get(f"/api/projects/{project['id']}/library")
+        self.assertEqual(library.status_code, 200)
+        library_asset = next(
+            item for item in library.json() if item["id"] == payload["library_attachment_id"]
+        )
+        self.assertEqual(library_asset["source_type"], "overlay")
+        self.assertEqual(library_asset["name"], "animated.mov")
+
         with server.SessionLocal() as db:
             record = db.get(Overlay, payload["token"])
+            attachment = db.get(ContentAttachment, payload["library_attachment_id"])
             overlay_path = server.Path(record.storage_path)
-            db.delete(record)
-            db.commit()
-        overlay_path.unlink(missing_ok=True)
-        overlay_path.with_name(f"{payload['token']}_preview.png").unlink(missing_ok=True)
-        (server.LOGOS_DIR / user_id).rmdir()
+            self.assertEqual(record.storage_path, attachment.storage_path)
+            self.assertEqual(attachment.asset_key, payload["token"])
+            self.assertTrue(overlay_path.is_relative_to(server.CONTENT_DIR))
+
+        deleted = client.delete(
+            f"/api/content-attachments/{payload['library_attachment_id']}"
+        )
+        self.assertEqual(deleted.status_code, 204)
+        with server.SessionLocal() as db:
+            self.assertIsNone(db.get(Overlay, payload["token"]))
+            self.assertIsNone(db.get(ContentAttachment, payload["library_attachment_id"]))
+        self.assertFalse(overlay_path.exists())
+        self.assertFalse(
+            overlay_path.with_name(f"{payload['token']}_preview.png").exists()
+        )
 
     def test_constructor_coordinates_are_bounded(self) -> None:
         payload = server.DownloadRequest(

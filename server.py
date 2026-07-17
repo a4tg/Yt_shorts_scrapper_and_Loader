@@ -15,12 +15,12 @@ from typing import Literal
 from urllib.parse import urlparse
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request, Response, UploadFile
+from fastapi import FastAPI, Form, HTTPException, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.background import BackgroundTask
 from starlette.middleware.gzip import GZipMiddleware
@@ -43,7 +43,13 @@ from auth_service import (
     csrf_is_valid,
     origin_is_allowed,
 )
-from billing_service import InsufficientCreditsError, PlanLimitError, SubscriptionRequiredError, require_plan_capacity
+from billing_service import (
+    InsufficientCreditsError,
+    PlanLimitError,
+    SubscriptionRequiredError,
+    require_entitlement,
+    require_plan_capacity,
+)
 from ai_service import (
     AIServiceError,
     ai_public_config,
@@ -58,7 +64,7 @@ from database import SessionLocal, check_database
 from email_service import email_verification_required
 from job_queue import DatabaseJobManager, ProcessedJob
 from payment_service import SubscriptionRenewalWorker
-from saas_models import ContentAttachment, ContentItem, Overlay, WorkspaceMember
+from saas_models import ContentAttachment, ContentItem, Overlay, Project, WorkspaceMember
 from workspace_service import has_role, membership_for, project_membership
 from yookassa_client import YooKassaClient
 from server_core import (
@@ -589,6 +595,32 @@ def resolve_media_project(project_id: str | None, request: Request) -> tuple[str
         return project.workspace_id, project.id
 
 
+def resolve_overlay_project(project_id: str | None, request: Request) -> str:
+    """Resolve the permanent project library used for a reusable overlay."""
+    if project_id:
+        _, resolved_project_id = resolve_media_project(project_id, request)
+        if resolved_project_id:
+            return resolved_project_id
+    user_id = str(request.state.user.id)
+    with SessionLocal() as db:
+        rows = db.execute(
+            select(Project, WorkspaceMember)
+            .join(WorkspaceMember, WorkspaceMember.workspace_id == Project.workspace_id)
+            .where(
+                WorkspaceMember.user_id == user_id,
+                Project.status == "active",
+            )
+            .order_by(Project.created_at, Project.id)
+        ).all()
+        for project, member in rows:
+            if has_role(member, "editor"):
+                return project.id
+    raise HTTPException(
+        409,
+        "Создайте проект с правами редактора, чтобы сохранить оверлей в медиатеке.",
+    )
+
+
 @app.get("/api/ai/config")
 def ai_config() -> dict[str, object]:
     return ai_public_config()
@@ -839,7 +871,20 @@ def item_metadata(job_id: str, video_id: str, request: Request) -> PlainTextResp
 
 
 @app.post("/api/logos")
-async def upload_logo(request: Request, file: UploadFile) -> dict[str, str]:
+async def upload_logo(
+    request: Request,
+    file: UploadFile,
+    project_id: str | None = Form(default=None),
+) -> dict[str, object]:
+    resolved_project_id = resolve_overlay_project(project_id, request)
+    with SessionLocal() as db:
+        entitlement = require_entitlement(db, str(request.state.user.id))
+        storage_limit = entitlement.limits.get("storage_mb", 0) * 1024 * 1024
+        used_storage = db.scalar(
+            select(func.coalesce(func.sum(ContentAttachment.size_bytes), 0)).where(
+                ContentAttachment.uploaded_by_user_id == str(request.state.user.id)
+            )
+        ) or 0
     suffix = Path(file.filename or "").suffix.lower()
     if not suffix or len(suffix) > 11 or not suffix[1:].isalnum():
         suffix = ".media"
@@ -847,10 +892,10 @@ async def upload_logo(request: Request, file: UploadFile) -> dict[str, str]:
     original_name = Path(file.filename or f"overlay{suffix}").name
     safe_stem = re.sub(r'[^\w.-]+', "_", Path(original_name).stem, flags=re.UNICODE).strip(" ._")
     safe_stem = (safe_stem or "overlay")[:60]
-    user_logos_dir = LOGOS_DIR / str(request.state.user.id)
-    user_logos_dir.mkdir(parents=True, exist_ok=True)
-    overlay_path = user_logos_dir / f"{token}_{safe_stem}{suffix}"
-    preview_path = user_logos_dir / f"{token}_preview.png"
+    project_files_dir = CONTENT_DIR / resolved_project_id / "files"
+    project_files_dir.mkdir(parents=True, exist_ok=True)
+    overlay_path = project_files_dir / f"{token}_{safe_stem}{suffix}"
+    preview_path = project_files_dir / f"{token}_preview.png"
     size_bytes = 0
     try:
         with overlay_path.open("wb") as destination:
@@ -860,6 +905,11 @@ async def upload_logo(request: Request, file: UploadFile) -> dict[str, str]:
                     raise HTTPException(
                         413,
                         f"Оверлей больше {MAX_OVERLAY_BYTES // 1024 // 1024} МБ",
+                    )
+                if storage_limit and int(used_storage) + size_bytes > storage_limit:
+                    raise HTTPException(
+                        413,
+                        "Оверлей не помещается в лимит хранилища текущего тарифа.",
                     )
                 destination.write(chunk)
     except Exception:
@@ -885,16 +935,27 @@ async def upload_logo(request: Request, file: UploadFile) -> dict[str, str]:
         raise HTTPException(400, "Не удалось создать предпросмотр оверлея") from exc
     try:
         with SessionLocal() as db:
-            db.add(
-                Overlay(
-                    id=token,
-                    user_id=str(request.state.user.id),
-                    original_name=original_name,
-                    storage_path=str(overlay_path.resolve()),
-                    mime_type=file.content_type,
-                    size_bytes=size_bytes,
-                )
+            overlay = Overlay(
+                id=token,
+                user_id=str(request.state.user.id),
+                original_name=original_name,
+                storage_path=str(overlay_path.resolve()),
+                mime_type=file.content_type,
+                size_bytes=size_bytes,
             )
+            attachment = ContentAttachment(
+                project_id=resolved_project_id,
+                uploaded_by_user_id=str(request.state.user.id),
+                original_name=original_name,
+                storage_path=str(overlay_path.resolve()),
+                mime_type=file.content_type,
+                source_type="overlay",
+                size_bytes=size_bytes,
+                asset_key=token,
+            )
+            db.add_all((overlay, attachment))
+            db.flush()
+            attachment_id = attachment.id
             db.commit()
     except SQLAlchemyError as exc:
         overlay_path.unlink(missing_ok=True)
@@ -904,6 +965,8 @@ async def upload_logo(request: Request, file: UploadFile) -> dict[str, str]:
         "token": token,
         "name": original_name,
         "preview_url": f"/api/logos/{token}/preview",
+        "library_attachment_id": attachment_id,
+        "project_id": resolved_project_id,
     }
 
 
@@ -922,10 +985,14 @@ def resolve_overlay_token(token: str, index: int, owner_id: str) -> tuple[Path, 
         )
     overlay_path = Path(overlay.storage_path).resolve() if overlay else None
     owner_directory = (LOGOS_DIR / owner_id).resolve()
+    content_directory = CONTENT_DIR.resolve()
     if (
         overlay_path is None
         or not overlay_path.is_file()
-        or not overlay_path.is_relative_to(owner_directory)
+        or not (
+            overlay_path.is_relative_to(owner_directory)
+            or overlay_path.is_relative_to(content_directory)
+        )
     ):
         raise HTTPException(404, "Оверлей не найден")
     display_name = str(overlay.original_name or f"overlay_{index}{overlay_path.suffix}")
@@ -937,9 +1004,13 @@ def overlay_preview(token: str, request: Request) -> FileResponse:
     overlay_path, _ = resolve_overlay_token(token, 1, str(request.state.user.id))
     preview_path = overlay_path.with_name(f"{token}_preview.png")
     owner_directory = (LOGOS_DIR / str(request.state.user.id)).resolve()
+    content_directory = CONTENT_DIR.resolve()
     if (
         not preview_path.is_file()
-        or not preview_path.resolve().is_relative_to(owner_directory)
+        or not (
+            preview_path.resolve().is_relative_to(owner_directory)
+            or preview_path.resolve().is_relative_to(content_directory)
+        )
     ):
         raise HTTPException(404, "Предпросмотр оверлея не найден")
     return FileResponse(

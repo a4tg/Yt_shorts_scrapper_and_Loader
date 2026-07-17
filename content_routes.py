@@ -24,6 +24,7 @@ from saas_models import (
     ContentRevision,
     Job,
     JobFile,
+    Overlay,
     ProjectFolder,
     User,
     WorkspaceMember,
@@ -636,6 +637,12 @@ def delete_attachment(
     attachment, _, member = _attachment_access(db, attachment_id, request.state.user.id)
     _require_editor(member)
     path = Path(attachment.storage_path)
+    overlay_preview = None
+    if attachment.source_type == "overlay":
+        overlay = db.get(Overlay, attachment.asset_key)
+        if overlay is not None:
+            db.delete(overlay)
+        overlay_preview = path.with_name(f"{attachment.asset_key}_preview.png")
     if attachment.is_current:
         previous = db.scalar(
             select(ContentAttachment)
@@ -650,6 +657,8 @@ def delete_attachment(
     db.delete(attachment)
     db.commit()
     path.unlink(missing_ok=True)
+    if overlay_preview is not None:
+        overlay_preview.unlink(missing_ok=True)
 
 
 @router.patch("/project-files/{attachment_id}")

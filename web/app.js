@@ -890,7 +890,11 @@ function renderLibrary() {
     }
     const title = document.createElement('h3'); title.textContent = item.name;
     const context = document.createElement('p');
-    context.textContent = item.source_type === 'ai' ? '✦ Создано AI' : (item.content_title || 'Файл проекта');
+    context.textContent = item.source_type === 'ai'
+      ? '✦ Создано AI'
+      : item.source_type === 'overlay'
+        ? 'Оверлей конструктора'
+        : (item.content_title || 'Файл проекта');
     const footer = document.createElement('footer');
     const size = document.createElement('span'); size.textContent = humanFileSize(item.size_bytes);
     const preview = document.createElement('button'); preview.className = 'text-button'; preview.type = 'button'; preview.textContent = 'Открыть';
@@ -1788,6 +1792,7 @@ async function uploadOverlayFile(file) {
   if (!upload) {
     upload = (async () => {
       const form = new FormData(); form.append('file', file);
+      if (state.currentProjectId) form.append('project_id', state.currentProjectId);
       const result = await api('/api/logos', { method: 'POST', body: form });
       state.logoTokens.set(key, result.token);
       state.overlayPreviewUrls.set(key, result.preview_url);
