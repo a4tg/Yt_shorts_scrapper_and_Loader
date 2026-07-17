@@ -61,5 +61,37 @@ class ContainerManifestTests(unittest.TestCase):
             self.assertIn(f"YT_LOADER_FEATURE_{name}", compose)
 
 
+class TelegramMonitorTests(unittest.TestCase):
+    def test_monitor_does_not_contain_a_real_telegram_token(self) -> None:
+        script = (ROOT / "deploy" / "telegram-monitor.sh").read_text(encoding="utf-8")
+        example = (
+            ROOT / "deploy" / "allasplanned-monitor.env.example"
+        ).read_text(encoding="utf-8")
+        self.assertIn("${TELEGRAM_BOT_TOKEN}", script)
+        self.assertIn("TELEGRAM_BOT_TOKEN=", example)
+        self.assertNotRegex(script + example, r"\b\d{8,12}:[A-Za-z0-9_-]{30,}\b")
+
+    def test_monitor_requires_consecutive_failures_and_reports_recovery(self) -> None:
+        script = (ROOT / "deploy" / "telegram-monitor.sh").read_text(encoding="utf-8")
+        self.assertIn("AAP_MONITOR_FAILURE_THRESHOLD", script)
+        self.assertIn('last_status" = "down"', script)
+        self.assertIn("Сервис восстановлен", script)
+        self.assertIn("Сбой сервиса", script)
+        self.assertIn("--test", script)
+
+    def test_systemd_timer_uses_hardened_oneshot_service(self) -> None:
+        service = (
+            ROOT / "deploy" / "allasplanned-monitor.service"
+        ).read_text(encoding="utf-8")
+        timer = (
+            ROOT / "deploy" / "allasplanned-monitor.timer"
+        ).read_text(encoding="utf-8")
+        self.assertIn("Type=oneshot", service)
+        self.assertIn("NoNewPrivileges=true", service)
+        self.assertIn("ProtectSystem=strict", service)
+        self.assertIn("StateDirectory=allasplanned-monitor", service)
+        self.assertIn("OnUnitActiveSec=1min", timer)
+
+
 if __name__ == "__main__":
     unittest.main()
