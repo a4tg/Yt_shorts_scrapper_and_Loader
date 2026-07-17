@@ -65,11 +65,32 @@ def _event(project_id: str, event_type: str, user_id: str, **payload: object) ->
     })
 
 
-def _validate_assignee(db: Session, workspace_id: str, user_id: str | None) -> None:
-    if user_id and not db.scalar(select(WorkspaceMember.id).where(
+def _validate_assignee(
+    db: Session,
+    workspace_id: str,
+    user_id: str | None,
+    *,
+    visibility: Visibility,
+) -> None:
+    if not user_id:
+        return
+    assignee = db.scalar(select(WorkspaceMember).where(
         WorkspaceMember.workspace_id == workspace_id, WorkspaceMember.user_id == user_id,
-    )):
+    ))
+    if assignee is None:
         raise HTTPException(400, "Ответственный должен состоять в рабочем пространстве.")
+    if visibility == "team" and assignee.role == "client":
+        raise HTTPException(400, "Клиента нельзя назначить на скрытое командное замечание.")
+
+
+def _require_decider(member: WorkspaceMember) -> None:
+    if member.role not in {"owner", "admin", "editor", "client"}:
+        raise HTTPException(403, "Эта роль не может принимать решение по материалу.")
+
+
+def _require_visible_review(review: AssetReview, member: WorkspaceMember) -> None:
+    if member.role == "client" and review.visibility != "client":
+        raise HTTPException(404, "Замечание не найдено.")
 
 
 def _validate_annotation(payload: ReviewCreate) -> None:
@@ -196,18 +217,23 @@ def create_asset_review(
     _validate_annotation(payload)
     if member.role == "client" and payload.visibility != "client":
         raise HTTPException(403, "Клиентские замечания должны быть видимы заказчику.")
-    _validate_assignee(db, project.workspace_id, payload.assignee_user_id)
+    visibility = payload.visibility
     if payload.parent_review_id:
         parent = db.get(AssetReview, payload.parent_review_id)
         if parent is None or parent.attachment_id != attachment.id:
             raise HTTPException(400, "Ответ относится к другому файлу.")
+        _require_visible_review(parent, member)
+        visibility = parent.visibility
+    _validate_assignee(
+        db, project.workspace_id, payload.assignee_user_id, visibility=visibility,
+    )
     review = AssetReview(
         attachment_id=attachment.id, parent_review_id=payload.parent_review_id,
         author_user_id=request.state.user.id, assignee_user_id=payload.assignee_user_id,
         body=payload.body.strip(), annotation_type=payload.annotation_type,
         x=payload.x, y=payload.y, width=payload.width, height=payload.height,
         time_seconds=payload.time_seconds, page_number=payload.page_number,
-        annotation_data=payload.annotation_data, visibility=payload.visibility, status="open",
+        annotation_data=payload.annotation_data, visibility=visibility, status="open",
     )
     db.add(review); db.commit()
     _event(attachment.project_id, "asset.review.created", request.state.user.id,
@@ -223,6 +249,7 @@ def update_asset_review(
     if review is None:
         raise HTTPException(404, "Замечание не найдено.")
     attachment, project, member = _attachment_access(db, review.attachment_id, request.state.user.id)
+    _require_visible_review(review, member)
     is_assignee = review.assignee_user_id == request.state.user.id
     is_author = review.author_user_id == request.state.user.id
     if not (has_role(member, "editor") or is_author or is_assignee):
@@ -239,7 +266,10 @@ def update_asset_review(
     if "assignee_user_id" in values:
         if not has_role(member, "editor"):
             raise HTTPException(403, "Ответственного назначает редактор.")
-        _validate_assignee(db, project.workspace_id, values["assignee_user_id"])
+        _validate_assignee(
+            db, project.workspace_id, values["assignee_user_id"],
+            visibility=review.visibility,
+        )
         review.assignee_user_id = values["assignee_user_id"]
     if "status" in values:
         review.status = values["status"]
@@ -259,6 +289,7 @@ def delete_asset_review(review_id: str, request: Request, db: Session = Depends(
     if review is None:
         raise HTTPException(404, "Замечание не найдено.")
     attachment, _, member = _attachment_access(db, review.attachment_id, request.state.user.id)
+    _require_visible_review(review, member)
     if review.author_user_id != request.state.user.id and not has_role(member, "admin"):
         raise HTTPException(403, "Удалить замечание может автор или администратор.")
     db.delete(review); db.commit()
@@ -271,6 +302,7 @@ def decide_asset(
     attachment_id: str, payload: ApprovalCreate, request: Request, db: Session = Depends(get_db),
 ) -> dict[str, object]:
     attachment, _, member = _attachment_access(db, attachment_id, request.state.user.id)
+    _require_decider(member)
     approval = db.scalar(select(AssetApproval).where(
         AssetApproval.attachment_id == attachment.id, AssetApproval.user_id == request.state.user.id,
     ))
@@ -288,7 +320,8 @@ def decide_asset(
 
 @router.delete("/content-attachments/{attachment_id}/approval", status_code=204)
 def clear_asset_decision(attachment_id: str, request: Request, db: Session = Depends(get_db)) -> None:
-    attachment, _, _ = _attachment_access(db, attachment_id, request.state.user.id)
+    attachment, _, member = _attachment_access(db, attachment_id, request.state.user.id)
+    _require_decider(member)
     db.execute(delete(AssetApproval).where(
         AssetApproval.attachment_id == attachment.id, AssetApproval.user_id == request.state.user.id,
     )); db.commit()

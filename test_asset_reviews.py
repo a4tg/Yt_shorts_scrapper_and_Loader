@@ -154,3 +154,72 @@ def test_team_reviews_are_hidden_from_client(tmp_path, monkeypatch) -> None:
     assert response.status_code == 201
     assert len(owner.get(f"/api/content-attachments/{asset['id']}/reviews").json()["reviews"]) == 1
     assert client.get(f"/api/content-attachments/{asset['id']}/reviews").json()["reviews"] == []
+
+
+def test_review_visibility_assignment_and_decision_roles_are_enforced(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(content_routes, "CONTENT_DIR", tmp_path)
+    owner, _ = register("review-security-owner")
+    viewer, viewer_user = register("review-security-viewer")
+    client, client_user = register("review-security-client")
+    workspace, project = project_for(owner)
+    add_member(owner, workspace["id"], viewer_user, "viewer")
+    add_member(owner, workspace["id"], client_user, "client")
+    asset = upload_pdf(owner, project["id"], "security.pdf")
+
+    hidden_assignment = owner.post(
+        f"/api/content-attachments/{asset['id']}/reviews", headers=csrf(owner),
+        json={
+            "body": "Внутренняя задача",
+            "visibility": "team",
+            "assignee_user_id": client_user["id"],
+        },
+    )
+    assert hidden_assignment.status_code == 400
+
+    hidden = owner.post(
+        f"/api/content-attachments/{asset['id']}/reviews", headers=csrf(owner),
+        json={"body": "Только для команды", "visibility": "team"},
+    ).json()
+    assert client.patch(
+        f"/api/asset-reviews/{hidden['id']}", headers=csrf(client),
+        json={"status": "resolved"},
+    ).status_code == 404
+    assert client.delete(
+        f"/api/asset-reviews/{hidden['id']}", headers=csrf(client),
+    ).status_code == 404
+
+    public = client.post(
+        f"/api/content-attachments/{asset['id']}/reviews", headers=csrf(client),
+        json={"body": "Комментарий клиента", "visibility": "client"},
+    ).json()
+    reply = owner.post(
+        f"/api/content-attachments/{asset['id']}/reviews", headers=csrf(owner),
+        json={
+            "body": "Ответ команды",
+            "visibility": "team",
+            "parent_review_id": public["id"],
+        },
+    )
+    assert reply.status_code == 201
+    assert reply.json()["visibility"] == "client"
+
+    assert viewer.put(
+        f"/api/content-attachments/{asset['id']}/approval", headers=csrf(viewer),
+        json={"decision": "approved"},
+    ).status_code == 403
+    assert viewer.delete(
+        f"/api/content-attachments/{asset['id']}/approval", headers=csrf(viewer),
+    ).status_code == 403
+
+    decided = client.put(
+        f"/api/content-attachments/{asset['id']}/approval", headers=csrf(client),
+        json={"decision": "changes_requested", "comment": "Нужна правка"},
+    )
+    assert decided.status_code == 200
+    assert any(item["is_own"] for item in decided.json()["approvals"])
+    assert client.delete(
+        f"/api/content-attachments/{asset['id']}/approval", headers=csrf(client),
+    ).status_code == 204
+    assert client.get(
+        f"/api/content-attachments/{asset['id']}/reviews",
+    ).json()["approval_state"] == "pending"

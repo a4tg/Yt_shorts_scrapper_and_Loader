@@ -14,6 +14,10 @@ function canEdit(context) {
   return ['owner', 'admin', 'editor'].includes(context?.workspace?.role);
 }
 
+function canDecide(context) {
+  return ['owner', 'admin', 'editor', 'client'].includes(context?.workspace?.role);
+}
+
 function reviewLabel(review) {
   if (review.annotation_type === 'timestamp') return `Таймкод ${timecode(review.time_seconds)}`;
   if (review.annotation_type === 'page') return `Страница ${review.page_number}`;
@@ -66,7 +70,7 @@ export function initAssetReviews({ bus, bridge }) {
     <section class="asset-approval-section">
       <div><strong>Согласование</strong><span class="asset-approval-state">Ожидает решения</span></div>
       <textarea rows="2" maxlength="10000" placeholder="Комментарий к решению"></textarea>
-      <footer><button data-decision="changes_requested" type="button">Нужны правки</button><button data-decision="approved" type="button">Согласовать</button></footer>
+      <footer><button data-decision-clear type="button">Отозвать моё решение</button><span></span><button data-decision="changes_requested" type="button">Нужны правки</button><button data-decision="approved" type="button">Согласовать</button></footer>
       <div class="asset-approval-list"></div>
     </section>`;
   layout.append(panel);
@@ -153,6 +157,12 @@ export function initAssetReviews({ bus, bridge }) {
     const summary = state.summary || {}; const list = panel.querySelector('.asset-approval-list'); list.replaceChildren();
     const label = { approved: 'Согласовано', changes_requested: 'Нужны правки', pending: 'Ожидает решения' }[summary.approval_state] || 'Ожидает решения';
     const status = panel.querySelector('.asset-approval-state'); status.textContent = label; status.dataset.state = summary.approval_state || 'pending';
+    const allowed = canDecide(state.context);
+    panel.querySelector('.asset-approval-section textarea').disabled = !allowed;
+    panel.querySelectorAll('[data-decision]').forEach((button) => { button.disabled = !allowed; });
+    panel.querySelector('[data-decision-clear]').classList.toggle(
+      'hidden', !allowed || !(summary.approvals || []).some((approval) => approval.is_own),
+    );
     for (const approval of summary.approvals || []) {
       const row = node('div'); row.append(node('b', '', approval.decision === 'approved' ? '✓' : '!'), node('span', '', `${approval.user?.name || 'Участник'} · ${approval.comment || label}`)); list.append(row);
     }
@@ -244,6 +254,13 @@ export function initAssetReviews({ bus, bridge }) {
     } catch (error) { notifyError(error); }
   }
 
+  async function clearDecision() {
+    try {
+      await bridge.api(`/api/content-attachments/${state.asset.id}/approval`, { method: 'DELETE' });
+      await loadReviewData(state.asset);
+    } catch (error) { notifyError(error); }
+  }
+
   async function uploadVersion(event) {
     event.preventDefault(); const submit = event.submitter; submit.disabled = true; const status = versionForm.querySelector('small'); status.textContent = 'Загружаем новую версию…';
     try {
@@ -313,8 +330,14 @@ export function initAssetReviews({ bus, bridge }) {
     if (versionId) bus.emit('asset:open', { asset: state.versions.find((item) => item.id === versionId), assets: state.versions, projectId: state.asset.project_id });
     const compareId = event.target.closest('[data-compare-id]')?.dataset.compareId; if (compareId) compare(state.versions.find((item) => item.id === compareId));
     const replyId = event.target.closest('[data-reply-id]')?.dataset.replyId;
-    if (replyId) { resetAnnotation(); state.parentId = replyId; const context = form.querySelector('.asset-review-context'); context.querySelector('span').textContent = 'Ответ на замечание'; context.classList.remove('hidden'); form.elements.body.focus(); }
+    if (replyId) {
+      resetAnnotation(); state.parentId = replyId;
+      const parent = state.reviews.find((review) => review.id === replyId);
+      if (parent) form.elements.visibility.value = parent.visibility;
+      const context = form.querySelector('.asset-review-context'); context.querySelector('span').textContent = 'Ответ на замечание'; context.classList.remove('hidden'); form.elements.body.focus();
+    }
     const decision = event.target.closest('[data-decision]')?.dataset.decision; if (decision) decide(decision);
+    if (event.target.closest('[data-decision-clear]')) clearDecision();
   });
   panel.addEventListener('change', async (event) => {
     const id = event.target.dataset.reviewStatus; if (!id) return;
