@@ -31,6 +31,7 @@ PUBLIC_API_PATHS = {
     "/api/auth/verification/confirm",
     "/api/auth/password/forgot",
     "/api/auth/password/reset",
+    "/api/legal/config",
     "/api/payments/yookassa/webhook",
 }
 password_hasher = PasswordHasher()

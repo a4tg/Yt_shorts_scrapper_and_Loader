@@ -1797,6 +1797,7 @@ function openCheckoutDialog(plan, sourceButton) {
   $('#checkout-dialog-price').textContent = `${formatPlanPrice(plan)} / месяц`;
   $('#checkout-dialog-status').textContent = '';
   $('#checkout-recurring-consent').checked = false;
+  $('#checkout-offer-consent').checked = false;
   $('#checkout-dialog-submit').disabled = true;
   $('#checkout-dialog').showModal();
   window.AAPAppMotion?.dialogFromSource?.(
@@ -1804,9 +1805,14 @@ function openCheckoutDialog(plan, sourceButton) {
   );
 }
 
-$('#checkout-recurring-consent').addEventListener('change', (event) => {
-  $('#checkout-dialog-submit').disabled = !event.currentTarget.checked;
-});
+function syncCheckoutConsent() {
+  $('#checkout-dialog-submit').disabled = !(
+    $('#checkout-recurring-consent').checked && $('#checkout-offer-consent').checked
+  );
+}
+
+$('#checkout-recurring-consent').addEventListener('change', syncCheckoutConsent);
+$('#checkout-offer-consent').addEventListener('change', syncCheckoutConsent);
 
 $('#checkout-dialog-cancel').addEventListener('click', () => {
   pendingCheckout = null;
@@ -1815,7 +1821,11 @@ $('#checkout-dialog-cancel').addEventListener('click', () => {
 
 $('#checkout-confirm-form').addEventListener('submit', async (event) => {
   event.preventDefault();
-  if (!pendingCheckout || !$('#checkout-recurring-consent').checked) return;
+  if (
+    !pendingCheckout
+    || !$('#checkout-recurring-consent').checked
+    || !$('#checkout-offer-consent').checked
+  ) return;
   const { plan, sourceButton } = pendingCheckout;
   await beginCheckout(plan.id, $('#checkout-dialog-submit'), sourceButton);
 });
@@ -1825,7 +1835,11 @@ async function beginCheckout(planId, button, sourceButton = button) {
   try {
     const payment = await api('/api/payments/checkout', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ plan_id: planId, recurring_consent: true })
+      body: JSON.stringify({
+        plan_id: planId,
+        recurring_consent: true,
+        offer_accepted: true
+      })
     });
     if (payment.status === 'succeeded') {
       pendingCheckout = null;
@@ -1913,7 +1927,9 @@ $('#register-form').addEventListener('submit', (event) => {
   event.preventDefault();
   submitAuthForm(event.currentTarget, '/api/auth/register', $('#register-status'), {
     display_name: $('#register-name').value, email: $('#register-email').value,
-    password: $('#register-password').value
+    password: $('#register-password').value,
+    terms_accepted: $('#register-legal-consent').checked,
+    privacy_accepted: $('#register-legal-consent').checked
   });
 });
 

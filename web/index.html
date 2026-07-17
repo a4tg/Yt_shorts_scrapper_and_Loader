@@ -64,6 +64,11 @@
         <label><span>Имя</span><input id="register-name" type="text" autocomplete="name" maxlength="120"></label>
         <label><span>Email</span><input id="register-email" type="email" autocomplete="email" required></label>
         <label><span>Пароль</span><input id="register-password" type="password" autocomplete="new-password" minlength="10" maxlength="128" required></label>
+        <label class="checkout-consent">
+          <input id="register-legal-consent" type="checkbox" required>
+          <span>Я принимаю <a href="/terms" target="_blank" rel="noopener">условия использования</a> и
+          <a href="/personal-data-consent" target="_blank" rel="noopener">согласие на обработку персональных данных</a>.</span>
+        </label>
         <button class="primary" type="submit">Зарегистрироваться</button>
         <div id="register-status" class="auth-status" aria-live="polite"></div>
       </form>
@@ -641,6 +646,11 @@
       <label class="checkout-consent">
         <input id="checkout-recurring-consent" type="checkbox" required>
         <span>Я понимаю условия и согласен на ежемесячное автопродление подписки.</span>
+      </label>
+      <label class="checkout-consent">
+        <input id="checkout-offer-consent" type="checkbox" required>
+        <span>Я принимаю <a href="/offer" target="_blank" rel="noopener">публичную оферту</a> и
+        <a href="/refund-policy" target="_blank" rel="noopener">условия возврата</a>.</span>
       </label>
       <div class="dialog-actions">
         <button id="checkout-dialog-cancel" class="ghost" type="button">Отмена</button>

@@ -1,3 +1,4 @@
+import os
 import tempfile
 from pathlib import Path
 
@@ -51,6 +52,20 @@ def isolated_test_database():
     temp_dir = tempfile.TemporaryDirectory()
     database_path = Path(temp_dir.name) / "test.db"
     database_url = f"sqlite:///{database_path.as_posix()}"
+    test_legal_environment = {
+        "YT_LOADER_ENABLE_PAYMENTS": "true",
+        "YT_LOADER_REQUIRE_LEGAL_ACCEPTANCE": "false",
+        "YT_LOADER_LEGAL_SELLER_NAME": "Test Seller",
+        "YT_LOADER_LEGAL_SELLER_INN": "1234567890",
+        "YT_LOADER_LEGAL_SELLER_ADDRESS": "Test address",
+        "YT_LOADER_LEGAL_SUPPORT_EMAIL": "support@example.com",
+        "YT_LOADER_LEGAL_VERSION": "test-version",
+        "YT_LOADER_LEGAL_DOCUMENTS_APPROVED": "true",
+    }
+    previous_environment = {
+        key: os.environ.get(key) for key in test_legal_environment
+    }
+    os.environ.update(test_legal_environment)
     config = Config(str(Path(__file__).resolve().parent / "alembic.ini"))
     config.attributes["database_url"] = database_url
     command.upgrade(config, "head")
@@ -77,6 +92,11 @@ def isolated_test_database():
         server.SessionLocal = original_server_sessions
         engine.dispose()
         temp_dir.cleanup()
+        for key, value in previous_environment.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 @pytest.fixture(autouse=True)

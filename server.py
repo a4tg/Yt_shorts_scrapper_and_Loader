@@ -36,6 +36,7 @@ from decision_routes import router as decision_router
 from messaging_routes import router as messaging_router
 from payment_routes import router as payment_router
 from beta_routes import router as beta_router
+from legal_routes import router as legal_router
 from workspace_routes import router as workspace_router
 from auth_service import (
     PUBLIC_API_PATHS,
@@ -504,6 +505,7 @@ app.include_router(decision_router)
 app.include_router(messaging_router)
 app.include_router(payment_router)
 app.include_router(beta_router)
+app.include_router(legal_router)
 app.include_router(workspace_router)
 
 
@@ -522,7 +524,10 @@ async def browser_security_headers(request: Request, call_next):
             response.headers["Cache-Control"] = "public, max-age=86400, stale-while-revalidate=604800"
         else:
             response.headers["Cache-Control"] = "public, max-age=0, must-revalidate"
-    elif path in {"/", "/app", "/app/", "/privacy", "/terms"}:
+    elif path in {
+        "/", "/app", "/app/", "/privacy", "/terms", "/offer",
+        "/personal-data-consent", "/refund-policy", "/storage-policy",
+    }:
         response.headers["Cache-Control"] = "no-cache"
     elif path.startswith("/api/"):
         response.headers.setdefault("Cache-Control", "no-store")
@@ -1247,16 +1252,6 @@ def application_index() -> FileResponse:
 @app.get("/", response_class=FileResponse)
 def landing() -> FileResponse:
     return FileResponse(WEB_DIR / "landing.html")
-
-
-@app.get("/privacy", response_class=FileResponse)
-def privacy() -> FileResponse:
-    return FileResponse(WEB_DIR / "privacy.html")
-
-
-@app.get("/terms", response_class=FileResponse)
-def terms() -> FileResponse:
-    return FileResponse(WEB_DIR / "terms.html")
 
 
 @app.get("/favicon.ico", response_class=FileResponse)

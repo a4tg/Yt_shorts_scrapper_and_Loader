@@ -31,6 +31,7 @@ from email_service import (
     send_password_reset_email,
     send_verification_email,
 )
+from legal_service import legal_acceptance_required, legal_config
 from saas_models import User
 from workspace_service import create_personal_workspace
 
@@ -43,6 +44,8 @@ class RegisterRequest(BaseModel):
     email: str = Field(min_length=3, max_length=320)
     password: SecretStr
     display_name: str | None = Field(default=None, max_length=120)
+    terms_accepted: bool = False
+    privacy_accepted: bool = False
 
 
 class LoginRequest(BaseModel):
@@ -108,11 +111,14 @@ def user_payload(db: Session, user: User) -> dict[str, object]:
 
 @router.get("/config")
 def auth_config() -> dict[str, object]:
+    legal = legal_config()
     return {
         "registration_enabled": registration_enabled(),
         "email_verification_required": email_verification_required(),
         "email_delivery_enabled": email_features_configured(),
         "password_reset_enabled": email_features_configured(),
+        "legal_acceptance_required": legal_acceptance_required(),
+        "legal_version": legal.version,
         "features": workspace_depth_features(),
     }
 
@@ -135,6 +141,13 @@ def register(
 ) -> dict[str, object]:
     if not registration_enabled():
         raise HTTPException(403, "Регистрация временно закрыта.")
+    if legal_acceptance_required() and not (
+        payload.terms_accepted and payload.privacy_accepted
+    ):
+        raise HTTPException(
+            400,
+            "Подтвердите условия использования и согласие на обработку персональных данных.",
+        )
     verification_required = email_verification_required()
     if verification_required and not email_features_configured():
         raise HTTPException(503, "Регистрация временно недоступна: почтовая доставка не настроена.")
@@ -153,6 +166,14 @@ def register(
         display_name=display_name,
         email_verified_at=None if verification_required else utc_now(),
         trial_expires_at=utc_now() + timedelta(days=trial_days()),
+        legal_accepted_at=(
+            utc_now() if payload.terms_accepted and payload.privacy_accepted else None
+        ),
+        legal_version=(
+            legal_config().version
+            if payload.terms_accepted and payload.privacy_accepted
+            else None
+        ),
     )
     db.add(user)
     verification_token = None

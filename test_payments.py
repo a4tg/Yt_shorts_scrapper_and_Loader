@@ -108,7 +108,11 @@ def create_checkout(client: TestClient, provider: FakeYooKassa, plan_id: str = "
     ), patch("payment_routes.get_provider", return_value=provider):
         return client.post(
             "/api/payments/checkout",
-            json={"plan_id": plan_id, "recurring_consent": True},
+            json={
+                "plan_id": plan_id,
+                "recurring_consent": True,
+                "offer_accepted": True,
+            },
         )
 
 
@@ -121,10 +125,33 @@ def test_checkout_requires_explicit_recurring_consent() -> None:
     ), patch("payment_routes.get_provider", return_value=provider):
         response = client.post(
             "/api/payments/checkout",
-            json={"plan_id": "creator", "recurring_consent": False},
+            json={
+                "plan_id": "creator",
+                "recurring_consent": False,
+                "offer_accepted": True,
+            },
         )
     assert response.status_code == 400
     assert "автопродление" in response.json()["detail"]
+    assert provider.create_calls == []
+
+
+def test_checkout_requires_explicit_offer_acceptance() -> None:
+    client, _user = registered_client()
+    provider = FakeYooKassa()
+    with patch.dict(
+        os.environ,
+        {"YT_LOADER_PUBLIC_BASE_URL": "https://shorts.example.test"},
+    ), patch("payment_routes.get_provider", return_value=provider):
+        response = client.post(
+            "/api/payments/checkout",
+            json={
+                "plan_id": "creator",
+                "recurring_consent": True,
+                "offer_accepted": False,
+            },
+        )
+    assert response.status_code == 400
     assert provider.create_calls == []
 
 

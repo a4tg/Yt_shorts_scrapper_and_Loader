@@ -27,6 +27,8 @@ EXPECTED_TABLES = {
     "credit_ledger",
     "webhook_events",
     "account_tokens",
+    "payment_refunds",
+    "admin_audit_log",
     "workspaces",
     "workspace_members",
     "projects",
@@ -82,7 +84,14 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertIn("attempts", job_columns)
         self.assertTrue(job_columns["user_id"]["nullable"])
         user_columns = {column["name"] for column in inspect(engine).get_columns("users")}
-        self.assertTrue({"credit_balance", "reserved_credits"}.issubset(user_columns))
+        self.assertTrue(
+            {
+                "credit_balance",
+                "reserved_credits",
+                "legal_accepted_at",
+                "legal_version",
+            }.issubset(user_columns)
+        )
         ledger_columns = {column["name"] for column in inspect(engine).get_columns("credit_ledger")}
         self.assertIn("idempotency_key", ledger_columns)
         payment_columns = {column["name"] for column in inspect(engine).get_columns("payments")}

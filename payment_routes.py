@@ -18,6 +18,7 @@ from payment_service import (
     public_base_url,
 )
 from saas_models import Payment
+from legal_service import commercial_payments_ready, legal_config
 from yookassa_client import (
     YooKassaAPIError,
     YooKassaClient,
@@ -33,6 +34,7 @@ MAX_WEBHOOK_BYTES = 128 * 1024
 class CheckoutRequest(BaseModel):
     plan_id: str = Field(min_length=1, max_length=40, pattern=r"^[a-z0-9_-]+$")
     recurring_consent: bool = False
+    offer_accepted: bool = False
 
 
 def get_provider() -> YooKassaClient:
@@ -48,15 +50,28 @@ def payment_config() -> dict[str, object]:
             public_base_url()
         except PaymentNotConfiguredError:
             ready = False
+    legal = legal_config()
+    ready = commercial_payments_ready(provider.configured, ready)
     return {
         "enabled": ready,
         "provider": "yookassa",
         "recurring": True,
+        "legal_ready": legal.complete,
     }
 
 
 @router.post("/checkout", status_code=201)
 def create_checkout(payload: CheckoutRequest, request: Request) -> dict[str, object]:
+    provider = get_provider()
+    public_url_ready = True
+    try:
+        public_base_url()
+    except PaymentNotConfiguredError:
+        public_url_ready = False
+    if not commercial_payments_ready(provider.configured, public_url_ready):
+        raise HTTPException(503, "Приём платежей ещё не активирован владельцем сервиса.")
+    if not payload.offer_accepted:
+        raise HTTPException(400, "Подтвердите принятие публичной оферты.")
     if not payload.recurring_consent:
         raise HTTPException(
             400,
@@ -68,7 +83,7 @@ def create_checkout(payload: CheckoutRequest, request: Request) -> dict[str, obj
     try:
         return create_checkout_payment(
             lambda: database.SessionLocal(),
-            get_provider(),
+            provider,
             str(request.state.user.id),
             payload.plan_id,
         )

@@ -40,6 +40,8 @@ class User(TimestampMixin, Base):
         Boolean, nullable=False, default=False, server_default=false(), index=True
     )
     email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    legal_accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    legal_version: Mapped[str | None] = mapped_column(String(40))
     credit_balance: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     reserved_credits: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     trial_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
