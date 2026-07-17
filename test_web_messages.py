@@ -17,6 +17,8 @@ class WebMessagesTests(unittest.TestCase):
             "message-list",
             "message-composer",
             "message-attachment",
+            "message-local-files",
+            "message-pending-files",
             "chat-details",
             "content-discussion-button",
         ):
@@ -53,13 +55,26 @@ class WebMessagesTests(unittest.TestCase):
         self.assertIn("new EventSource", script)
         self.assertIn("aapChatAnywhereLayoutV2", script)
         self.assertIn("mentioned_user_ids", script)
+        self.assertIn('input type="file" multiple', script)
+        self.assertIn("/attachments`", script)
+        self.assertIn("chat-anywhere-media-preview", script)
         self.assertIn("/pinned-messages", script)
         self.assertIn("data-mode=docked", styles)
         self.assertIn("data-mode=expanded", styles)
         self.assertIn("resize:both", styles)
         self.assertIn("Math.hypot(dx, dy) < 6", script)
         self.assertIn("lostpointercapture", script)
+        self.assertIn("new ResizeObserver(updateTypographyScale)", script)
+        self.assertIn("--chat-fs-md", script)
         self.assertIn(".chat-anywhere-messages{grid-row:3}", layout_styles)
+
+    def test_messages_and_floating_chat_scale_typography_with_their_containers(self) -> None:
+        message_styles = (ROOT / "web" / "messages.css").read_text(encoding="utf-8")
+        floating_styles = (ROOT / "web" / "chat-anywhere.css").read_text(encoding="utf-8")
+        self.assertIn("container-type:inline-size", message_styles)
+        self.assertIn("--messages-fs-md:clamp(", message_styles)
+        self.assertIn('.workspace-page[data-page="messages"]{width:min(1800px,100%)}', message_styles)
+        self.assertIn("font-size:var(--chat-fs-md)", floating_styles)
 
 
 if __name__ == "__main__":

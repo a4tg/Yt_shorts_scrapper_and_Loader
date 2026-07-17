@@ -9,7 +9,7 @@ const state = {
   workspaceMembers: [], approvalWorkflow: null, contentItems: [], contentView: 'board',
   libraryItems: [], libraryFolders: [], currentLibraryFolderId: null,
   conversations: [], activeConversationId: null, messages: [], messageReplyTo: null,
-  messageHasMore: false, messagePollTimer: null,
+  messageHasMore: false, messagePollTimer: null, messageLocalFiles: [],
   editingContentId: null, aiConfig: null, aiResultJobs: {}, adminLoaded: false
 };
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -1134,12 +1134,30 @@ function renderMessageAttachment(message) {
     const copy = document.createElement('div'); const title = document.createElement('strong'); title.textContent = message.attachment_name;
     const note = document.createElement('small'); note.textContent = 'Файл удалён из проекта'; copy.append(title, note); missing.append(icon, copy); return missing;
   }
-  const attachment = message.attachment; const link = document.createElement('a'); link.className = 'message-attachment'; link.href = attachment.download_url;
-  link.dataset.assetId = attachment.id; link.dataset.projectId = state.currentProjectId || '';
+  const attachment = message.attachment;
+  const kind = attachment.preview?.kind
+    || (attachment.mime_type?.startsWith('image/') ? 'image'
+      : attachment.mime_type?.startsWith('video/') ? 'video'
+        : attachment.mime_type?.startsWith('audio/') ? 'audio' : 'file');
+  const card = document.createElement('div'); card.className = `message-attachment-card ${kind}`;
+  if (kind === 'image') {
+    const preview = document.createElement('a'); preview.className = 'message-media-preview';
+    preview.href = attachment.preview_url; preview.dataset.assetId = attachment.id;
+    preview.dataset.projectId = state.currentProjectId || '';
+    const image = document.createElement('img'); image.src = attachment.preview_url;
+    image.alt = attachment.name; image.loading = 'lazy'; preview.append(image); card.append(preview);
+  } else if (kind === 'video') {
+    const video = document.createElement('video'); video.controls = true; video.preload = 'metadata';
+    video.src = attachment.preview_url; video.setAttribute('playsinline', ''); card.append(video);
+  } else if (kind === 'audio') {
+    const audio = document.createElement('audio'); audio.controls = true; audio.preload = 'metadata';
+    audio.src = attachment.preview_url; card.append(audio);
+  }
+  const link = document.createElement('a'); link.className = 'message-attachment'; link.href = attachment.download_url; link.download = '';
   const icon = document.createElement('span'); icon.textContent = (attachment.name.split('.').pop() || 'FILE').slice(0, 4).toUpperCase();
   const copy = document.createElement('div'); const title = document.createElement('strong'); title.textContent = attachment.name;
   const size = document.createElement('small'); size.textContent = humanFileSize(attachment.size_bytes); copy.append(title, size);
-  const arrow = document.createElement('b'); arrow.textContent = '↓'; link.append(icon, copy, arrow); return link;
+  const arrow = document.createElement('b'); arrow.textContent = '↓'; link.append(icon, copy, arrow); card.append(link); return card;
 }
 
 function renderMessages({ scrollToBottom = false } = {}) {
@@ -1214,7 +1232,49 @@ function populateMessageAttachmentSelect() {
   for (const item of state.libraryItems) { const option = document.createElement('option'); option.value = item.id; option.textContent = item.name; select.append(option); }
 }
 
+function validateMessageLocalFiles(files) {
+  if (files.length > 10) throw new Error('За одно сообщение можно выбрать не более 10 файлов.');
+  for (const file of files) {
+    const extension = file.name.split('.').pop()?.toLowerCase() || '';
+    if (!supportedProjectFileExtensions.has(extension)) {
+      throw new Error(`Формат файла «${file.name}» не поддерживается.`);
+    }
+    if (!file.size) throw new Error(`Файл «${file.name}» пуст.`);
+    if (file.size > 250 * 1024 * 1024) throw new Error(`Файл «${file.name}» больше 250 МБ.`);
+  }
+}
+
+function renderMessageLocalFiles() {
+  const container = $('#message-pending-files'); container.replaceChildren();
+  for (const [index, file] of state.messageLocalFiles.entries()) {
+    const chip = document.createElement('span'); chip.className = 'message-pending-file';
+    const name = document.createElement('strong'); name.textContent = file.name;
+    const size = document.createElement('small'); size.textContent = humanFileSize(file.size);
+    const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = '×';
+    remove.setAttribute('aria-label', `Убрать ${file.name}`);
+    remove.addEventListener('click', () => {
+      state.messageLocalFiles.splice(index, 1); renderMessageLocalFiles();
+    });
+    chip.append(name, size, remove); container.append(chip);
+  }
+  container.classList.toggle('hidden', !state.messageLocalFiles.length);
+  $('.message-local-file-picker').textContent = state.messageLocalFiles.length
+    ? `↑ Выбрано: ${state.messageLocalFiles.length}`
+    : '↑ С компьютера';
+}
+
+async function uploadConversationFile(conversationId, file) {
+  const form = new FormData(); form.append('file', file);
+  return api(`/api/conversations/${conversationId}/attachments`, {
+    method: 'POST', body: form,
+  });
+}
+
 async function openConversation(conversationId, { preserveScroll = false } = {}) {
+  if (state.activeConversationId !== conversationId) {
+    state.messageLocalFiles = []; $('#message-local-files').value = ''; renderMessageLocalFiles();
+    $('#message-attachment').value = ''; $('.message-attachment-picker span').textContent = '＋ Из проекта';
+  }
   state.activeConversationId = conversationId; clearMessageReply(); renderConversationList();
   const conversation = activeConversation();
   $('#chat-kind').textContent = conversationKindLabels[conversation.kind]; $('#chat-title').textContent = conversation.name;
@@ -2478,29 +2538,66 @@ $('#conversation-form').addEventListener('submit', async (event) => {
 
 $('#message-composer').addEventListener('submit', async (event) => {
   event.preventDefault(); if (!state.activeConversationId) return;
-  const submit = event.submitter; const body = $('#message-body').value.trim(); const attachmentId = $('#message-attachment').value || null;
-  if (!body && !attachmentId) return;
+  const submit = event.submitter || $('#message-composer button[type="submit"]');
+  const body = $('#message-body').value.trim();
+  const attachmentId = $('#message-attachment').value || null;
+  const localFiles = [...state.messageLocalFiles];
+  if (!body && !attachmentId && !localFiles.length) return;
   submit.disabled = true;
   try {
-    const message = await api(`/api/conversations/${state.activeConversationId}/messages`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ body: body || null, attachment_id: attachmentId, reply_to_message_id: state.messageReplyTo?.id || null })
-    });
-    state.messages.push(message); $('#message-body').value = ''; $('#message-attachment').value = ''; clearMessageReply();
-    $('.message-attachment-picker span').textContent = '＋ Файл';
+    validateMessageLocalFiles(localFiles);
+    const uploaded = [];
+    for (const file of localFiles) {
+      submit.textContent = `Загрузка ${uploaded.length + 1}/${localFiles.length}…`;
+      uploaded.push(await uploadConversationFile(state.activeConversationId, file));
+    }
+    const attachmentIds = [
+      ...(attachmentId ? [attachmentId] : []),
+      ...uploaded.map((item) => item.id),
+    ];
+    if (!attachmentIds.length) attachmentIds.push(null);
+    const created = [];
+    for (const [index, currentAttachmentId] of attachmentIds.entries()) {
+      created.push(await api(`/api/conversations/${state.activeConversationId}/messages`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          body: index === 0 ? body || null : null,
+          attachment_id: currentAttachmentId,
+          reply_to_message_id: index === 0 ? state.messageReplyTo?.id || null : null,
+        }),
+      }));
+    }
+    state.messages.push(...created);
+    for (const attachment of uploaded) {
+      if (!state.libraryItems.some((item) => item.id === attachment.id)) state.libraryItems.unshift(attachment);
+    }
+    $('#message-body').value = ''; $('#message-attachment').value = ''; $('#message-local-files').value = '';
+    state.messageLocalFiles = []; renderMessageLocalFiles(); populateMessageAttachmentSelect(); clearMessageReply();
+    $('.message-attachment-picker span').textContent = '＋ Из проекта';
     const conversation = activeConversation();
-    if (conversation) { conversation.last_message = message; conversation.updated_at = message.created_at; conversation.unread_count = 0; }
+    const lastMessage = created[created.length - 1];
+    if (conversation) { conversation.last_message = lastMessage; conversation.updated_at = lastMessage.created_at; conversation.unread_count = 0; }
     renderConversationList();
     renderMessages({ scrollToBottom: true });
   } catch (error) { showWorkspaceError(error); }
-  finally { submit.disabled = false; }
+  finally { submit.disabled = false; submit.innerHTML = 'Отправить <span>↗</span>'; }
 });
 $('#message-body').addEventListener('keydown', (event) => {
   if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); $('#message-composer').requestSubmit(); }
 });
 $('#message-attachment').addEventListener('change', (event) => {
   const option = event.target.selectedOptions[0];
-  $('.message-attachment-picker span').textContent = event.target.value ? `＋ ${option.textContent}` : '＋ Файл';
+  $('.message-attachment-picker span').textContent = event.target.value ? `＋ ${option.textContent}` : '＋ Из проекта';
+});
+$('#message-local-files').addEventListener('change', (event) => {
+  try {
+    const selected = [...event.target.files];
+    validateMessageLocalFiles(selected);
+    state.messageLocalFiles = selected;
+    renderMessageLocalFiles();
+  } catch (error) {
+    event.target.value = ''; state.messageLocalFiles = []; renderMessageLocalFiles(); showWorkspaceError(error);
+  }
 });
 $('#cancel-message-reply').addEventListener('click', clearMessageReply);
 $('#load-older-messages').addEventListener('click', async () => {

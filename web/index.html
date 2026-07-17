@@ -233,7 +233,13 @@
           <form id="message-composer" class="message-composer">
             <div id="message-reply-preview" class="message-reply-preview hidden"><div><small>Ответ на сообщение</small><strong></strong></div><button id="cancel-message-reply" class="icon-button" type="button" aria-label="Отменить ответ">×</button></div>
             <textarea id="message-body" rows="2" maxlength="10000" placeholder="Напишите сообщение…" aria-label="Текст сообщения"></textarea>
-            <div class="message-composer-actions"><label class="message-attachment-picker"><span>＋ Файл</span><select id="message-attachment" aria-label="Прикрепить файл из проекта"><option value="">Без вложения</option></select></label><small>Enter — отправить · Shift+Enter — новая строка</small><button class="primary" type="submit">Отправить <span>↗</span></button></div>
+            <div id="message-pending-files" class="message-pending-files hidden" aria-live="polite"></div>
+            <div class="message-composer-actions">
+              <input id="message-local-files" class="visually-hidden-file" type="file" multiple accept="image/*,video/*,audio/*,.pdf,.docx,.xlsx,.pptx,.odt,.ods,.odp,.rtf,.txt,.md,.csv,.tsv,.json,.srt,.vtt">
+              <label class="message-local-file-picker" for="message-local-files">↑ С компьютера</label>
+              <label class="message-attachment-picker"><span>＋ Из проекта</span><select id="message-attachment" aria-label="Прикрепить файл из проекта"><option value="">Без вложения</option></select></label>
+              <small>Enter — отправить · Shift+Enter — новая строка</small><button class="primary" type="submit">Отправить <span>↗</span></button>
+            </div>
           </form>
         </section>
         <aside id="chat-details" class="chat-details">

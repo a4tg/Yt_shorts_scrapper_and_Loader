@@ -1,4 +1,10 @@
 const REACTIONS = ['👍', '❤️', '🔥', '🎉', '👀', '✅'];
+const CHAT_FILE_EXTENSIONS = new Set([
+  'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tif', 'tiff', 'mp4', 'm4v', 'mov', 'webm',
+  'mkv', 'avi', 'mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg', 'opus', 'pdf', 'docx', 'xlsx',
+  'pptx', 'odt', 'ods', 'odp', 'rtf', 'txt', 'md', 'csv', 'tsv', 'json', 'srt', 'vtt',
+]);
+const MAX_CHAT_FILE_BYTES = 250 * 1024 * 1024;
 // V2 intentionally resets layouts saved by the pre-hotfix unbounded resizer.
 const LAYOUT_KEY = 'aapChatAnywhereLayoutV2';
 
@@ -30,7 +36,7 @@ export function initChatAnywhere({ bus, router, bridge }) {
     context: bridge?.getContext?.() || null,
     conversations: [], messages: [], library: [], members: [],
     activeConversationId: null, replyTo: null, mentionedIds: new Set(),
-    source: null, refreshTimer: null, projectId: null, opened: false,
+    source: null, refreshTimer: null, projectId: null, opened: false, localFiles: [],
   };
   const layout = { mode: 'floating', left: null, top: null, width: 480, height: 680, ...loadLayout() };
   if (!['floating', 'docked', 'minimized', 'expanded'].includes(layout.mode)) layout.mode = 'floating';
@@ -69,8 +75,10 @@ export function initChatAnywhere({ bus, router, bridge }) {
         <div class="chat-anywhere-mentions hidden"></div>
         <form class="chat-anywhere-composer">
           <textarea rows="2" maxlength="10000" placeholder="Напишите сообщение…" aria-label="Текст сообщения"></textarea>
+          <div class="chat-anywhere-pending-files hidden" aria-live="polite"></div>
           <footer>
-            <label class="chat-anywhere-attachment"><span>＋ Файл</span><select aria-label="Прикрепить файл"><option value="">Без вложения</option></select></label>
+            <label class="chat-anywhere-local-file"><input type="file" multiple accept="image/*,video/*,audio/*,.pdf,.docx,.xlsx,.pptx,.odt,.ods,.odp,.rtf,.txt,.md,.csv,.tsv,.json,.srt,.vtt"><span>↑ С компьютера</span></label>
+            <label class="chat-anywhere-attachment"><span>＋ Из проекта</span><select aria-label="Прикрепить файл из проекта"><option value="">Без вложения</option></select></label>
             <button data-chat-action="mention" type="button" aria-label="Упомянуть участника">@</button>
             <span></span><button class="primary" type="submit">Отправить ↗</button>
           </footer>
@@ -85,8 +93,22 @@ export function initChatAnywhere({ bus, router, bridge }) {
   const composer = $('.chat-anywhere-composer');
   const textarea = composer.querySelector('textarea');
   const attachmentSelect = composer.querySelector('select');
+  const localFileInput = composer.querySelector('input[type="file"]');
+  const pendingFiles = $('.chat-anywhere-pending-files');
   const mentionPanel = $('.chat-anywhere-mentions');
   const pinsPanel = $('.chat-anywhere-pins');
+  let typographyObserver = null;
+
+  function updateTypographyScale() {
+    const width = Math.max(360, shell.clientWidth || Number(layout.width) || 480);
+    const height = Math.max(460, shell.clientHeight || Number(layout.height) || 680);
+    const scale = Math.min(1.45, Math.max(.9, Math.sqrt((width * height) / (480 * 680))));
+    shell.style.setProperty('--chat-fs-xs', `${(7 * scale).toFixed(2)}px`);
+    shell.style.setProperty('--chat-fs-sm', `${(9 * scale).toFixed(2)}px`);
+    shell.style.setProperty('--chat-fs-md', `${(11 * scale).toFixed(2)}px`);
+    shell.style.setProperty('--chat-fs-lg', `${(13 * scale).toFixed(2)}px`);
+    shell.style.setProperty('--chat-control-scale', scale.toFixed(3));
+  }
 
   function activeConversation() {
     return state.conversations.find((item) => item.id === state.activeConversationId) || null;
@@ -124,6 +146,7 @@ export function initChatAnywhere({ bus, router, bridge }) {
     fullButton.textContent = layout.mode === 'expanded' ? '↙' : '⛶';
     fullButton.title = layout.mode === 'expanded' ? 'Вернуть размер окна' : 'Развернуть чат';
     fullButton.setAttribute('aria-label', fullButton.title);
+    requestAnimationFrame(updateTypographyScale);
   }
 
   function setMode(mode) {
@@ -173,10 +196,31 @@ export function initChatAnywhere({ bus, router, bridge }) {
   function renderAttachment(message) {
     if (!message.attachment && !message.attachment_name) return null;
     if (!message.attachment) return element('div', 'chat-anywhere-file missing', `${message.attachment_name} · файл удалён`);
-    const link = element('a', 'chat-anywhere-file'); link.href = message.attachment.download_url;
-    link.dataset.assetId = message.attachment.id; link.dataset.projectId = state.projectId || '';
-    link.append(element('span', '', (message.attachment.name.split('.').pop() || 'file').slice(0, 4).toUpperCase()), element('strong', '', message.attachment.name));
-    return link;
+    const attachment = message.attachment;
+    const kind = attachment.preview?.kind
+      || (attachment.mime_type?.startsWith('image/') ? 'image'
+        : attachment.mime_type?.startsWith('video/') ? 'video'
+          : attachment.mime_type?.startsWith('audio/') ? 'audio' : 'file');
+    const card = element('div', `chat-anywhere-file-card ${kind}`);
+    if (kind === 'image') {
+      const preview = element('a', 'chat-anywhere-media-preview'); preview.href = attachment.preview_url;
+      preview.dataset.assetId = attachment.id; preview.dataset.projectId = state.projectId || '';
+      const image = element('img'); image.src = attachment.preview_url; image.alt = attachment.name; image.loading = 'lazy';
+      preview.append(image); card.append(preview);
+    } else if (kind === 'video') {
+      const video = element('video'); video.controls = true; video.preload = 'metadata';
+      video.src = attachment.preview_url; video.setAttribute('playsinline', ''); card.append(video);
+    } else if (kind === 'audio') {
+      const audio = element('audio'); audio.controls = true; audio.preload = 'metadata';
+      audio.src = attachment.preview_url; card.append(audio);
+    }
+    const link = element('a', 'chat-anywhere-file'); link.href = attachment.download_url; link.download = '';
+    link.append(
+      element('span', '', (attachment.name.split('.').pop() || 'file').slice(0, 4).toUpperCase()),
+      element('strong', '', attachment.name),
+      element('b', '', '↓'),
+    );
+    card.append(link); return card;
   }
 
   function renderMessages({ preserveScroll = false } = {}) {
@@ -222,6 +266,45 @@ export function initChatAnywhere({ bus, router, bridge }) {
     for (const item of state.library) attachmentSelect.append(new Option(item.name, item.id));
   }
 
+  function fileSize(bytes) {
+    if (bytes < 1024) return `${bytes} Б`;
+    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} КБ`;
+    return `${(bytes / 1024 / 1024).toFixed(1)} МБ`;
+  }
+
+  function validateLocalFiles(files) {
+    if (files.length > 10) throw new Error('За одно сообщение можно выбрать не более 10 файлов.');
+    for (const file of files) {
+      const extension = file.name.split('.').pop()?.toLowerCase() || '';
+      if (!CHAT_FILE_EXTENSIONS.has(extension)) throw new Error(`Формат файла «${file.name}» не поддерживается.`);
+      if (!file.size) throw new Error(`Файл «${file.name}» пуст.`);
+      if (file.size > MAX_CHAT_FILE_BYTES) throw new Error(`Файл «${file.name}» больше 250 МБ.`);
+    }
+  }
+
+  function renderLocalFiles() {
+    pendingFiles.replaceChildren();
+    for (const [index, file] of state.localFiles.entries()) {
+      const chip = element('span', 'chat-anywhere-pending-file');
+      chip.append(element('strong', '', file.name), element('small', '', fileSize(file.size)));
+      const remove = element('button', '', '×'); remove.type = 'button';
+      remove.setAttribute('aria-label', `Убрать ${file.name}`);
+      remove.addEventListener('click', () => { state.localFiles.splice(index, 1); renderLocalFiles(); });
+      chip.append(remove); pendingFiles.append(chip);
+    }
+    pendingFiles.classList.toggle('hidden', !state.localFiles.length);
+    $('.chat-anywhere-local-file span').textContent = state.localFiles.length
+      ? `↑ ${state.localFiles.length}`
+      : '↑ С компьютера';
+  }
+
+  async function uploadLocalFile(file) {
+    const form = new FormData(); form.append('file', file);
+    return bridge.api(`/api/conversations/${state.activeConversationId}/attachments`, {
+      method: 'POST', body: form,
+    });
+  }
+
   function renderMentions() {
     mentionPanel.replaceChildren();
     for (const member of state.members.filter((item) => item.user_id !== state.context?.user?.id)) {
@@ -249,7 +332,11 @@ export function initChatAnywhere({ bus, router, bridge }) {
   async function openConversation(conversationId) {
     if (!state.conversations.some((item) => item.id === conversationId)) await refreshConversations();
     if (!state.conversations.some((item) => item.id === conversationId)) return;
-    saveDraft(); state.activeConversationId = conversationId; state.replyTo = null; state.mentionedIds.clear();
+    saveDraft();
+    if (state.activeConversationId !== conversationId) {
+      state.localFiles = []; localFileInput.value = ''; renderLocalFiles();
+    }
+    state.activeConversationId = conversationId; state.replyTo = null; state.mentionedIds.clear();
     localStorage.setItem(`aapChatConversation:${state.projectId}`, conversationId);
     textarea.value = localStorage.getItem(draftKey()) || '';
     const conversation = activeConversation();
@@ -298,17 +385,47 @@ export function initChatAnywhere({ bus, router, bridge }) {
 
   async function sendMessage() {
     const body = textarea.value.trim(); const attachmentId = attachmentSelect.value;
-    if (!body && !attachmentId) return;
+    const localFiles = [...state.localFiles];
+    if (!body && !attachmentId && !localFiles.length) return;
+    validateLocalFiles(localFiles);
+    const submit = composer.querySelector('button[type="submit"]'); submit.disabled = true;
     const mentionedUserIds = state.members.filter((member) => {
       const name = member.display_name || member.email;
       return state.mentionedIds.has(member.user_id) && body.includes(`@${name}`);
     }).map((member) => member.user_id);
-    await bridge.api(`/api/conversations/${state.activeConversationId}/messages`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ body: body || null, attachment_id: attachmentId || null, reply_to_message_id: state.replyTo?.id || null, mentioned_user_ids: mentionedUserIds }),
-    });
-    textarea.value = ''; attachmentSelect.value = ''; state.replyTo = null; state.mentionedIds.clear(); localStorage.removeItem(draftKey());
-    $('.chat-anywhere-reply').classList.add('hidden'); await refreshConversations(); await refreshMessages();
+    try {
+      const uploaded = [];
+      for (const file of localFiles) {
+        submit.textContent = `Загрузка ${uploaded.length + 1}/${localFiles.length}…`;
+        uploaded.push(await uploadLocalFile(file));
+      }
+      const attachmentIds = [
+        ...(attachmentId ? [attachmentId] : []),
+        ...uploaded.map((item) => item.id),
+      ];
+      if (!attachmentIds.length) attachmentIds.push(null);
+      for (const [index, currentAttachmentId] of attachmentIds.entries()) {
+        await bridge.api(`/api/conversations/${state.activeConversationId}/messages`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            body: index === 0 ? body || null : null,
+            attachment_id: currentAttachmentId,
+            reply_to_message_id: index === 0 ? state.replyTo?.id || null : null,
+            mentioned_user_ids: index === 0 ? mentionedUserIds : [],
+          }),
+        });
+      }
+      for (const attachment of uploaded) {
+        if (!state.library.some((item) => item.id === attachment.id)) state.library.unshift(attachment);
+      }
+      textarea.value = ''; attachmentSelect.value = ''; localFileInput.value = '';
+      state.localFiles = []; renderLocalFiles(); populateAttachments();
+      state.replyTo = null; state.mentionedIds.clear(); localStorage.removeItem(draftKey());
+      $('.chat-anywhere-attachment span').textContent = '＋ Из проекта';
+      $('.chat-anywhere-reply').classList.add('hidden'); await refreshConversations(); await refreshMessages();
+    } finally {
+      submit.disabled = false; submit.textContent = 'Отправить ↗';
+    }
   }
 
   async function toggleReaction(message, emoji) {
@@ -359,6 +476,20 @@ export function initChatAnywhere({ bus, router, bridge }) {
   });
   composer.addEventListener('submit', (event) => { event.preventDefault(); sendMessage().catch(showError); });
   textarea.addEventListener('input', saveDraft);
+  attachmentSelect.addEventListener('change', () => {
+    const option = attachmentSelect.selectedOptions[0];
+    $('.chat-anywhere-attachment span').textContent = attachmentSelect.value
+      ? `＋ ${option.textContent}`
+      : '＋ Из проекта';
+  });
+  localFileInput.addEventListener('change', () => {
+    try {
+      const selected = [...localFileInput.files];
+      validateLocalFiles(selected); state.localFiles = selected; renderLocalFiles();
+    } catch (error) {
+      localFileInput.value = ''; state.localFiles = []; renderLocalFiles(); showError(error);
+    }
+  });
   textarea.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendMessage().catch(showError); }
   });
@@ -420,7 +551,17 @@ export function initChatAnywhere({ bus, router, bridge }) {
   bus.on('context:change', (context) => loadProject(context).catch(showError));
   bus.on('chat:open', ({ conversationId, context }) => openWindow(conversationId, context));
   bus.on('route:change', ({ page, params }) => { if (page === 'messages' && params.conversation) openWindow(params.conversation); });
+  if (typeof ResizeObserver !== 'undefined') {
+    typographyObserver = new ResizeObserver(updateTypographyScale);
+    typographyObserver.observe(shell);
+  }
   applyLayout(); loadProject(state.context).catch(showError);
 
-  return { open: openWindow, close: closeWindow, destroy: () => { closeRealtime(); launcher.remove(); shell.remove(); } };
+  return {
+    open: openWindow,
+    close: closeWindow,
+    destroy: () => {
+      closeRealtime(); typographyObserver?.disconnect(); launcher.remove(); shell.remove();
+    },
+  };
 }

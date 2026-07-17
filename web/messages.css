@@ -10,3 +10,47 @@
 @media(max-width:1150px){.messages-workspace{grid-template-columns:260px minmax(400px,1fr)}.chat-details{position:fixed;right:18px;top:110px;bottom:20px;width:280px;z-index:8;border:1px solid #30445e;border-radius:16px;box-shadow:0 20px 80px rgba(0,0,0,.45)}.chat-details:not(.open){display:none}}
 @media(max-width:760px){.messages-workspace{display:block;min-height:calc(100vh - 190px)}.messages-sidebar{border-right:0}.conversation-list{display:flex;overflow-x:auto}.conversation-section-label{display:none}.conversation-row{flex:0 0 220px}.chat-panel{max-height:none;min-height:620px}.message-list{padding:17px 12px}.message-bubble-row{max-width:92%}.message-composer-actions>small{display:none}.chat-header{padding-inline:14px}}
 .conversation-member-options.muted{opacity:.45;pointer-events:none}.content-dialog-actions{grid-template-columns:auto 1fr auto auto auto}
+
+.message-attachment-card{width:min(420px,68vw);margin-top:8px;overflow:hidden;border:1px solid rgba(158,177,204,.18);border-radius:12px;background:rgba(5,10,17,.22)}
+.message-attachment-card .message-attachment{margin:0;border:0;border-radius:0;background:transparent}
+.message-media-preview{display:block;max-height:310px;overflow:hidden;background:#050a11}
+.message-media-preview img{display:block;width:100%;max-height:310px;object-fit:contain}
+.message-attachment-card video{display:block;width:100%;max-height:310px;background:#050a11}
+.message-attachment-card audio{display:block;width:calc(100% - 16px);margin:10px 8px}
+.visually-hidden-file{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.message-local-file-picker{color:#b7aaff;font-size:10px;cursor:pointer}
+.message-local-file-picker:hover{color:#fff}
+.message-pending-files{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.message-pending-file{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:1px 8px;align-items:center;max-width:240px;padding:6px 7px;border:1px solid #344b67;border-radius:9px;background:#152334}
+.message-pending-file strong,.message-pending-file small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.message-pending-file strong{font-size:9px}
+.message-pending-file small{color:#7f91a8;font-size:8px}
+.message-pending-file button{grid-column:2;grid-row:1/3;padding:2px 5px;border:0;background:transparent;color:#9badc2}
+
+/* The discussion workspace grows with wide/zoomed-out viewports instead of
+   keeping desktop text and columns frozen at their smallest values. */
+.workspace-page[data-page="messages"]{width:min(1800px,100%)}
+.messages-workspace{
+  container-type:inline-size;
+  --messages-fs-xs:clamp(9px,.68cqw,12px);
+  --messages-fs-sm:clamp(10px,.8cqw,14px);
+  --messages-fs-md:clamp(12px,.94cqw,16px);
+  --messages-fs-lg:clamp(18px,1.38cqw,25px);
+  grid-template-columns:clamp(290px,21%,380px) minmax(420px,1fr) clamp(250px,18%,330px);
+}
+.messages-sidebar-head h2{font-size:var(--messages-fs-lg)}
+.conversation-section-label,.conversation-meta,.conversation-unread,.message-day,.message-bubble-head time,.message-edited,.message-reply-preview small{font-size:var(--messages-fs-xs)}
+.conversation-copy small,.chat-header span,.message-bubble-head strong,.message-reply-quote span,.message-actions button,.message-attachment strong,.message-attachment-picker,.message-local-file-picker,.message-composer-actions>small,.chat-details>p,.chat-details h4,.chat-member-row strong,.chat-file-row strong{font-size:var(--messages-fs-sm)}
+.conversation-copy strong,.chat-header .eyebrow,.message-bubble p,.message-composer textarea,.message-reply-preview strong,.message-attachment small,.chat-member-row small,.chat-file-row small{font-size:var(--messages-fs-md)}
+.chat-header h2{font-size:clamp(18px,1.18cqw,22px)}
+.message-empty h3,.chat-details h3{font-size:clamp(16px,1.12cqw,21px)}
+.message-composer-actions .primary{font-size:var(--messages-fs-sm)}
+.message-pending-file strong{font-size:var(--messages-fs-sm)}
+.message-pending-file small{font-size:var(--messages-fs-xs)}
+@media(max-width:1150px){
+  .messages-workspace{grid-template-columns:260px minmax(400px,1fr)}
+}
+@media(max-width:760px){
+  .workspace-page[data-page="messages"]{width:100%}
+  .messages-workspace{display:block}
+}

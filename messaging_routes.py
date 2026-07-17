@@ -5,7 +5,7 @@ import json
 from datetime import datetime, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.orm import Session
@@ -25,6 +25,7 @@ from saas_models import (
     WorkspaceMember,
 )
 from asset_preview import preview_capabilities
+from content_routes import _store_upload
 from workspace_service import project_membership
 
 
@@ -128,6 +129,7 @@ def _attachment_payload(attachment: ContentAttachment | None) -> dict[str, objec
         "project_id": attachment.project_id,
         "name": attachment.original_name,
         "mime_type": attachment.mime_type,
+        "source_type": attachment.source_type,
         "size_bytes": attachment.size_bytes,
         "download_url": f"/api/content-attachments/{attachment.id}/download",
         "preview_url": f"/api/content-attachments/{attachment.id}/preview",
@@ -492,6 +494,27 @@ def list_messages(
         "messages": [_message_payload(db, message, request.state.user.id) for message in messages],
         "has_more": False,
     }
+
+
+@router.post("/conversations/{conversation_id}/attachments", status_code=201)
+async def upload_conversation_attachment(
+    conversation_id: str,
+    request: Request,
+    file: UploadFile,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    conversation, _, _, _ = _conversation_access(
+        db, conversation_id, request.state.user.id
+    )
+    attachment = await _store_upload(
+        file,
+        project_id=conversation.project_id,
+        user_id=request.state.user.id,
+        db=db,
+        ensure_unique_name=False,
+        source_type="chat",
+    )
+    return _attachment_payload(attachment) or {}
 
 
 @router.post("/conversations/{conversation_id}/messages", status_code=201)

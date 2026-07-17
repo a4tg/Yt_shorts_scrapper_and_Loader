@@ -177,6 +177,44 @@ def test_message_reply_attachment_edit_delete_and_content_context(tmp_path, monk
     assert repeated.json()["id"] == context.json()["id"]
 
 
+def test_conversation_accepts_local_media_upload(tmp_path, monkeypatch) -> None:
+    import content_routes
+
+    monkeypatch.setattr(content_routes, "CONTENT_DIR", tmp_path)
+    owner, _ = register_user("owner")
+    outsider, _ = register_user("outsider")
+    _, project = workspace_project(owner)
+    conversation = owner.get(f"/api/projects/{project['id']}/conversations").json()[0]
+
+    uploaded = owner.post(
+        f"/api/conversations/{conversation['id']}/attachments",
+        headers=csrf(owner),
+        files={"file": ("campaign.png", b"\x89PNG\r\n\x1a\nchat-media", "image/png")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    asset = uploaded.json()
+    assert asset["mime_type"] == "image/png"
+    assert asset["source_type"] == "chat"
+    assert asset["preview"]["kind"] == "image"
+
+    sent = owner.post(
+        f"/api/conversations/{conversation['id']}/messages",
+        headers=csrf(owner),
+        json={"body": "Фото для публикации", "attachment_id": asset["id"]},
+    )
+    assert sent.status_code == 201, sent.text
+    assert sent.json()["attachment"]["id"] == asset["id"]
+    assert sent.json()["attachment"]["preview_url"] == asset["preview_url"]
+    assert owner.get(asset["preview_url"]).status_code == 200
+
+    denied = outsider.post(
+        f"/api/conversations/{conversation['id']}/attachments",
+        headers=csrf(outsider),
+        files={"file": ("outside.png", b"\x89PNG\r\n\x1a\noutsider", "image/png")},
+    )
+    assert denied.status_code == 404
+
+
 def test_mentions_reactions_pins_and_realtime_access() -> None:
     owner, _ = register_user("owner")
     member, member_user = register_user("member")

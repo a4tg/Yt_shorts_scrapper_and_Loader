@@ -465,6 +465,7 @@ async def _store_upload(
     version_label: str | None = None,
     version_notes: str | None = None,
     supersedes_attachment_id: str | None = None,
+    source_type: str = "upload",
 ) -> ContentAttachment:
     entitlement = require_entitlement(db, user_id)
     storage_limit = entitlement.limits.get("storage_mb", 0) * 1024 * 1024
@@ -516,7 +517,7 @@ async def _store_upload(
         original_name=original_name,
         storage_path=str(target),
         mime_type=validated.mime_type,
-        source_type="upload",
+        source_type=source_type,
         size_bytes=size,
         asset_key=asset_key or str(uuid.uuid4()),
         version_number=version_number,
