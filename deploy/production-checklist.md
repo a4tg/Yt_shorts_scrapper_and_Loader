@@ -51,7 +51,7 @@ production.
 ## Workspace Depth V2
 
 - [ ] Перед миграцией создан и проверен свежий снимок PostgreSQL и `server_data`.
-- [ ] Миграция дошла до `k6f7a8b9c0d1`, downgrade отдельно проверен на копии данных.
+- [ ] Миграция дошла до `l7a8b9c0d1e2`, downgrade отдельно проверен на копии данных.
 - [ ] Chat Anywhere работает на desktop/mobile, восстанавливает положение окна и получает realtime-события.
 - [ ] Viewer открывает поддерживаемые изображения, видео, аудио, PDF, тексты и таблицы; неподдерживаемые типы скачиваются безопасно.
 - [ ] Версии, compare, contextual review и client/team visibility проверены двумя аккаунтами.
@@ -81,7 +81,7 @@ docker compose exec yt-loader python manage_users.py audit-payments
 docker compose exec yt-loader python manage_users.py audit-credits
 ```
 
-Ожидаемая ревизия Alembic: `k6f7a8b9c0d1`. Readiness должен вернуть `status`, `database`
+Ожидаемая ревизия Alembic: `l7a8b9c0d1e2`. Readiness должен вернуть `status`, `database`
 и `workers` со значением `ok`.
 
 Для самого первого перехода со старой JSON/Basic Auth версии используй
