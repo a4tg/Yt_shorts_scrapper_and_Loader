@@ -165,6 +165,8 @@ class DatabaseJobManager:
             )
         if job.kind == "download" and job.request_payload:
             payload["source_url"] = str(job.request_payload.get("url") or "")
+            payload["channel_name"] = str(job.request_payload.get("channel_name") or "")
+            payload["video_title"] = str(job.request_payload.get("video_title") or "")
             if job.request_payload.get("batch_id"):
                 payload["batch_id"] = str(job.request_payload["batch_id"])
         return payload
@@ -341,6 +343,20 @@ class DatabaseJobManager:
                 statement.order_by(Job.created_at.desc(), Job.id.desc()).limit(limit)
             ).all()
             return [self._public_with_queue_position(db, record) for record in records]
+
+    def list_stored_downloads_for_owner(self, user_id: str) -> list[dict[str, object]]:
+        """Return every completed download owned by one profile, newest first."""
+        with self.session_factory() as db:
+            records = db.scalars(
+                select(Job)
+                .where(
+                    Job.user_id == user_id,
+                    Job.kind == "download",
+                    Job.status == "done",
+                )
+                .order_by(Job.created_at.desc(), Job.id.desc())
+            ).all()
+            return [self._public(record) for record in records]
 
     def update(self, job_id: str, **values: object) -> None:
         """Compatibility helper for lifecycle actions and focused tests."""

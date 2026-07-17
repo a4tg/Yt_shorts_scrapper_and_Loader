@@ -10,6 +10,7 @@
   <link rel="preload" href="/assets/brand-mark.svg" as="image" type="image/svg+xml">
   <link rel="stylesheet" href="/assets/style.css">
   <link rel="stylesheet" href="/assets/direct-video.css">
+  <link rel="stylesheet" href="/assets/video-library.css">
   <link rel="stylesheet" href="/assets/overlay-editor.css">
   <link rel="stylesheet" href="/assets/metadata.css">
   <link rel="stylesheet" href="/assets/batch.css">
@@ -369,6 +370,20 @@
     </section>
 
     <section class="workspace-page hidden" data-page="video">
+    <section class="panel profile-video-library-panel">
+      <div class="profile-video-library-head">
+        <div class="section-title compact">
+          <span class="step">▰</span>
+          <div>
+            <h2>Медиатека профиля</h2>
+            <p id="profile-video-library-summary">Загружаю сохранённые видео…</p>
+          </div>
+        </div>
+        <button id="refresh-profile-video-library" class="ghost" type="button">Обновить</button>
+      </div>
+      <div id="profile-video-library" class="profile-video-library" aria-live="polite"></div>
+    </section>
+
     <section class="panel import-panel">
       <div class="section-title">
         <span class="step">1</span>

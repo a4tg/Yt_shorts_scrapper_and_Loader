@@ -9,6 +9,7 @@ const state = {
   workspaces: [], currentWorkspaceId: null, projects: [], currentProjectId: null,
   workspaceMembers: [], approvalWorkflow: null, contentItems: [], contentView: 'board',
   libraryItems: [], libraryFolders: [], currentLibraryFolderId: null,
+  videoLibraryJobs: [], directSourceChannel: '', directSourceTitle: '',
   conversations: [], activeConversationId: null, messages: [], messageReplyTo: null,
   messageHasMore: false, messagePollTimer: null, messageLocalFiles: [],
   editingContentId: null, aiConfig: null, aiResultJobs: {}, adminLoaded: false
@@ -93,6 +94,7 @@ function showWorkspacePage(page, syncUrl = false) {
   if (page === 'approvals' && state.currentProjectId) loadApprovalWorkflow().catch(showWorkspaceError);
   if (['content', 'documents'].includes(page) && state.currentProjectId) loadContent().catch(showWorkspaceError);
   if (page === 'library' && state.currentProjectId) loadLibrary().catch(showWorkspaceError);
+  if (page === 'video') loadVideoLibrary().catch(showWorkspaceError);
   if (page === 'messages' && state.currentProjectId) loadMessagingWorkspace().catch(showWorkspaceError);
   else stopMessagePolling();
   if (page === 'ai' && state.currentProjectId) loadAIStudio().catch(showWorkspaceError);
@@ -211,12 +213,14 @@ function showSourceVideo(url, thumbnail = '', title = '') {
 
 async function showExternalSourcePreview(url) {
   if (!url) return;
-  if (youtubeVideoId(url)) { showSourceVideo(url); return; }
   const preview = await api(`/api/sources/preview?url=${encodeURIComponent(url)}`);
+  state.directSourceChannel = preview.uploader || '';
+  state.directSourceTitle = preview.title || '';
   showSourceVideo(
     preview.url, preview.thumbnail,
     `${preview.platform.toUpperCase()} · ${preview.title}`
   );
+  return preview;
 }
 
 function updateOverlayPreview() {
@@ -2179,7 +2183,10 @@ function renderItems(items, importId, pagination = null) {
     image.title = 'Показать этот ролик в конструкторе';
     videoButton.addEventListener('click', async () => {
       showSourceVideo(item.url, item.thumbnail, item.title);
-      if (await startDownloadUrl(item.url, videoButton, note)) markVideoCompleted(record);
+      if (await startDownloadUrl(
+        item.url, videoButton, note, null, null, false,
+        { channelName: item.uploader, videoTitle: item.title }
+      )) markVideoCompleted(record);
     });
     loadBilling().catch(() => {});
     actions.append(videoButton, saveContent, metadata, note); card.append(selector, image, info, actions); container.append(card);
@@ -2255,6 +2262,74 @@ $('#clear-video-selection').addEventListener('click', () => {
 function sourceJobKey(url) {
   const youtubeId = youtubeVideoId(url);
   return youtubeId ? `youtube:${youtubeId}` : String(url || '').trim();
+}
+
+function videoLibrarySourceLabel(job) {
+  try {
+    return new URL(job.source_url).hostname.replace(/^www\./, '');
+  } catch (_) {
+    return 'Сохранённое видео';
+  }
+}
+
+function renderVideoLibrary() {
+  const container = $('#profile-video-library'); container.replaceChildren();
+  const summary = $('#profile-video-library-summary');
+  const totalSize = state.videoLibraryJobs.reduce(
+    (sum, job) => sum + Number(job.stored_size_bytes || 0), 0
+  );
+  const groups = new Map();
+  for (const job of state.videoLibraryJobs) {
+    const channelName = job.channel_name || 'Без канала';
+    if (!groups.has(channelName)) groups.set(channelName, []);
+    groups.get(channelName).push(job);
+  }
+  summary.textContent = `${state.videoLibraryJobs.length} видео · ${groups.size} папок · ${humanFileSize(totalSize)}`;
+  if (!state.videoLibraryJobs.length) {
+    container.append(createBrandedEmptyState(
+      'Готовых видео пока нет',
+      'После подготовки ролик появится здесь в папке своего канала.'
+    ));
+    return;
+  }
+  for (const [channelName, jobs] of groups) {
+    const folder = document.createElement('details'); folder.className = 'video-library-folder';
+    folder.open = true;
+    const heading = document.createElement('summary');
+    const folderIcon = document.createElement('span'); folderIcon.className = 'video-library-folder-icon'; folderIcon.textContent = '▰';
+    const headingCopy = document.createElement('span');
+    const title = document.createElement('strong'); title.textContent = channelName;
+    const count = document.createElement('small'); count.textContent = `${jobs.length} ${jobs.length === 1 ? 'видео' : 'видео'}`;
+    headingCopy.append(title, count); heading.append(folderIcon, headingCopy);
+    const grid = document.createElement('div'); grid.className = 'video-library-grid';
+    for (const job of jobs) {
+      const card = document.createElement('article'); card.className = 'video-library-card';
+      const fileIcon = document.createElement('span'); fileIcon.className = 'video-library-file-icon';
+      fileIcon.textContent = String(job.stored_filename || '').toLowerCase().endsWith('.zip') ? 'ZIP' : 'MP4';
+      const copy = document.createElement('div'); copy.className = 'video-library-card-copy';
+      const name = document.createElement('h3'); name.textContent = job.video_title || job.stored_filename;
+      const filename = document.createElement('p'); filename.textContent = job.stored_filename;
+      const meta = document.createElement('small');
+      meta.textContent = [
+        videoLibrarySourceLabel(job),
+        humanFileSize(job.stored_size_bytes),
+        conversationTime(job.finished_at || job.created_at)
+      ].filter(Boolean).join(' · ');
+      copy.append(name, filename, meta);
+      const actions = document.createElement('div'); actions.className = 'video-library-card-actions';
+      const downloadButton = document.createElement('button'); downloadButton.className = 'primary';
+      downloadButton.type = 'button'; downloadButton.textContent = 'Скачать';
+      const note = document.createElement('div'); note.className = 'job-note';
+      actions.append(downloadButton); card.append(fileIcon, copy, actions, note); grid.append(card);
+      showReadyDownload(job, downloadButton, note);
+    }
+    folder.append(heading, grid); container.append(folder);
+  }
+}
+
+async function loadVideoLibrary() {
+  state.videoLibraryJobs = await api('/api/videos/library');
+  renderVideoLibrary();
 }
 
 async function restoreDownloadJobs() {
@@ -2375,6 +2450,7 @@ async function pollBatchRecords(records) {
       );
       localStorage.removeItem('ytLoaderVideoBatch');
       loadBilling().catch(() => {});
+      loadVideoLibrary().catch(() => {});
     }
     updateBatchSelection();
   }
@@ -2406,7 +2482,8 @@ async function submitVideoBatch(records) {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         items: records.map((record) => downloadPayload(
-          record.item.url, logoTokens, batchSettings
+          record.item.url, logoTokens, batchSettings,
+          { channelName: record.item.uploader, videoTitle: record.item.title }
         ))
       })
     });
@@ -2453,9 +2530,10 @@ function currentDownloadSettings() {
   };
 }
 
-function downloadPayload(url, logoTokens, settings = null) {
+function downloadPayload(url, logoTokens, settings = null, source = {}) {
   return {
     url, logo_tokens: logoTokens, project_id: state.currentProjectId,
+    channel_name: source.channelName || null, video_title: source.videoTitle || null,
     ...(settings || currentDownloadSettings())
   };
 }
@@ -2561,7 +2639,8 @@ async function startDownloadUrl(
   note,
   uploadedLogoTokens = null,
   downloadSettings = null,
-  withoutOverlayConfirmed = false
+  withoutOverlayConfirmed = false,
+  source = {}
 ) {
   const logoTokens = uploadedLogoTokens ?? await ensureOverlaysUploaded();
   if (
@@ -2580,7 +2659,7 @@ async function startDownloadUrl(
   try {
     const created = await api('/api/videos/download', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(downloadPayload(url, logoTokens, downloadSettings))
+      body: JSON.stringify(downloadPayload(url, logoTokens, downloadSettings, source))
     });
     loadBilling().catch(() => {});
     const job = await pollJob(created.id, (current) => {
@@ -2588,6 +2667,7 @@ async function startDownloadUrl(
       window.AAPAppMotion?.videoJobUpdated?.(note, current);
     });
     showReadyDownload(job, button, note);
+    loadVideoLibrary().catch(() => {});
     if (!state.batchRunning) window.AAPAppMotion?.videoPhase?.('ready');
     return true;
   } catch (error) {
@@ -2607,13 +2687,25 @@ $('#direct-video-form').addEventListener('submit', async (event) => {
   const workButton = document.createElement('button'); workButton.className = 'primary';
   workButton.textContent = 'Подготовка…'; buttons.append(workButton);
   submitButton.disabled = true;
+  state.directSourceChannel = ''; state.directSourceTitle = '';
   try { await showExternalSourcePreview($('#direct-video-url').value); } catch (_) {}
-  await startDownloadUrl($('#direct-video-url').value, workButton, note);
+  await startDownloadUrl(
+    $('#direct-video-url').value, workButton, note, null, null, false,
+    { channelName: state.directSourceChannel, videoTitle: state.directSourceTitle }
+  );
   submitButton.disabled = false;
 });
 
 $('#direct-video-url').addEventListener('change', (event) => {
+  state.directSourceChannel = ''; state.directSourceTitle = '';
   showExternalSourcePreview(event.target.value).catch((error) => showToast(error.message));
+});
+
+$('#refresh-profile-video-library').addEventListener('click', (event) => {
+  const button = event.currentTarget; button.disabled = true;
+  loadVideoLibrary()
+    .catch(showWorkspaceError)
+    .finally(() => { button.disabled = false; });
 });
 
 api('/api/health').then((health) => {

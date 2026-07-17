@@ -1,0 +1,24 @@
+.profile-video-library-head{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.profile-video-library{display:grid;gap:14px;margin-top:20px}
+.profile-video-library>.empty-brand-state{grid-column:1/-1}
+.video-library-folder{overflow:hidden;border:1px solid #2b3c53;border-radius:16px;background:#0d1621}
+.video-library-folder>summary{display:flex;align-items:center;gap:11px;padding:14px 16px;cursor:pointer;list-style:none;background:linear-gradient(135deg,#152235,#101a27)}
+.video-library-folder>summary::-webkit-details-marker{display:none}
+.video-library-folder>summary::after{content:"⌄";margin-left:auto;color:#8496ad;font-size:18px;transition:transform .16s ease}
+.video-library-folder:not([open])>summary::after{transform:rotate(-90deg)}
+.video-library-folder-icon{width:36px;height:36px;display:grid;place-items:center;border-radius:10px;background:rgba(255,200,70,.11);color:#ffd66b;font-size:18px}
+.video-library-folder>summary strong,.video-library-folder>summary small{display:block}
+.video-library-folder>summary small{margin-top:2px;color:var(--muted);font-size:11px}
+.video-library-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:12px}
+.video-library-card{display:grid;grid-template-columns:48px minmax(0,1fr) auto;align-items:center;gap:12px;padding:13px;border:1px solid #27384d;border-radius:13px;background:#111c29}
+.video-library-file-icon{width:48px;height:48px;display:grid;place-items:center;border-radius:12px;background:rgba(124,108,255,.14);color:var(--accent2);font-size:11px;font-weight:900;letter-spacing:.04em}
+.video-library-card-copy{min-width:0}
+.video-library-card h3,.video-library-card p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.video-library-card h3{margin:0;font-size:13px}
+.video-library-card p{margin:3px 0;color:#8fa1b8;font-size:11px}
+.video-library-card small{display:block;color:#6f8299;font-size:10px}
+.video-library-card-actions{display:flex;align-items:center;gap:7px}
+.video-library-card-actions button{padding:9px 12px;font-size:11px}
+.video-library-card>.job-note{grid-column:2/-1;max-width:none;text-align:left}
+@media(max-width:900px){.video-library-grid{grid-template-columns:1fr}}
+@media(max-width:600px){.profile-video-library-head{align-items:stretch;flex-direction:column}.video-library-card{grid-template-columns:42px minmax(0,1fr)}.video-library-file-icon{width:42px;height:42px}.video-library-card-actions{grid-column:1/-1}.video-library-card-actions button{width:100%}.video-library-card>.job-note{grid-column:1/-1}}

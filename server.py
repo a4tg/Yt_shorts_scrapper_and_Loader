@@ -174,6 +174,8 @@ class SourceImportRequest(BaseModel):
 class DownloadRequest(BaseModel):
     url: str = Field(min_length=10, max_length=500)
     project_id: str | None = Field(default=None, max_length=36)
+    channel_name: str | None = Field(default=None, max_length=200)
+    video_title: str | None = Field(default=None, max_length=300)
     logo_token: str | None = None
     logo_tokens: list[str] = Field(default_factory=list, max_length=10)
     opacity: int = Field(default=35, ge=5, le=100)
@@ -1095,6 +1097,8 @@ def prepare_download_job(
     workspace_id, project_id = resolve_media_project(payload.project_id, request)
     return workspace_id, project_id, {
         "url": url,
+        "channel_name": (payload.channel_name or "").strip(),
+        "video_title": (payload.video_title or "").strip(),
         "overlays": overlays,
         "opacity": payload.opacity,
         "width_percent": payload.width_percent,
@@ -1144,6 +1148,26 @@ def create_download_batch(
         raise HTTPException(402, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/videos/library")
+def video_library(request: Request) -> list[dict[str, object]]:
+    """List the completed download files still stored for the current profile."""
+    stored: list[dict[str, object]] = []
+    for job in manager.list_stored_downloads_for_owner(str(request.state.user.id)):
+        job_id = str(job["id"])
+        filename = str(dict(job.get("result") or {}).get("filename") or "")
+        job_directory = (VIDEOS_DIR / job_id).resolve()
+        path = (job_directory / filename).resolve() if filename else job_directory
+        if not filename or path.parent != job_directory or not path.is_file():
+            continue
+        item = decorate_job_urls(job)
+        item["stored_filename"] = filename
+        item["stored_size_bytes"] = path.stat().st_size
+        item["channel_name"] = str(item.get("channel_name") or "").strip() or "Без канала"
+        item["video_title"] = str(item.get("video_title") or "").strip() or filename
+        stored.append(item)
+    return stored
 
 
 @app.get("/api/videos/{job_id}/download")

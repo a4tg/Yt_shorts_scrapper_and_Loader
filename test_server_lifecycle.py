@@ -43,7 +43,11 @@ class VideoLifecycleTests(unittest.TestCase):
         (self.video_dir / "ready.mp4").write_bytes(b"test-video")
         server.manager.create(
             "download",
-            {"url": "https://youtu.be/abcdefghijk"},
+            {
+                "url": "https://youtu.be/abcdefghijk",
+                "channel_name": "Тестовый канал",
+                "video_title": "Тестовый ролик",
+            },
             self.user_id,
             job_id=self.job_id,
         )
@@ -82,6 +86,52 @@ class VideoLifecycleTests(unittest.TestCase):
         self.assertEqual(deleted.status_code, 200)
         self.assertFalse(self.video_dir.exists())
         self.assertEqual(self.client.get(f"/api/videos/{self.job_id}/download").status_code, 410)
+
+    def test_profile_library_lists_stored_own_videos_with_channel_folder(self) -> None:
+        other_client, other_user_id = authenticated_client()
+        other_job_id = uuid.uuid4().hex
+        other_dir = server.VIDEOS_DIR / other_job_id
+        other_dir.mkdir(parents=True)
+        (other_dir / "other.mp4").write_bytes(b"other-video")
+        server.manager.create(
+            "download",
+            {
+                "url": "https://youtu.be/12345678901",
+                "channel_name": "Чужой канал",
+                "video_title": "Чужой ролик",
+            },
+            other_user_id,
+            job_id=other_job_id,
+        )
+        server.manager.update(
+            other_job_id,
+            status="done",
+            result={"filename": "other.mp4"},
+        )
+        try:
+            response = self.client.get("/api/videos/library")
+            self.assertEqual(response.status_code, 200)
+            items = response.json()
+            self.assertEqual([item["id"] for item in items], [self.job_id])
+            self.assertEqual(items[0]["channel_name"], "Тестовый канал")
+            self.assertEqual(items[0]["video_title"], "Тестовый ролик")
+            self.assertEqual(items[0]["stored_filename"], "ready.mp4")
+            self.assertEqual(items[0]["stored_size_bytes"], len(b"test-video"))
+            self.assertEqual(
+                items[0]["download_ticket_url"],
+                f"/api/videos/{self.job_id}/download-ticket",
+            )
+            self.assertEqual(
+                [item["id"] for item in other_client.get("/api/videos/library").json()],
+                [other_job_id],
+            )
+        finally:
+            with server.SessionLocal() as db:
+                record = db.get(Job, other_job_id)
+                if record:
+                    db.delete(record)
+                    db.commit()
+            shutil.rmtree(other_dir, ignore_errors=True)
 
     def test_expired_download_is_deleted_automatically(self) -> None:
         server.manager.update(
