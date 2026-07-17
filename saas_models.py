@@ -358,6 +358,7 @@ class ProjectDiagram(TimestampMixin, Base):
     __tablename__ = "project_diagrams"
     __table_args__ = (
         CheckConstraint("diagram_type IN ('process', 'flowchart', 'mind_map')", name="ck_project_diagrams_type"),
+        CheckConstraint("visibility IN ('team', 'client')", name="ck_project_diagrams_visibility"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -367,6 +368,7 @@ class ProjectDiagram(TimestampMixin, Base):
     title: Mapped[str] = mapped_column(String(160), nullable=False)
     description: Mapped[str | None] = mapped_column(String(1000))
     diagram_type: Mapped[str] = mapped_column(String(24), nullable=False, default="flowchart", index=True)
+    visibility: Mapped[str] = mapped_column(String(16), nullable=False, default="team", index=True)
     viewport: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     created_by_user_id: Mapped[str] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True

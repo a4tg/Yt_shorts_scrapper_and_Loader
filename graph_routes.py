@@ -41,6 +41,7 @@ class DiagramCreate(BaseModel):
     title: str = Field(min_length=1, max_length=160)
     description: str | None = Field(default=None, max_length=1000)
     diagram_type: Literal["process", "flowchart", "mind_map"] = "flowchart"
+    visibility: Literal["team", "client"] = "team"
     template: Literal["blank", "approval"] = "blank"
 
 
@@ -71,6 +72,7 @@ class DiagramSave(BaseModel):
     title: str = Field(min_length=1, max_length=160)
     description: str | None = Field(default=None, max_length=1000)
     diagram_type: Literal["process", "flowchart", "mind_map"] = "flowchart"
+    visibility: Literal["team", "client"] = "team"
     viewport: dict[str, object] | None = None
     nodes: list[DiagramNodeInput] = Field(max_length=300)
     edges: list[DiagramEdgeInput] = Field(max_length=600)
@@ -214,7 +216,7 @@ def project_graph(
         if member.role == "client":
             reviews = [review for review in reviews if review.visibility == "client"]
         for index, review in enumerate(reviews):
-            graph_node = _graph_node("review", review.id, review.body[:100], kind="review", subtitle=review.annotation_type, status=review.status, x=220 + math.cos(index * 1.9) * 180, y=math.sin(index * 1.9) * 330)
+            graph_node = _graph_node("review", review.id, review.body[:100], kind="review", subtitle=review.annotation_type, status=review.status, x=220 + math.cos(index * 1.9) * 180, y=math.sin(index * 1.9) * 330, extra={"attachment_id": review.attachment_id})
             nodes[graph_node["id"]] = graph_node
             edge = _graph_edge("review", review.id, "asset", review.attachment_id, "about"); edges[edge["id"]] = edge
 
@@ -228,9 +230,12 @@ def project_graph(
             edge = _graph_edge("user", user.id, "project", project.id, "member_of"); edges[edge["id"]] = edge
 
     if include("diagram"):
-        diagrams = db.scalars(select(ProjectDiagram).where(
+        diagram_statement = select(ProjectDiagram).where(
             ProjectDiagram.project_id == project.id
-        ).order_by(ProjectDiagram.updated_at.desc()).limit(50)).all()
+        ).order_by(ProjectDiagram.updated_at.desc()).limit(50)
+        if member.role == "client":
+            diagram_statement = diagram_statement.where(ProjectDiagram.visibility == "client")
+        diagrams = db.scalars(diagram_statement).all()
         for index, diagram in enumerate(diagrams):
             graph_node = _graph_node("diagram", diagram.id, diagram.title, kind="diagram", subtitle=diagram.diagram_type,
                                      x=-120 + math.cos(index * 1.8) * 180, y=math.sin(index * 1.8) * 320)
@@ -306,6 +311,7 @@ def delete_entity_link(link_id: str, request: Request, db: Session = Depends(get
 def _diagram_payload(db: Session, diagram: ProjectDiagram, *, detailed: bool = False) -> dict[str, object]:
     payload = {"id": diagram.id, "project_id": diagram.project_id, "title": diagram.title,
                "description": diagram.description, "diagram_type": diagram.diagram_type,
+               "visibility": diagram.visibility,
                "viewport": diagram.viewport or {}, "created_at": diagram.created_at.isoformat(),
                "updated_at": diagram.updated_at.isoformat()}
     if not detailed: return payload
@@ -325,17 +331,21 @@ def _diagram_payload(db: Session, diagram: ProjectDiagram, *, detailed: bool = F
 
 @router.get("/projects/{project_id}/diagrams")
 def list_diagrams(project_id: str, request: Request, db: Session = Depends(get_db)) -> list[dict[str, object]]:
-    _project_access(db, project_id, request.state.user.id)
-    return [_diagram_payload(db, item) for item in db.scalars(select(ProjectDiagram).where(
+    _, member = _project_access(db, project_id, request.state.user.id)
+    statement = select(ProjectDiagram).where(
         ProjectDiagram.project_id == project_id
-    ).order_by(ProjectDiagram.updated_at.desc())).all()]
+    ).order_by(ProjectDiagram.updated_at.desc())
+    if member.role == "client":
+        statement = statement.where(ProjectDiagram.visibility == "client")
+    return [_diagram_payload(db, item) for item in db.scalars(statement).all()]
 
 
 @router.post("/projects/{project_id}/diagrams", status_code=201)
 def create_diagram(project_id: str, payload: DiagramCreate, request: Request, db: Session = Depends(get_db)) -> dict[str, object]:
     _, member = _project_access(db, project_id, request.state.user.id); _require_editor(member)
     diagram = ProjectDiagram(project_id=project_id, title=payload.title.strip(), description=(payload.description or "").strip() or None,
-                             diagram_type=payload.diagram_type, created_by_user_id=request.state.user.id)
+                             diagram_type=payload.diagram_type, visibility=payload.visibility,
+                             created_by_user_id=request.state.user.id)
     db.add(diagram); db.flush()
     if payload.template == "approval":
         workflow = db.scalar(select(ApprovalWorkflow).where(ApprovalWorkflow.project_id == project_id))
@@ -356,6 +366,8 @@ def _diagram_access(db: Session, diagram_id: str, user_id: str):
     diagram = db.get(ProjectDiagram, diagram_id)
     if diagram is None: raise HTTPException(404, "Схема не найдена.")
     _, member = _project_access(db, diagram.project_id, user_id)
+    if member.role == "client" and diagram.visibility != "client":
+        raise HTTPException(404, "Схема не найдена.")
     return diagram, member
 
 
@@ -375,7 +387,8 @@ def save_diagram(diagram_id: str, payload: DiagramSave, request: Request, db: Se
     if len(json.dumps(payload.model_dump())) > 2_000_000: raise HTTPException(413, "Схема слишком большая.")
     if len(json.dumps(payload.viewport or {})) > 50_000: raise HTTPException(413, "Состояние рабочей области слишком большое.")
     diagram.title = payload.title.strip(); diagram.description = (payload.description or "").strip() or None
-    diagram.diagram_type = payload.diagram_type; diagram.viewport = payload.viewport
+    diagram.diagram_type = payload.diagram_type; diagram.visibility = payload.visibility
+    diagram.viewport = payload.viewport
     db.execute(delete(DiagramEdge).where(DiagramEdge.diagram_id == diagram.id))
     db.execute(delete(DiagramNode).where(DiagramNode.diagram_id == diagram.id)); db.flush()
     stored: dict[str, DiagramNode] = {}

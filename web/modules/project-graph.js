@@ -148,7 +148,10 @@ export function initProjectGraph({ bus, bridge }) {
     else if (item.entity_type === 'conversation') bus.emit('chat:open', { conversationId: item.entity_id, context: state.context });
     else if (item.entity_type === 'content') bridge.navigate?.('content', true);
     else if (item.entity_type === 'diagram') { setView('diagrams'); openDiagram(item.entity_id).catch(showError); }
-    else if (item.entity_type === 'review') bridge.notify?.('Откройте связанный файл, чтобы перейти к замечанию.');
+    else if (item.entity_type === 'review' && item.extra?.attachment_id) {
+      bus.emit('asset:open', { assetId: item.extra.attachment_id, projectId: state.projectId });
+      bus.emit('review:focus', { reviewId: item.entity_id, attachmentId: item.extra.attachment_id });
+    }
     else if (item.entity_type === 'insight') bridge.navigate?.('attention', true);
   }
 
@@ -196,6 +199,8 @@ export function initProjectGraph({ bus, bridge }) {
   function renderDiagram() {
     diagramNodes.replaceChildren(); const diagram = state.diagram;
     root.querySelector('#project-diagram-title').value = diagram?.title || '';
+    root.querySelector('#project-diagram-visibility').value = diagram?.visibility || 'team';
+    root.querySelector('#project-diagram-visibility').disabled = !diagram || !editable(state.context);
     if (!diagram) { renderDiagramInspector(); diagramEdges.replaceChildren(); return; }
     for (const item of diagram.nodes) {
       const card = node('button', `project-diagram-node ${item.kind}${item.key === state.selectedNodeKey ? ' selected' : ''}`); card.type = 'button'; card.dataset.diagramNodeKey = item.key;
@@ -250,13 +255,13 @@ export function initProjectGraph({ bus, bridge }) {
 
   function renderDiagramList() {
     const list = root.querySelector('.project-diagram-list'); list.replaceChildren();
-    for (const item of state.diagrams) { const button = node('button', item.id === state.diagram?.id ? 'active' : ''); button.type = 'button'; button.dataset.diagramId = item.id; button.append(node('strong', '', item.title), node('small', '', new Date(item.updated_at).toLocaleString('ru-RU'))); list.append(button); }
+    for (const item of state.diagrams) { const button = node('button', item.id === state.diagram?.id ? 'active' : ''); button.type = 'button'; button.dataset.diagramId = item.id; button.append(node('strong', '', item.title), node('small', '', `${item.visibility === 'client' ? 'Видит клиент' : 'Только команда'} · ${new Date(item.updated_at).toLocaleString('ru-RU')}`)); list.append(button); }
     if (!state.diagrams.length) list.append(node('p', '', 'Создайте первую схему или перенесите сюда процесс согласования.'));
     root.querySelectorAll('[data-diagram-action="create"],[data-diagram-action="approval-template"]').forEach((button) => button.classList.toggle('hidden', !editable(state.context)));
   }
 
   async function createDiagram(template = 'blank') {
-    const created = await bridge.api(`/api/projects/${state.projectId}/diagrams`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: template === 'approval' ? 'Процесс согласования' : 'Новая блок-схема', diagram_type: 'flowchart', template }) });
+    const created = await bridge.api(`/api/projects/${state.projectId}/diagrams`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: template === 'approval' ? 'Процесс согласования' : 'Новая блок-схема', diagram_type: 'flowchart', visibility: 'team', template }) });
     await loadDiagrams(created.id);
   }
 
@@ -269,7 +274,8 @@ export function initProjectGraph({ bus, bridge }) {
   async function saveDiagram(silent = false) {
     if (!state.diagram || !editable(state.context)) return; clearTimeout(state.saveTimer);
     state.diagram.title = root.querySelector('#project-diagram-title').value.trim() || 'Без названия';
-    const payload = { title: state.diagram.title, description: state.diagram.description, diagram_type: state.diagram.diagram_type, viewport: state.diagramTransform, nodes: state.diagram.nodes.map(({ id, ...item }) => item), edges: state.diagram.edges.map(({ id, ...item }) => item) };
+    state.diagram.visibility = root.querySelector('#project-diagram-visibility').value;
+    const payload = { title: state.diagram.title, description: state.diagram.description, diagram_type: state.diagram.diagram_type, visibility: state.diagram.visibility, viewport: state.diagramTransform, nodes: state.diagram.nodes.map(({ id, ...item }) => item), edges: state.diagram.edges.map(({ id, ...item }) => item) };
     state.diagram = await bridge.api(`/api/diagrams/${state.diagram.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); state.dirty = false; renderDiagram(); await loadDiagrams(state.diagram.id); if (!silent) bridge.notify?.('Схема сохранена.');
   }
 
@@ -328,6 +334,7 @@ export function initProjectGraph({ bus, bridge }) {
 
   root.querySelector('#project-graph-search').addEventListener('input', renderGraph);
   root.querySelector('#project-diagram-title').addEventListener('input', () => { if (state.diagram) { state.diagram.title = root.querySelector('#project-diagram-title').value; markDirty(); } });
+  root.querySelector('#project-diagram-visibility').addEventListener('change', () => { if (state.diagram) { state.diagram.visibility = root.querySelector('#project-diagram-visibility').value; markDirty(); } });
   diagramForm.addEventListener('input', () => { const item = diagramNode(state.selectedNodeKey); if (!item) return; item.title = diagramForm.elements.title.value; item.description = diagramForm.elements.description.value; item.kind = diagramForm.elements.kind.value; item.color = diagramForm.elements.color.value; markDirty(); renderDiagram(); });
 
   let drag = null;

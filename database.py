@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, sessionmaker
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_SQLITE_PATH = (BASE_DIR / "server_data" / "yt_loader.db").resolve()
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DEFAULT_SQLITE_PATH.as_posix()}")
-EXPECTED_DATABASE_REVISION = "k6f7a8b9c0d1"
+EXPECTED_DATABASE_REVISION = "l7a8b9c0d1e2"
 
 
 def build_engine(database_url: str = DATABASE_URL) -> Engine:

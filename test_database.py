@@ -99,6 +99,8 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertTrue(
             {"asset_key", "version_number", "version_label", "version_notes", "supersedes_attachment_id", "is_current"}.issubset(attachment_columns)
         )
+        diagram_columns = {column["name"] for column in inspect(engine).get_columns("project_diagrams")}
+        self.assertIn("visibility", diagram_columns)
         self.assertTrue(check_database(engine))
 
         command.downgrade(self.config, "base")

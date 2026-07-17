@@ -33,7 +33,7 @@ export function initAssetReviews({ bus, bridge }) {
   const state = {
     asset: null, assets: [], versions: [], reviews: [], summary: null, members: [],
     context: bridge.getContext?.() || {}, tool: 'general', annotation: {}, parentId: null,
-    compareVersion: null, draw: null, loadToken: 0, source: null,
+    compareVersion: null, draw: null, loadToken: 0, source: null, pendingReviewId: null,
   };
 
   const toggle = node('button', 'asset-review-toggle'); toggle.type = 'button'; toggle.title = 'Версии и ревью'; toggle.setAttribute('aria-label', 'Открыть версии и ревью'); toggle.innerHTML = '◉ <i>0</i>';
@@ -187,6 +187,12 @@ export function initAssetReviews({ bus, bridge }) {
       if (token !== state.loadToken) return;
       state.versions = versions.versions; state.reviews = reviews.reviews; state.summary = reviews; state.members = members;
       renderVersions(); renderMembers(); renderReviews(); renderApprovals();
+      if (state.pendingReviewId) {
+        const target = panel.querySelector(`[data-review-id="${state.pendingReviewId}"]`);
+        shell.classList.add('show-reviews');
+        target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        state.pendingReviewId = null;
+      }
     } catch (error) { notifyError(error); }
   }
 
@@ -346,6 +352,11 @@ export function initAssetReviews({ bus, bridge }) {
   form.addEventListener('submit', submitReview); versionForm.addEventListener('submit', uploadVersion);
   bus.on('asset:change', ({ asset, assets, projectId }) => { state.assets = assets || []; connectRealtime(projectId || asset.project_id); loadReviewData(asset); });
   bus.on('asset:media-ready', () => { renderMarkers(); });
+  bus.on('review:focus', ({ reviewId }) => {
+    state.pendingReviewId = reviewId;
+    shell.classList.add('show-reviews');
+    panel.querySelector(`[data-review-id="${reviewId}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
   bus.on('asset:close', () => { state.loadToken += 1; state.source?.close(); state.source = null; overlay.remove(); closeCompare(); shell.classList.remove('show-reviews'); });
   bus.on('context:change', (context) => { state.context = context; });
   window.addEventListener('resize', positionOverlay);

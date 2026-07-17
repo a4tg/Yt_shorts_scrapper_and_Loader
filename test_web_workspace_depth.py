@@ -40,7 +40,7 @@ class WorkspaceDepthFoundationTests(unittest.TestCase):
         for marker in ('data-page="graph"', 'id="project-graph-viewport"', 'id="project-diagram-viewport"', 'data-node-kind="decision"'):
             self.assertIn(marker, html)
         self.assertIn("registerModule('project-graph'", entrypoint)
-        for marker in ("loadGraph", "createLink", "saveDiagram", "undo", "redo", "EventSource", "project-diagram-edges"):
+        for marker in ("loadGraph", "createLink", "saveDiagram", "undo", "redo", "EventSource", "project-diagram-edges", "project-diagram-visibility", "review:focus"):
             self.assertIn(marker, script)
         for selector in (".project-graph-node", ".project-diagram-node", ".project-diagram-edge", ".project-graph-minimap"):
             self.assertIn(selector, styles)

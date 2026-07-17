@@ -99,9 +99,11 @@ def test_diagram_approval_template_edit_and_access(tmp_path, monkeypatch) -> Non
     monkeypatch.setattr(content_routes, "CONTENT_DIR", tmp_path)
     owner, _ = register("diagram-owner")
     viewer, viewer_user = register("diagram-viewer")
+    client, client_user = register("diagram-client")
     outsider, _ = register("diagram-outsider")
     workspace, project = project_for(owner)
     add_member(owner, workspace["id"], viewer_user)
+    add_member(owner, workspace["id"], client_user, "client")
 
     created = owner.post(f"/api/projects/{project['id']}/diagrams", headers=csrf(owner), json={
         "title": "Согласование контента", "diagram_type": "process", "template": "approval",
@@ -109,11 +111,15 @@ def test_diagram_approval_template_edit_and_access(tmp_path, monkeypatch) -> Non
     assert created.status_code == 201, created.text
     diagram = created.json()
     assert len(diagram["nodes"]) >= 4 and len(diagram["edges"]) == len(diagram["nodes"]) - 1
+    assert diagram["visibility"] == "team"
     assert viewer.get(f"/api/diagrams/{diagram['id']}").status_code == 200
+    assert client.get(f"/api/diagrams/{diagram['id']}").status_code == 404
+    assert client.get(f"/api/projects/{project['id']}/diagrams").json() == []
     assert outsider.get(f"/api/diagrams/{diagram['id']}").status_code == 404
 
     payload = {
         "title": "Производство ролика", "diagram_type": "flowchart", "description": "От идеи до публикации",
+        "visibility": "client",
         "viewport": {"x": 10, "y": 20, "zoom": 1.2},
         "nodes": [
             {"key": "start", "kind": "start", "title": "Идея", "x": 50, "y": 80},
@@ -129,7 +135,10 @@ def test_diagram_approval_template_edit_and_access(tmp_path, monkeypatch) -> Non
     saved = owner.put(f"/api/diagrams/{diagram['id']}", headers=csrf(owner), json=payload)
     assert saved.status_code == 200, saved.text
     assert saved.json()["viewport"]["zoom"] == 1.2
+    assert saved.json()["visibility"] == "client"
     assert saved.json()["edges"][1]["label"] == "Да"
+    assert client.get(f"/api/diagrams/{diagram['id']}").status_code == 200
+    assert client.get(f"/api/projects/{project['id']}/diagrams").json()[0]["id"] == diagram["id"]
     assert owner.get(f"/api/projects/{project['id']}/diagrams").json()[0]["title"] == "Производство ролика"
     graph_nodes = {node["id"] for node in owner.get(f"/api/projects/{project['id']}/graph").json()["nodes"]}
     assert f"diagram:{diagram['id']}" in graph_nodes
@@ -144,7 +153,10 @@ def test_client_graph_hides_team_only_reviews(tmp_path, monkeypatch) -> None:
     workspace, project = project_for(owner)
     add_member(owner, workspace["id"], client_user, "client")
     _, _, review = seed_graph(owner, project["id"])
-    owner_nodes = {node["id"] for node in owner.get(f"/api/projects/{project['id']}/graph").json()["nodes"]}
+    owner_graph = owner.get(f"/api/projects/{project['id']}/graph").json()
+    owner_nodes = {node["id"] for node in owner_graph["nodes"]}
     client_nodes = {node["id"] for node in client.get(f"/api/projects/{project['id']}/graph").json()["nodes"]}
     assert f"review:{review['id']}" in owner_nodes
+    review_node = next(node for node in owner_graph["nodes"] if node["id"] == f"review:{review['id']}")
+    assert review_node["extra"]["attachment_id"]
     assert f"review:{review['id']}" not in client_nodes
