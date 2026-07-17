@@ -15,6 +15,7 @@ function node(tag, className, text) {
 }
 
 function canAnalyze(context) { return ['owner', 'admin', 'editor'].includes(context?.workspace?.role); }
+function canContribute(context) { return canAnalyze(context) || context?.workspace?.role === 'client'; }
 function dateText(value) { return value ? new Intl.DateTimeFormat('ru', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(value)) : null; }
 function scoreLabel(score) { return score >= 70 ? 'Нужна немедленная реакция' : score >= 40 ? 'Есть узкие места' : score >= 15 ? 'Стоит проверить' : 'Всё спокойно'; }
 
@@ -73,7 +74,9 @@ export function initDecisionIntelligence({ bus, bridge, router }) {
       meta.append(node('span', '', KIND[item.kind]?.label || item.kind)); copy.append(meta); card.append(copy);
       const actions = node('div', 'decision-signal-actions'); const status = node('select');
       for (const [value, label] of [['open', 'Открыт'], ['in_progress', 'В работе'], ['done', 'Готово'], ['dismissed', 'Скрыть']]) { const option = node('option', '', label); option.value = value; option.selected = item.status === value; status.append(option); }
-      status.dataset.insightStatus = item.id; actions.append(status); const graph = node('button', '', 'На карте'); graph.type = 'button'; graph.dataset.insightGraph = item.id; actions.append(graph); card.append(actions); host.append(card);
+      status.dataset.insightStatus = item.id;
+      status.disabled = !(canAnalyze(state.context) || item.is_own || item.assignee?.id === state.context?.user?.id);
+      actions.append(status); const graph = node('button', '', 'На карте'); graph.type = 'button'; graph.dataset.insightGraph = item.id; actions.append(graph); card.append(actions); host.append(card);
     }
   }
 
@@ -95,11 +98,22 @@ export function initDecisionIntelligence({ bus, bridge, router }) {
     finally { setBusy(false); }
   }
 
+  function renderAssignees() {
+    const select = dialog.querySelector('[name="assignee_user_id"]');
+    const current = select.value;
+    const visibility = dialog.querySelector('[name="visibility"]').value;
+    select.replaceChildren(node('option', '', 'Без ответственного')); select.firstElementChild.value = '';
+    for (const member of state.members) {
+      if (visibility === 'team' && member.role === 'client') continue;
+      const option = node('option', '', member.display_name || member.email); option.value = member.user_id; select.append(option);
+    }
+    if ([...select.options].some((option) => option.value === current)) select.value = current;
+  }
+
   async function loadMembers() {
     const workspaceId = state.context?.workspace?.id; if (!workspaceId) return;
     state.members = await bridge.api(`/api/workspaces/${workspaceId}/members`);
-    const select = dialog.querySelector('[name="assignee_user_id"]'); select.replaceChildren(node('option', '', 'Без ответственного')); select.firstElementChild.value = '';
-    for (const member of state.members) { const option = node('option', '', member.display_name || member.email); option.value = member.user_id; select.append(option); }
+    renderAssignees();
   }
 
   async function extract(useAI = false) {
@@ -138,6 +152,9 @@ export function initDecisionIntelligence({ bus, bridge, router }) {
     state.context = context || bridge.getContext?.() || {}; const projectId = state.context?.project?.id; if (!projectId) return;
     const changed = projectId !== state.projectId; state.projectId = projectId;
     root.querySelector('[data-intel-action="extract"]').classList.toggle('hidden', !canAnalyze(state.context));
+    root.querySelector('[data-intel-action="new"]').classList.toggle('hidden', !canContribute(state.context));
+    root.querySelector('[data-intel-action="briefing"]').classList.toggle('hidden', !canContribute(state.context));
+    root.querySelector('[data-intel-action="briefing-ai"]').classList.toggle('hidden', !canAnalyze(state.context));
     const visibility = dialog.querySelector('[name="visibility"]');
     visibility.value = state.context?.workspace?.role === 'client' ? 'client' : visibility.value;
     visibility.disabled = state.context?.workspace?.role === 'client';
@@ -151,11 +168,16 @@ export function initDecisionIntelligence({ bus, bridge, router }) {
     else if (action === 'briefing') briefing(false).catch(errorMessage); else if (action === 'briefing-ai') briefing(true).catch(errorMessage);
     else if (action === 'graph') router.open('graph');
     const filter = event.target.closest('[data-intel-filter]')?.dataset.intelFilter; if (filter) { state.filter = filter; root.querySelectorAll('[data-intel-filter]').forEach((button) => button.classList.toggle('active', button.dataset.intelFilter === filter)); renderSignals(); }
-    const insightGraph = event.target.closest('[data-insight-graph]')?.dataset.insightGraph; if (insightGraph) router.open('graph');
-    const queue = event.target.closest('[data-queue-type]'); if (queue) { const page = queue.dataset.queueType === 'review' ? 'library' : queue.dataset.queueType === 'overdue' ? 'content' : 'attention'; if (page !== 'attention') router.open(page); }
+    const insightGraph = event.target.closest('[data-insight-graph]')?.dataset.insightGraph; if (insightGraph) router.open('graph', { insight: insightGraph });
+    const queue = event.target.closest('[data-queue-type]');
+    if (queue?.dataset.queueType === 'review' && queue.dataset.attachmentId) {
+      bus.emit('asset:open', { assetId: queue.dataset.attachmentId, projectId: state.projectId });
+      bus.emit('review:focus', { reviewId: queue.dataset.queueId, attachmentId: queue.dataset.attachmentId });
+    } else if (queue?.dataset.queueType === 'overdue') router.open('content');
   });
   root.addEventListener('change', (event) => { const id = event.target.dataset.insightStatus; if (id) patchInsight(id, { status: event.target.value }).catch(errorMessage); });
   dialog.querySelector('form').addEventListener('submit', createInsight);
+  dialog.querySelector('[name="visibility"]').addEventListener('change', renderAssignees);
   bus.on('context:change', (context) => { state.context = context; if (context.page === 'attention') activate(context, true).catch(errorMessage); });
   bus.on('route:change', ({ page }) => { if (page === 'attention') activate(bridge.getContext?.(), true).catch(errorMessage); });
   const initial = bridge.getContext?.(); if (initial?.project?.id) activate(initial).catch(errorMessage);

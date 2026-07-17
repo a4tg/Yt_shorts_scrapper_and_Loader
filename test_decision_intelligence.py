@@ -111,7 +111,18 @@ def test_manual_insight_lifecycle_permissions_and_client_visibility() -> None:
     assert client.delete(f"/api/insights/{team.json()['id']}", headers=csrf(client)).status_code == 404
     assert outsider.get(f"/api/projects/{project['id']}/attention").status_code == 404
     assert viewer.post(f"/api/projects/{project['id']}/insights/extract", headers=csrf(viewer), json={}).status_code == 403
+    assert viewer.post(f"/api/projects/{project['id']}/insights", headers=csrf(viewer), json={
+        "kind": "action", "title": "Наблюдатель не должен создавать сигнал",
+    }).status_code == 403
+    assert owner.post(f"/api/projects/{project['id']}/insights", headers=csrf(owner), json={
+        "kind": "action", "title": "Скрытая задача клиента",
+        "visibility": "team", "assignee_user_id": client_user["id"],
+    }).status_code == 400
 
+    assert viewer.patch(
+        f"/api/insights/{team.json()['id']}", headers=csrf(viewer),
+        json={"title": "Попытка переписать сигнал"},
+    ).status_code == 403
     done = viewer.patch(f"/api/insights/{team.json()['id']}", headers=csrf(viewer), json={"status": "done"})
     assert done.status_code == 200 and done.json()["status"] == "done"
     assert done.json()["completed_at"]
@@ -139,3 +150,42 @@ def test_briefing_has_deterministic_fallback_and_sanitized_ai(monkeypatch) -> No
     assert generated.json()["provider"] == "openai"
     assert generated.json()["highlights"] == [{"title": "Signal", "detail": "Useful"}]
     assert len(owner.get(f"/api/projects/{project['id']}/briefings").json()) == 2
+
+
+def test_client_cannot_use_ai_briefing_or_link_internal_diagram(monkeypatch) -> None:
+    owner, _ = register("client-intel-owner")
+    client, client_user = register("client-intel-client")
+    workspace, project = context(owner)
+    add_member(owner, workspace["id"], client_user, "client")
+    diagram = owner.post(
+        f"/api/projects/{project['id']}/diagrams", headers=csrf(owner),
+        json={"title": "Внутренний план", "visibility": "team"},
+    ).json()
+
+    linked = client.post(
+        f"/api/projects/{project['id']}/insights", headers=csrf(client),
+        json={
+            "kind": "question",
+            "title": "Ссылка на скрытую схему",
+            "visibility": "client",
+            "links": [{
+                "entity_type": "diagram",
+                "entity_id": diagram["id"],
+                "relation_type": "impacts",
+            }],
+        },
+    )
+    assert linked.status_code == 400
+
+    monkeypatch.setattr(decision_routes, "ai_enabled", lambda: True)
+
+    def unexpected_ai_call(*args, **kwargs):
+        raise AssertionError("Client briefing must not call the paid AI provider")
+
+    monkeypatch.setattr(decision_routes, "generate_text", unexpected_ai_call)
+    briefing = client.post(
+        f"/api/projects/{project['id']}/briefings", headers=csrf(client),
+        json={"use_ai": True, "visibility": "client"},
+    )
+    assert briefing.status_code == 201, briefing.text
+    assert briefing.json()["provider"] == "rules"

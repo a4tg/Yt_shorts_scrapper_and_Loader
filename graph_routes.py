@@ -138,6 +138,20 @@ def _validate_entity(db: Session, project: Project, entity_type: str, entity_id:
         if conversation is None or conversation.project_id != project.id or not (conversation.is_project_wide or participant):
             raise HTTPException(400, "Связываемая сущность не принадлежит проекту.")
         return
+    if entity_type == "diagram" and user_id:
+        diagram = db.get(ProjectDiagram, entity_id)
+        member = db.scalar(select(WorkspaceMember).where(
+            WorkspaceMember.workspace_id == project.workspace_id,
+            WorkspaceMember.user_id == user_id,
+        ))
+        if (
+            diagram is None
+            or diagram.project_id != project.id
+            or member is None
+            or (member.role == "client" and diagram.visibility != "client")
+        ):
+            raise HTTPException(400, "Связываемая сущность не принадлежит проекту.")
+        return
     if entity_type == "user":
         exists = db.scalar(select(WorkspaceMember.id).where(
             WorkspaceMember.workspace_id == project.workspace_id, WorkspaceMember.user_id == entity_id,

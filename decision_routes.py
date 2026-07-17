@@ -113,17 +113,34 @@ def _require_editor(member: WorkspaceMember) -> None:
         raise HTTPException(403, "Для запуска анализа нужна роль редактора.")
 
 
+def _require_contributor(member: WorkspaceMember) -> None:
+    if member.role != "client" and not has_role(member, "editor"):
+        raise HTTPException(403, "Для создания сигнала нужна роль редактора или клиента.")
+
+
 def _event(project_id: str, event_type: str, user_id: str, **payload: object) -> None:
     project_events.publish(project_id, {
         "type": event_type, "project_id": project_id, "actor_user_id": user_id, **payload,
     })
 
 
-def _validate_assignee(db: Session, project: Project, user_id: str | None) -> None:
-    if user_id and not db.scalar(select(WorkspaceMember.id).where(
-        WorkspaceMember.workspace_id == project.workspace_id, WorkspaceMember.user_id == user_id,
-    )):
+def _validate_assignee(
+    db: Session,
+    project: Project,
+    user_id: str | None,
+    *,
+    visibility: Visibility,
+) -> None:
+    if not user_id:
+        return
+    assignee = db.scalar(select(WorkspaceMember).where(
+        WorkspaceMember.workspace_id == project.workspace_id,
+        WorkspaceMember.user_id == user_id,
+    ))
+    if assignee is None:
         raise HTTPException(400, "Ответственный должен состоять в рабочем пространстве.")
+    if visibility == "team" and assignee.role == "client":
+        raise HTTPException(400, "Клиента нельзя назначить на скрытый командный сигнал.")
 
 
 def _user_payload(user: User | None) -> dict[str, str] | None:
@@ -375,8 +392,11 @@ def list_insights(project_id: str, request: Request, status: str | None = None, 
 @router.post("/projects/{project_id}/insights", status_code=201)
 def create_insight(project_id: str, payload: InsightCreate, request: Request, db: Session = Depends(get_db)) -> dict[str, object]:
     project, member = _project_access(db, project_id, request.state.user.id)
+    _require_contributor(member)
     if member.role == "client" and payload.visibility != "client": raise HTTPException(403, "Клиентская запись должна быть видима заказчику.")
-    _validate_assignee(db, project, payload.assignee_user_id)
+    _validate_assignee(
+        db, project, payload.assignee_user_id, visibility=payload.visibility,
+    )
     item, _ = _upsert_insight(
         db, project, kind=payload.kind, text=payload.description or payload.title,
         source_type="manual", source_id=str(uuid.uuid4()), visibility=payload.visibility,
@@ -402,10 +422,23 @@ def update_insight(insight_id: str, payload: InsightUpdate, request: Request, db
     project, member = _project_access(db, item.project_id, request.state.user.id)
     if member.role == "client" and item.visibility != "client":
         raise HTTPException(404, "Сигнал не найден.")
-    if not (has_role(member, "editor") or item.created_by_user_id == request.state.user.id or item.assignee_user_id == request.state.user.id): raise HTTPException(403, "Недостаточно прав для изменения сигнала.")
+    is_editor = has_role(member, "editor")
+    is_creator = item.created_by_user_id == request.state.user.id
+    is_assignee = item.assignee_user_id == request.state.user.id
+    if not (is_editor or is_creator or is_assignee):
+        raise HTTPException(403, "Недостаточно прав для изменения сигнала.")
     values = payload.model_dump(exclude_unset=True)
     if member.role == "client" and values.get("visibility") not in {None, "client"}: raise HTTPException(403, "Клиент не может создать внутреннюю запись.")
-    if "assignee_user_id" in values: _validate_assignee(db, project, values["assignee_user_id"])
+    protected_fields = {"title", "description", "priority", "visibility", "assignee_user_id", "due_at"}
+    if is_assignee and not (is_editor or is_creator) and protected_fields.intersection(values):
+        raise HTTPException(403, "Ответственный может менять только статус сигнала.")
+    if not is_editor and {"visibility", "assignee_user_id"}.intersection(values):
+        raise HTTPException(403, "Видимость и ответственного меняет редактор.")
+    next_visibility = values.get("visibility", item.visibility)
+    next_assignee = values.get("assignee_user_id", item.assignee_user_id)
+    _validate_assignee(
+        db, project, next_assignee, visibility=next_visibility,
+    )
     for field in ("title", "description", "priority", "visibility", "assignee_user_id", "due_at"):
         if field in values: setattr(item, field, values[field].strip() if isinstance(values[field], str) else values[field])
     if "status" in values:
@@ -456,7 +489,7 @@ def generate_briefing(project_id: str, payload: BriefingRequest, request: Reques
     attention = _attention_data(db, project, member, request.state.user.id)
     visible = [item for item in attention["insights"] if visibility == "team" or item["visibility"] == "client"]
     generated = deterministic_briefing(project.name, visible, attention["stats"]); provider = "rules"; model = None
-    if payload.use_ai and ai_enabled():
+    if payload.use_ai and has_role(member, "editor") and ai_enabled():
         try:
             response = generate_text(
                 json.dumps({"project": project.name, "stats": attention["stats"], "insights": visible[:100]}, ensure_ascii=False),
