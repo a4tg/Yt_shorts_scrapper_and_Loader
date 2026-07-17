@@ -2076,6 +2076,14 @@ function markVideoCompleted(record) {
   if (!state.batchRunning) window.AAPAppMotion?.videoPhase?.('ready');
 }
 
+function confirmDownloadWithoutOverlay(videoCount = 1) {
+  if (state.overlayFiles.length) return true;
+  const subject = videoCount > 1 ? `${videoCount} видео` : 'видео';
+  return window.confirm(
+    `Вы не добавили логотип. Скачать ${subject} без оверлея?`
+  );
+}
+
 $('#select-all-videos').addEventListener('click', () => {
   for (const record of selectableRecords()) { record.checkbox.checked = true; record.card.classList.add('selected'); }
   updateBatchSelection();
@@ -2088,7 +2096,14 @@ $('#clear-video-selection').addEventListener('click', () => {
 
 $('#prepare-selected').addEventListener('click', async () => {
   const records = selectedRecords(); if (!records.length || state.batchRunning) return;
-  const status = $('#batch-status'); state.batchRunning = true; status.className = 'status';
+  const status = $('#batch-status');
+  const withoutOverlayConfirmed = !state.overlayFiles.length;
+  if (!confirmDownloadWithoutOverlay(records.length)) {
+    status.className = 'status';
+    status.textContent = 'Пакетная обработка отменена: добавьте логотип или повторите запуск без оверлея.';
+    return;
+  }
+  state.batchRunning = true; status.className = 'status';
   for (const record of selectableRecords()) { record.checkbox.disabled = true; record.videoButton.disabled = true; }
   updateBatchSelection();
   window.AAPAppMotion?.videoPhase?.('processing');
@@ -2104,7 +2119,8 @@ $('#prepare-selected').addEventListener('click', async () => {
       showSourceVideo(record.item.url, record.item.thumbnail, record.item.title);
       status.textContent = `Обрабатывается ${index + 1} из ${records.length}: ${record.item.title}`;
       const success = await startDownloadUrl(
-        record.item.url, record.videoButton, record.note, logoTokens, batchSettings
+        record.item.url, record.videoButton, record.note, logoTokens, batchSettings,
+        withoutOverlayConfirmed
       );
       record.card.classList.remove('processing');
       if (success) { completed += 1; markVideoCompleted(record); }
@@ -2235,12 +2251,29 @@ function showReadyDownload(job, oldButton, note) {
   });
 }
 
-async function startDownloadUrl(url, button, note, uploadedLogoTokens = null, downloadSettings = null) {
+async function startDownloadUrl(
+  url,
+  button,
+  note,
+  uploadedLogoTokens = null,
+  downloadSettings = null,
+  withoutOverlayConfirmed = false
+) {
+  const logoTokens = uploadedLogoTokens ?? await ensureOverlaysUploaded();
+  if (
+    !logoTokens.length
+    && !withoutOverlayConfirmed
+    && !confirmDownloadWithoutOverlay()
+  ) {
+    button.disabled = false;
+    note.textContent = 'Скачивание отменено. Добавьте логотип или повторите запуск без оверлея.';
+    window.AAPAppMotion?.videoPhase?.('idle');
+    return false;
+  }
   button.disabled = true; note.textContent = 'Подготовка задания…';
   window.AAPAppMotion?.videoPhase?.('processing');
   window.AAPAppMotion?.videoJobUpdated?.(note, { status: 'queued', message: 'Подготовка задания' });
   try {
-    const logoTokens = uploadedLogoTokens || await ensureOverlaysUploaded();
     const created = await api('/api/videos/download', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(downloadPayload(url, logoTokens, downloadSettings))
