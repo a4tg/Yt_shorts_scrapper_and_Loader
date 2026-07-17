@@ -98,6 +98,9 @@ export function initAssetViewer({ bus, bridge }) {
   const searchBox = shell.querySelector('.asset-viewer-text-search');
   const searchInput = searchBox.querySelector('input');
   const searchStatus = searchBox.querySelector('small');
+  const imageActions = [...shell.querySelectorAll(
+    '[data-viewer-action="zoom-out"],[data-viewer-action="zoom-in"],[data-viewer-action="fit"]',
+  )];
   let focusBeforeOpen = null;
 
   function currentIndex() {
@@ -149,6 +152,27 @@ export function initAssetViewer({ bus, bridge }) {
     const link = node('a', 'primary', 'Скачать оригинал'); link.href = state.asset.download_url; link.download = ''; failure.append(link); stage.append(failure);
   }
 
+  function setImageControls(enabled) {
+    for (const button of imageActions) button.disabled = !enabled;
+    if (!enabled) {
+      output.value = '—';
+      output.textContent = output.value;
+    }
+  }
+
+  function emitMediaReady(asset) {
+    bus.emit('asset:media-ready', { asset, shell, stage });
+  }
+
+  function watchMedia(element, asset, token, errorMessage) {
+    element.addEventListener('loadedmetadata', () => {
+      if (token === state.loadToken) emitMediaReady(asset);
+    }, { once: true });
+    element.addEventListener('error', () => {
+      if (token === state.loadToken) showFailure(new Error(errorMessage));
+    }, { once: true });
+  }
+
   function applyImageTransform() {
     const image = stage.querySelector('.asset-viewer-image'); if (!image) return;
     image.style.transform = `translate(${state.panX}px,${state.panY}px) scale(${state.zoom})`;
@@ -186,21 +210,29 @@ export function initAssetViewer({ bus, bridge }) {
     download.href = asset.download_url; position.textContent = `${currentIndex() + 1} / ${state.assets.length}`;
     renderDetails(); renderStrip(); setZoom(1, { fit: true });
     const kind = fileKind(asset);
+    setImageControls(kind === 'image');
     try {
       if (kind === 'image') {
         const image = node('img', 'asset-viewer-image'); image.alt = asset.name; image.draggable = false;
-        image.addEventListener('load', () => { if (token === state.loadToken) { stage.replaceChildren(image); applyImageTransform(); bus.emit('asset:media-ready', { asset, shell, stage }); } });
+        image.addEventListener('load', () => { if (token === state.loadToken) { stage.replaceChildren(image); applyImageTransform(); emitMediaReady(asset); } });
         image.addEventListener('error', () => { if (token === state.loadToken) showFailure(new Error('Изображение не удалось прочитать.')); }); image.src = asset.preview_url;
       } else if (kind === 'video') {
-        const video = node('video', 'asset-viewer-video'); video.controls = true; video.playsInline = true; video.preload = 'metadata'; video.src = asset.preview_url; stage.replaceChildren(video);
+        const video = node('video', 'asset-viewer-video'); video.controls = true; video.playsInline = true; video.preload = 'metadata';
+        watchMedia(video, asset, token, 'Браузер не смог воспроизвести это видео. Скачайте оригинал или используйте MP4 H.264.');
+        video.src = asset.preview_url; stage.replaceChildren(video);
       } else if (kind === 'audio') {
         const player = node('div', 'asset-viewer-audio'); player.append(node('span', '', '♫'), node('strong', '', asset.name));
-        const audio = node('audio'); audio.controls = true; audio.preload = 'metadata'; audio.src = asset.preview_url; player.append(audio); stage.replaceChildren(player);
+        const audio = node('audio'); audio.controls = true; audio.preload = 'metadata';
+        watchMedia(audio, asset, token, 'Браузер не смог воспроизвести эту аудиодорожку. Оригинал доступен для скачивания.');
+        audio.src = asset.preview_url; player.append(audio); stage.replaceChildren(player);
       } else if (kind === 'pdf') {
-        const frame = node('iframe', 'asset-viewer-pdf'); frame.src = asset.preview_url; frame.title = `PDF: ${asset.name}`; stage.replaceChildren(frame);
+        const frame = node('iframe', 'asset-viewer-pdf'); frame.title = `PDF: ${asset.name}`;
+        frame.addEventListener('load', () => { if (token === state.loadToken) emitMediaReady(asset); }, { once: true });
+        frame.src = asset.preview_url; stage.replaceChildren(frame);
       } else if (kind === 'text' || kind === 'table') {
         const payload = await bridge.api(asset.preview_data_url); if (token !== state.loadToken) return;
         stage.replaceChildren(); if (payload.kind === 'table') renderTable(payload); else renderText(payload);
+        emitMediaReady(asset);
       } else showFailure(new Error('Предварительный просмотр этого формата ещё не поддерживается.'));
     } catch (error) { if (token === state.loadToken) showFailure(error); }
     bus.emit('asset:change', { asset, assets: state.assets, projectId: state.projectId, shell, stage });
@@ -267,9 +299,19 @@ export function initAssetViewer({ bus, bridge }) {
     searchStatus.textContent = query ? `${count} совпадений` : '';
   });
   window.addEventListener('keydown', (event) => {
-    if (!state.open || event.target.matches('input,textarea')) return;
-    if (event.key === 'Escape') closeViewer();
-    else if (event.key === 'ArrowLeft') move(-1);
+    if (!state.open) return;
+    if (event.key === 'Escape') { event.preventDefault(); closeViewer(); return; }
+    if (event.key === 'Tab') {
+      const focusable = [...shell.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')]
+        .filter((element) => !element.closest('.hidden') && element.getClientRects().length);
+      if (!focusable.length) return;
+      const first = focusable[0]; const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+      return;
+    }
+    if (event.target.matches('input,textarea,select') || event.target.isContentEditable) return;
+    if (event.key === 'ArrowLeft') move(-1);
     else if (event.key === 'ArrowRight') move(1);
     else if (event.key === '+' || event.key === '=') setZoom(state.zoom * 1.25);
     else if (event.key === '-') setZoom(state.zoom / 1.25);

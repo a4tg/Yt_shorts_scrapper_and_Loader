@@ -71,12 +71,22 @@ def _decode_text(value: bytes) -> str:
 def _table_payload(rows: list[list[str]], *, truncated: bool = False, label: str | None = None) -> dict[str, object]:
     normalized = [[str(cell)[:20_000] for cell in row[:MAX_TABLE_COLUMNS]] for row in rows[:MAX_TABLE_ROWS]]
     width = max((len(row) for row in normalized), default=0)
-    columns = normalized[0] if normalized else []
+    source_columns = normalized[0] if normalized else []
     data = normalized[1:] if normalized else []
-    if len(set(columns)) != len(columns) or any(not column.strip() for column in columns):
-        columns = [f"Столбец {index + 1}" for index in range(width)]
-        data = normalized
-    columns += [f"Столбец {index + 1}" for index in range(len(columns), width)]
+    columns: list[str] = []
+    used_columns: set[str] = set()
+    for index, source_column in enumerate(source_columns):
+        column = source_column.strip() or f"Столбец {index + 1}"
+        if column in used_columns:
+            column = f"{column} ({index + 1})"
+        used_columns.add(column)
+        columns.append(column)
+    for index in range(len(columns), width):
+        column = f"Столбец {index + 1}"
+        while column in used_columns:
+            column += " (доп.)"
+        used_columns.add(column)
+        columns.append(column)
     data = [row + [""] * (width - len(row)) for row in data]
     return {
         "kind": "table", "columns": columns, "rows": data,
@@ -134,12 +144,26 @@ def _xlsx(path: Path) -> dict[str, object]:
         for row_node in (node for node in root.iter() if node.tag.rsplit("}", 1)[-1] == "row"):
             row: list[str] = []
             for cell in (node for node in row_node if node.tag.rsplit("}", 1)[-1] == "c"):
+                reference = cell.attrib.get("r", "")
+                column_match = re.match(r"([A-Z]+)", reference.upper())
+                if column_match:
+                    column_index = 0
+                    for character in column_match.group(1):
+                        column_index = column_index * 26 + ord(character) - ord("A") + 1
+                    column_index -= 1
+                    if column_index >= MAX_TABLE_COLUMNS:
+                        continue
+                    if column_index > len(row):
+                        row.extend([""] * (column_index - len(row)))
                 cell_type = cell.attrib.get("t")
                 value_node = next((node for node in cell.iter() if node.tag.rsplit("}", 1)[-1] in {"v", "t"}), None)
                 value = value_node.text or "" if value_node is not None else ""
                 if cell_type == "s" and value.isdigit() and int(value) < len(shared):
                     value = shared[int(value)]
-                row.append(value)
+                if column_match and column_index < len(row):
+                    row[column_index] = value
+                else:
+                    row.append(value)
             rows.append(row)
             if len(rows) > MAX_TABLE_ROWS:
                 break
