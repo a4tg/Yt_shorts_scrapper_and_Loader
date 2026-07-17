@@ -28,6 +28,9 @@ All As Planned — Web-SaaS для маркетинговых команд: ра
 
 Актуальный порядок доведения продукта до закрытой беты и коммерческого запуска
 зафиксирован в [`LAUNCH_PLAN.md`](LAUNCH_PLAN.md).
+Проверка deploy-ready кандидата описана в [`DEPLOY_READY.md`](DEPLOY_READY.md),
+а безопасное включение ЮKassa — в
+[`deploy/commercial-readiness.md`](deploy/commercial-readiness.md).
 
 ## Файлы проектов и обсуждения
 
