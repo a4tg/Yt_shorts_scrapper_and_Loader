@@ -7,7 +7,8 @@ const state = {
   importItemsUrl: null, importPagination: null,
   paymentResumed: false, authConfig: {}, accountToken: null, currentPage: 'dashboard',
   workspaces: [], currentWorkspaceId: null, projects: [], currentProjectId: null,
-  workspaceMembers: [], approvalWorkflow: null, contentItems: [], contentView: 'board',
+  workspaceMembers: [], approvalWorkflow: null, approvalQueue: [], approvalQueueSummary: {},
+  approvalFilter: 'all', approvalLibrary: [], contentItems: [], contentView: 'board',
   contentCalendarDate: new Date(),
   libraryItems: [], libraryFolders: [], currentLibraryFolderId: null,
   videoLibraryJobs: [], directSourceChannel: '', directSourceTitle: '',
@@ -777,15 +778,258 @@ function syncApprovalStageOrder() {
 
 async function loadApprovalWorkflow() {
   if (!state.currentProjectId) return;
-  const workflow = await api(`/api/projects/${state.currentProjectId}/approval-workflow`);
+  const [workflow, queue, library] = await Promise.all([
+    api(`/api/projects/${state.currentProjectId}/approval-workflow`),
+    api(`/api/projects/${state.currentProjectId}/approval-queue?status=${encodeURIComponent(state.approvalFilter)}`),
+    api(`/api/projects/${state.currentProjectId}/library`)
+  ]);
   state.approvalWorkflow = workflow; $('#workflow-name').value = workflow.name;
+  state.approvalQueue = queue.requests || [];
+  state.approvalQueueSummary = queue.summary || {};
+  state.approvalLibrary = library || [];
   const container = $('#approval-stages'); container.replaceChildren();
   workflow.stages.forEach((stage) => container.append(approvalStageRow(stage)));
   syncApprovalStageOrder();
   const workspace = currentWorkspace();
   const canEdit = ['owner', 'admin', 'editor'].includes(workspace?.role);
   $('#save-workflow-button').disabled = !canEdit; $('#add-approval-stage').disabled = !canEdit;
+  $('#approval-request-open').disabled = !canEdit;
   container.querySelectorAll('input,select,button').forEach((control) => { control.disabled = !canEdit; });
+  renderApprovalQueue();
+}
+
+const approvalStatusMeta = {
+  pending: { label: 'Ожидает решения', color: '#7c6cff' },
+  approved: { label: 'Одобрено', color: '#38d6a0' },
+  changes_requested: { label: 'Нужны правки', color: '#ffad5b' },
+  cancelled: { label: 'Отменено', color: '#8491a8' },
+  overdue: { label: 'Просрочено', color: '#ff6f7d' }
+};
+
+const approvalEventLabels = {
+  requested: 'Отправлено на согласование',
+  reopened: 'Согласование открыто повторно',
+  updated: 'Параметры согласования изменены',
+  cancelled: 'Согласование отменено',
+  decision: 'Получено решение',
+  decision_withdrawn: 'Решение отозвано'
+};
+
+function approvalCanEdit() {
+  return ['owner', 'admin', 'editor'].includes(currentWorkspace()?.role);
+}
+
+function approvalCanDecide() {
+  return ['owner', 'admin', 'editor', 'client'].includes(currentWorkspace()?.role);
+}
+
+function approvalInitials(person) {
+  const source = person?.name || person?.email || '?';
+  return source.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toLocaleUpperCase('ru');
+}
+
+function renderApprovalSummary() {
+  const container = $('#approval-queue-summary'); container.replaceChildren();
+  const values = [
+    ['total', 'Всего', '#7c6cff'],
+    ['pending', 'Ожидают', '#7f9cff'],
+    ['overdue', 'Просрочены', '#ff6f7d'],
+    ['changes_requested', 'Нужны правки', '#ffad5b'],
+    ['approved', 'Одобрены', '#38d6a0']
+  ];
+  for (const [key, label, color] of values) {
+    const card = document.createElement('article'); card.className = 'approval-summary-card';
+    card.style.setProperty('--summary-color', color);
+    const caption = document.createElement('span'); caption.textContent = label;
+    const value = document.createElement('strong'); value.textContent = state.approvalQueueSummary[key] || 0;
+    card.append(caption, value); container.append(card);
+  }
+}
+
+function approvalPerson(person, fallback) {
+  const row = document.createElement('span'); row.className = 'approval-card-person';
+  const avatar = document.createElement('i'); avatar.textContent = approvalInitials(person);
+  const name = document.createElement('span'); name.textContent = person?.name || person?.email || fallback;
+  row.append(avatar, name); return row;
+}
+
+function openApprovalAsset(item) {
+  const asset = { ...item.attachment, content: item.content };
+  if (window.AAPWorkspaceDepth?.bus) {
+    window.AAPWorkspaceDepth.bus.emit('asset:open', {
+      asset,
+      assets: state.approvalQueue.map((entry) => ({ ...entry.attachment, content: entry.content })),
+      projectId: state.currentProjectId
+    });
+  } else {
+    window.open(item.attachment.preview_url || item.attachment.download_url, '_blank', 'noopener');
+  }
+}
+
+async function decideApproval(item, decision, comment, button) {
+  button.disabled = true;
+  try {
+    await api(`/api/content-attachments/${item.attachment.id}/approval`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decision, comment: comment.trim() || null })
+    });
+    await loadApprovalWorkflow();
+    showToast(decision === 'approved' ? 'Материал одобрен.' : 'Материал возвращён на доработку.');
+  } catch (error) {
+    showWorkspaceError(error);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function toggleApprovalHistory(item, card, button) {
+  const existing = card.querySelector('.approval-history');
+  if (existing) {
+    existing.remove(); button.textContent = 'История'; return;
+  }
+  button.disabled = true;
+  try {
+    const events = await api(`/api/approval-requests/${item.id}/history`);
+    const history = document.createElement('section'); history.className = 'approval-history';
+    for (const event of events) {
+      const row = document.createElement('div'); row.className = 'approval-history-event';
+      const time = document.createElement('time'); time.dateTime = event.created_at;
+      time.textContent = contentDate(event.created_at, true);
+      const actor = document.createElement('strong'); actor.textContent = event.actor?.name || event.actor?.email || 'Участник';
+      const action = document.createElement('span');
+      action.textContent = approvalEventLabels[event.event_type] || event.event_type;
+      if (event.details?.decision === 'approved') action.textContent += ' · Одобрено';
+      if (event.details?.decision === 'changes_requested') action.textContent += ' · Нужны правки';
+      if (event.details?.comment) action.textContent += ` · ${event.details.comment}`;
+      row.append(time, actor, action); history.append(row);
+    }
+    if (!events.length) {
+      const empty = document.createElement('span'); empty.textContent = 'История пока пуста.'; history.append(empty);
+    }
+    card.append(history); button.textContent = 'Скрыть историю';
+  } catch (error) {
+    showWorkspaceError(error);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function approvalCard(item) {
+  const card = document.createElement('article'); card.className = 'approval-card';
+  const statusKey = item.overdue ? 'overdue' : item.status;
+  const meta = approvalStatusMeta[statusKey] || approvalStatusMeta.pending;
+  card.style.setProperty('--approval-accent', meta.color);
+
+  const main = document.createElement('div'); main.className = 'approval-card-main';
+  const head = document.createElement('div'); head.className = 'approval-card-head';
+  const title = document.createElement('h3'); title.textContent = item.content?.title || item.attachment.name;
+  const status = document.createElement('span'); status.className = 'approval-status-pill'; status.textContent = meta.label;
+  head.append(title, status);
+  if (item.stage) {
+    const stage = document.createElement('span'); stage.className = 'approval-stage-pill';
+    stage.textContent = item.stage.name; stage.style.setProperty('--approval-accent', item.stage.color || meta.color);
+    head.append(stage);
+  }
+  const metadata = document.createElement('div'); metadata.className = 'approval-card-meta';
+  const file = document.createElement('span'); file.textContent = `${item.attachment.name} · v${item.attachment.version_number}`;
+  const requested = document.createElement('span'); requested.textContent = `Отправлено ${contentDate(item.created_at, true)}`;
+  metadata.append(file, requested);
+  if (item.due_at) {
+    const due = document.createElement('span');
+    due.textContent = `${item.overdue ? 'Просрочено' : 'Срок'}: ${contentDate(item.due_at, true)}`;
+    metadata.append(due);
+  }
+  const people = document.createElement('div'); people.className = 'approval-card-actions';
+  people.append(
+    approvalPerson(item.assignee, 'Любой согласующий'),
+    approvalPerson(item.requested_by, 'Автор запроса')
+  );
+  main.append(head, metadata, people);
+  if (item.note) {
+    const note = document.createElement('p'); note.className = 'approval-card-note'; note.textContent = item.note; main.append(note);
+  }
+
+  const side = document.createElement('aside'); side.className = 'approval-card-side';
+  if (approvalCanDecide() && item.status === 'pending') {
+    const decision = document.createElement('div'); decision.className = 'approval-decision-box';
+    const comment = document.createElement('textarea'); comment.rows = 2; comment.maxLength = 4000;
+    comment.placeholder = 'Комментарий к решению';
+    const buttons = document.createElement('div'); buttons.className = 'approval-card-actions';
+    const approve = document.createElement('button'); approve.className = 'primary'; approve.type = 'button'; approve.textContent = 'Одобрить';
+    const changes = document.createElement('button'); changes.className = 'ghost'; changes.type = 'button'; changes.textContent = 'Нужны правки';
+    approve.addEventListener('click', () => decideApproval(item, 'approved', comment.value, approve));
+    changes.addEventListener('click', () => decideApproval(item, 'changes_requested', comment.value, changes));
+    buttons.append(approve, changes); decision.append(comment, buttons); side.append(decision);
+  }
+  const actions = document.createElement('div'); actions.className = 'approval-card-actions';
+  const open = document.createElement('button'); open.className = 'ghost'; open.type = 'button'; open.textContent = 'Открыть материал';
+  open.addEventListener('click', () => openApprovalAsset(item));
+  const history = document.createElement('button'); history.className = 'ghost'; history.type = 'button'; history.textContent = 'История';
+  history.addEventListener('click', () => toggleApprovalHistory(item, card, history));
+  actions.append(open, history);
+  if (approvalCanEdit() && item.status === 'pending') {
+    const cancel = document.createElement('button'); cancel.className = 'ghost'; cancel.type = 'button'; cancel.textContent = 'Отменить';
+    cancel.addEventListener('click', async () => {
+      if (!confirm('Отменить это согласование?')) return;
+      try {
+        await api(`/api/approval-requests/${item.id}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'cancelled' })
+        });
+        await loadApprovalWorkflow(); showToast('Согласование отменено.');
+      } catch (error) { showWorkspaceError(error); }
+    });
+    actions.append(cancel);
+  }
+  side.append(actions); card.append(main, side); return card;
+}
+
+function renderApprovalQueue() {
+  renderApprovalSummary();
+  document.querySelectorAll('[data-approval-filter]').forEach((button) => {
+    button.classList.toggle('active', button.dataset.approvalFilter === state.approvalFilter);
+  });
+  const container = $('#approval-queue-list'); container.replaceChildren();
+  if (!state.approvalQueue.length) {
+    const empty = document.createElement('div'); empty.className = 'approval-empty';
+    const icon = document.createElement('span'); icon.textContent = '✓';
+    const title = document.createElement('h3'); title.textContent = state.approvalFilter === 'all'
+      ? 'Очередь пока пуста' : 'В этой категории ничего нет';
+    const text = document.createElement('p'); text.textContent = state.approvalFilter === 'all'
+      ? 'Отправьте первый материал и назначьте ответственного за решение.'
+      : 'Смените фильтр, чтобы увидеть остальные согласования.';
+    empty.append(icon, title, text); container.append(empty); return;
+  }
+  state.approvalQueue.forEach((item) => container.append(approvalCard(item)));
+}
+
+function openApprovalRequestDialog() {
+  const dialog = $('#approval-request-dialog');
+  const attachment = $('#approval-request-attachment'); attachment.replaceChildren();
+  for (const item of state.approvalLibrary.filter((entry) => entry.is_current)) {
+    const option = document.createElement('option'); option.value = item.id;
+    option.textContent = `${item.name} · v${item.version_number}`;
+    attachment.append(option);
+  }
+  const assignee = $('#approval-request-assignee');
+  assignee.replaceChildren(new Option('Любой согласующий', ''));
+  for (const member of state.workspaceMembers.filter((entry) => ['owner', 'admin', 'editor', 'client'].includes(entry.role))) {
+    const option = new Option(
+      `${member.display_name || member.email} · ${workspaceRoleLabels[member.role] || member.role}`,
+      member.user_id
+    );
+    assignee.append(option);
+  }
+  const stage = $('#approval-request-stage');
+  stage.replaceChildren(new Option('Текущий этап материала', ''));
+  for (const item of state.approvalWorkflow?.stages || []) stage.append(new Option(item.name, item.id));
+  $('#approval-request-status').textContent = '';
+  $('#approval-request-form').reset();
+  if (!attachment.options.length) {
+    showToast('Сначала загрузите материал в медиатеку.', 'error'); return;
+  }
+  dialog.showModal();
 }
 
 function workflowPayload() {
@@ -3185,6 +3429,53 @@ $('#save-workflow-button').addEventListener('click', async (event) => {
     await loadApprovalWorkflow();
   } catch (error) { status.classList.add('error'); status.textContent = error.message; }
   finally { button.disabled = false; }
+});
+
+document.querySelectorAll('[data-approval-filter]').forEach((button) => {
+  button.addEventListener('click', async () => {
+    state.approvalFilter = button.dataset.approvalFilter;
+    try { await loadApprovalWorkflow(); } catch (error) { showWorkspaceError(error); }
+  });
+});
+$('#approval-request-open').addEventListener('click', openApprovalRequestDialog);
+$('#approval-request-close').addEventListener('click', () => $('#approval-request-dialog').close());
+$('#approval-request-cancel').addEventListener('click', () => $('#approval-request-dialog').close());
+$('#approval-request-assignee').addEventListener('change', (event) => {
+  const member = state.workspaceMembers.find((item) => item.user_id === event.target.value);
+  if (member?.role === 'client') $('#approval-request-visibility').value = 'client';
+});
+$('#approval-request-visibility').addEventListener('change', (event) => {
+  if (event.target.value !== 'team') return;
+  const selected = state.workspaceMembers.find((item) => item.user_id === $('#approval-request-assignee').value);
+  if (selected?.role === 'client') $('#approval-request-assignee').value = '';
+});
+$('#approval-request-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const submit = event.submitter; submit.disabled = true;
+  const status = $('#approval-request-status'); status.className = 'auth-status';
+  status.textContent = 'Отправляем материал…';
+  try {
+    const localDue = $('#approval-request-due').value;
+    await api(`/api/content-attachments/${$('#approval-request-attachment').value}/approval-request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        assignee_user_id: $('#approval-request-assignee').value || null,
+        stage_id: $('#approval-request-stage').value || null,
+        due_at: localDue ? new Date(localDue).toISOString() : null,
+        visibility: $('#approval-request-visibility').value,
+        note: $('#approval-request-note').value.trim() || null
+      })
+    });
+    $('#approval-request-dialog').close();
+    state.approvalFilter = 'all';
+    await loadApprovalWorkflow();
+    showToast('Материал отправлен на согласование.');
+  } catch (error) {
+    status.classList.add('error'); status.textContent = error.message;
+  } finally {
+    submit.disabled = false;
+  }
 });
 
 $('#create-content-button').addEventListener('click', () => openContentEditor().catch(showWorkspaceError));

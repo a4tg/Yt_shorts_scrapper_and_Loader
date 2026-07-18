@@ -23,6 +23,7 @@
   <link rel="stylesheet" href="/assets/chat-anywhere-layout.css">
   <link rel="stylesheet" href="/assets/asset-viewer.css">
   <link rel="stylesheet" href="/assets/asset-reviews.css">
+  <link rel="stylesheet" href="/assets/approvals.css">
   <link rel="stylesheet" href="/assets/project-graph.css">
   <link rel="stylesheet" href="/assets/project-graph-editor.css">
   <link rel="stylesheet" href="/assets/decision-intelligence.css">
@@ -271,13 +272,31 @@
       </section>
     </section>
     <section class="workspace-page hidden" data-page="approvals">
-      <section class="approval-builder panel">
-        <div class="management-heading"><div><p class="eyebrow">Процесс проекта</p><h2>Этапы согласования</h2><p>Настройте путь материала от идеи до публикации.</p></div><button id="save-workflow-button" class="primary" type="button">Сохранить процесс</button></div>
-        <label class="workflow-name-field"><span>Название процесса</span><input id="workflow-name" type="text" maxlength="120" value="Основной процесс"></label>
-        <div id="approval-stages" class="approval-stage-list" aria-live="polite"></div>
-        <button id="add-approval-stage" class="ghost" type="button">+ Добавить этап</button>
-        <div id="workflow-status" class="status hidden" aria-live="polite"></div>
-      </section>
+      <div class="approvals-page">
+        <header class="approvals-page-head">
+          <div><p class="eyebrow">Контроль качества</p><h2>Очередь согласований</h2><p>Материалы, ответственные, сроки и решения — в одном рабочем потоке.</p></div>
+          <button id="approval-request-open" class="primary" type="button">+ Отправить материал</button>
+        </header>
+        <section id="approval-queue-summary" class="approval-summary" aria-label="Сводка согласований"></section>
+        <nav id="approval-queue-filters" class="approval-filters" aria-label="Фильтр согласований">
+          <button class="active" type="button" data-approval-filter="all">Все</button>
+          <button type="button" data-approval-filter="pending">Ожидают</button>
+          <button type="button" data-approval-filter="overdue">Просрочены</button>
+          <button type="button" data-approval-filter="changes_requested">Нужны правки</button>
+          <button type="button" data-approval-filter="approved">Одобрены</button>
+        </nav>
+        <section id="approval-queue-list" class="approval-queue-list" aria-live="polite"></section>
+        <details class="approval-workflow-settings">
+          <summary><span><strong>Настройка процесса</strong><small>Этапы и роли согласования</small></span><span aria-hidden="true">⌄</span></summary>
+          <section class="approval-builder panel">
+            <div class="management-heading"><div><p class="eyebrow">Процесс проекта</p><h2>Этапы согласования</h2><p>Настройте путь материала от идеи до публикации.</p></div><button id="save-workflow-button" class="primary" type="button">Сохранить процесс</button></div>
+            <label class="workflow-name-field"><span>Название процесса</span><input id="workflow-name" type="text" maxlength="120" value="Основной процесс"></label>
+            <div id="approval-stages" class="approval-stage-list" aria-live="polite"></div>
+            <button id="add-approval-stage" class="ghost" type="button">+ Добавить этап</button>
+            <div id="workflow-status" class="status hidden" aria-live="polite"></div>
+          </section>
+        </details>
+      </div>
     </section>
     <section class="workspace-page hidden decision-page" data-page="attention">
       <header class="decision-page-head">
@@ -640,6 +659,21 @@
       <label><span>Новый пароль</span><input id="new-password" type="password" autocomplete="new-password" minlength="10" maxlength="128" required></label>
       <div class="dialog-actions"><button id="password-dialog-cancel" class="ghost" type="button">Отмена</button><button class="primary" type="submit">Сохранить</button></div>
       <div id="change-password-status" class="auth-status" aria-live="polite"></div>
+    </form>
+  </dialog>
+  <dialog id="approval-request-dialog" class="account-dialog approval-request-dialog">
+    <form id="approval-request-form">
+      <header><div><p class="eyebrow">Новый круг</p><h2>Отправить на согласование</h2></div><button id="approval-request-close" class="icon-button" type="button" aria-label="Закрыть">×</button></header>
+      <label><span>Материал</span><select id="approval-request-attachment" required></select></label>
+      <div class="approval-request-grid">
+        <label><span>Ответственный</span><select id="approval-request-assignee"><option value="">Любой согласующий</option></select></label>
+        <label><span>Этап</span><select id="approval-request-stage"><option value="">Текущий этап материала</option></select></label>
+        <label><span>Срок</span><input id="approval-request-due" type="datetime-local"></label>
+        <label><span>Видимость</span><select id="approval-request-visibility"><option value="team">Только команда</option><option value="client">Команда и клиент</option></select></label>
+      </div>
+      <label><span>Комментарий для согласующего</span><textarea id="approval-request-note" rows="4" maxlength="10000" placeholder="На что обратить внимание"></textarea></label>
+      <div class="dialog-actions"><button id="approval-request-cancel" class="ghost" type="button">Отмена</button><button class="primary" type="submit">Отправить</button></div>
+      <div id="approval-request-status" class="auth-status" aria-live="polite"></div>
     </form>
   </dialog>
   <dialog id="checkout-dialog" class="account-dialog checkout-dialog">
