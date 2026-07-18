@@ -212,6 +212,14 @@
           <div class="view-switcher"><button class="active" type="button" data-content-view="board">Канбан</button><button type="button" data-content-view="calendar">Календарь</button></div>
         </div>
         <div id="content-board" class="content-board" aria-live="polite"></div>
+        <div id="content-calendar-toolbar" class="calendar-toolbar hidden">
+          <div class="calendar-navigation" aria-label="Навигация по календарю">
+            <button id="calendar-previous" class="ghost" type="button" aria-label="Предыдущий месяц">←</button>
+            <button id="calendar-today" class="ghost" type="button">Сегодня</button>
+            <button id="calendar-next" class="ghost" type="button" aria-label="Следующий месяц">→</button>
+          </div>
+          <h3 id="calendar-month-label" aria-live="polite"></h3>
+        </div>
         <div id="content-calendar" class="content-calendar hidden" aria-live="polite"></div>
       </section>
     </section>

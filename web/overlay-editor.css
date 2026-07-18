@@ -1,8 +1,8 @@
 .overlay-editor {
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) minmax(210px, 270px);
-  gap: 28px;
-  align-items: center;
+  grid-template-columns: minmax(280px, .8fr) minmax(320px, 1.2fr);
+  gap: clamp(24px, 4vw, 56px);
+  align-items: start;
   margin-top: 22px;
   padding: 22px;
   border: 1px solid var(--line);
@@ -52,7 +52,7 @@
 .video-stage {
   position: relative;
   justify-self: center;
-  width: min(100%, 250px);
+  width: min(100%, 360px);
   aspect-ratio: 9 / 16;
   overflow: hidden;
   border: 1px solid #3b4c65;
@@ -171,5 +171,5 @@
 }
 @media (max-width: 720px) {
   .overlay-editor { grid-template-columns: 1fr; }
-  .video-stage { grid-row: 1; width: min(78vw, 270px); }
+  .video-stage { grid-row: 1; width: min(82vw, 340px); }
 }

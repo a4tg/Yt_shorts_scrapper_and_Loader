@@ -11,6 +11,11 @@ class WebContentWorkspaceTests(unittest.TestCase):
         for element_id in (
             "content-board",
             "content-calendar",
+            "content-calendar-toolbar",
+            "calendar-month-label",
+            "calendar-previous",
+            "calendar-today",
+            "calendar-next",
             "content-search",
             "create-content-button",
             "documents-list",
@@ -31,6 +36,8 @@ class WebContentWorkspaceTests(unittest.TestCase):
         self.assertIn("text/content-id", script)
         self.assertIn("moveContentToStage", script)
         self.assertIn("renderContentCalendar", script)
+        self.assertIn("moveContentCalendar", script)
+        self.assertIn("calendar-weekday", script)
         self.assertIn("renderRevisions", script)
 
     def test_content_workspace_has_responsive_layout_rules(self) -> None:

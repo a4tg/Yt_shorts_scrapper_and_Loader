@@ -8,6 +8,7 @@ const state = {
   paymentResumed: false, authConfig: {}, accountToken: null, currentPage: 'dashboard',
   workspaces: [], currentWorkspaceId: null, projects: [], currentProjectId: null,
   workspaceMembers: [], approvalWorkflow: null, contentItems: [], contentView: 'board',
+  contentCalendarDate: new Date(),
   libraryItems: [], libraryFolders: [], currentLibraryFolderId: null,
   videoLibraryJobs: [], directSourceChannel: '', directSourceTitle: '',
   conversations: [], activeConversationId: null, messages: [], messageReplyTo: null,
@@ -968,10 +969,20 @@ function renderContentBoard() {
 
 function renderContentCalendar() {
   const container = $('#content-calendar'); container.replaceChildren();
-  const today = new Date(); const year = today.getFullYear(); const month = today.getMonth();
+  const today = new Date();
+  const cursor = state.contentCalendarDate instanceof Date ? state.contentCalendarDate : today;
+  const year = cursor.getFullYear(); const month = cursor.getMonth();
   const first = new Date(year, month, 1); const mondayOffset = (first.getDay() + 6) % 7;
   const start = new Date(year, month, 1 - mondayOffset);
   const items = filteredContentItems().filter((item) => item.planned_at);
+  $('#calendar-month-label').textContent = new Intl.DateTimeFormat('ru-RU', {
+    month: 'long', year: 'numeric'
+  }).format(first);
+  for (const weekday of ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']) {
+    const heading = document.createElement('div');
+    heading.className = 'calendar-weekday'; heading.textContent = weekday;
+    container.append(heading);
+  }
   for (let index = 0; index < 42; index += 1) {
     const date = new Date(start); date.setDate(start.getDate() + index);
     const day = document.createElement('div'); day.className = 'calendar-day';
@@ -997,6 +1008,7 @@ function renderContent() {
   $('#create-document-button').disabled = !canEditContent();
   renderContentStats(); renderContentBoard(); renderContentCalendar(); renderDocuments();
   $('#content-board').classList.toggle('hidden', state.contentView !== 'board');
+  $('#content-calendar-toolbar').classList.toggle('hidden', state.contentView !== 'calendar');
   $('#content-calendar').classList.toggle('hidden', state.contentView !== 'calendar');
 }
 
@@ -3401,6 +3413,17 @@ document.querySelectorAll('[data-content-view]').forEach((button) => {
     if (window.AAPAppMotion?.transitionContentView) window.AAPAppMotion.transitionContentView(update);
     else update();
   });
+});
+function moveContentCalendar(monthDelta) {
+  const cursor = state.contentCalendarDate instanceof Date ? state.contentCalendarDate : new Date();
+  state.contentCalendarDate = new Date(cursor.getFullYear(), cursor.getMonth() + monthDelta, 1);
+  renderContentCalendar();
+}
+$('#calendar-previous').addEventListener('click', () => moveContentCalendar(-1));
+$('#calendar-next').addEventListener('click', () => moveContentCalendar(1));
+$('#calendar-today').addEventListener('click', () => {
+  state.contentCalendarDate = new Date();
+  renderContentCalendar();
 });
 
 $('#content-dialog-close').addEventListener('click', () => $('#content-dialog').close());
