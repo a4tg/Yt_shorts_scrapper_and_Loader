@@ -37,16 +37,30 @@ class WorkspaceDepthFoundationTests(unittest.TestCase):
         script = (ROOT / "web" / "modules" / "project-graph.js").read_text(encoding="utf-8")
         styles = (ROOT / "web" / "project-graph.css").read_text(encoding="utf-8")
         editor_styles = (ROOT / "web" / "project-graph-editor.css").read_text(encoding="utf-8")
-        for marker in ('data-page="graph"', 'id="project-graph-viewport"', 'id="project-diagram-viewport"', 'data-node-kind="decision"'):
+        for marker in (
+            'data-page="graph"',
+            'id="project-graph-viewport"',
+            'id="project-diagram-viewport"',
+            'data-node-kind="decision"',
+            'data-graph-action="add"',
+            'id="project-graph-history-dialog"',
+        ):
             self.assertIn(marker, html)
         self.assertIn("registerModule('project-graph'", entrypoint)
-        for marker in ("loadGraph", "createLink", "saveDiagram", "undo", "redo", "EventSource", "project-diagram-edges", "project-diagram-visibility", "review:focus"):
+        for marker in (
+            "loadGraph", "createLink", "saveDiagram", "undo", "redo", "EventSource",
+            "project-diagram-edges", "project-diagram-visibility", "review:focus",
+            "saveGraphState", "addCustomNode", "deleteCustomNode", "showGraphHistory",
+            "restoreGraphRevision", "/graph-state", "/graph-history",
+        ):
             self.assertIn(marker, script)
         self.assertIn("if (bounds.width < 1 || bounds.height < 1) return false", script)
         self.assertIn("const projectChanged = projectId !== state.projectId", script)
         for selector in (".project-graph-node", ".project-diagram-node", ".project-diagram-edge", ".project-graph-minimap"):
             self.assertIn(selector, styles)
         self.assertIn(".project-diagram-edge-list", editor_styles)
+        self.assertIn(".project-graph-custom-form", editor_styles)
+        self.assertIn(".graph-history-dialog", editor_styles)
 
     def test_decision_intelligence_attention_center_is_wired(self) -> None:
         html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")

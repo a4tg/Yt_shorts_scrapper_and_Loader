@@ -45,6 +45,8 @@ EXPECTED_TABLES = {
     "asset_reviews",
     "asset_approvals",
     "entity_links",
+    "project_graph_states",
+    "project_graph_revisions",
     "project_diagrams",
     "diagram_nodes",
     "diagram_edges",

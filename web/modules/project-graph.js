@@ -1,7 +1,7 @@
 const WORLD_WIDTH = 2200;
 const WORLD_HEIGHT = 1500;
-const TYPE_LABELS = { project: 'Проект', content: 'Контент', asset: 'Файлы', conversation: 'Чаты', review: 'Замечания', insight: 'Решения и риски', user: 'Команда', diagram: 'Схемы' };
-const TYPE_ICONS = { project: 'AAP', content: '▤', asset: '◇', conversation: '◌', review: '!', insight: '◆', user: '●', diagram: '⌘' };
+const TYPE_LABELS = { project: 'Проект', content: 'Контент', asset: 'Файлы', conversation: 'Чаты', review: 'Замечания', insight: 'Решения и риски', user: 'Команда', diagram: 'Схемы', custom: 'Свои узлы' };
+const TYPE_ICONS = { project: 'AAP', content: '▤', asset: '◇', conversation: '◌', review: '!', insight: '◆', user: '●', diagram: '⌘', custom: '✦' };
 
 function node(tag, className, text) {
   const value = document.createElement(tag); if (className) value.className = className;
@@ -33,10 +33,16 @@ export function initProjectGraph({ bus, bridge }) {
     filters: new Set(Object.keys(TYPE_LABELS)), source: null, refreshTimer: null,
     diagrams: [], diagram: null, selectedNodeKey: null, diagramTransform: { x: 0, y: 0, zoom: 1 },
     history: [], future: [], dirty: false, saveTimer: null, connectSource: null,
+    graphSaveTimer: null, graphSaving: false, graphSavePending: false, graphHistory: [],
   };
 
   function showError(error) { bridge.notify?.(error?.message || 'Не удалось обновить карту.', 'error'); }
   function applyTransform(world, transform) { world.style.transform = `translate(${transform.x}px,${transform.y}px) scale(${transform.zoom})`; }
+  function syncGraphPermissions() {
+    root.querySelectorAll('[data-graph-action="add"],[data-graph-action="link"]').forEach((button) => {
+      button.classList.toggle('hidden', !editable(state.context));
+    });
+  }
 
   function layoutGraph(useSaved = true) {
     const groups = {};
@@ -45,19 +51,81 @@ export function initProjectGraph({ bus, bridge }) {
     columns.insight = 1650;
     for (const [type, items] of Object.entries(groups)) {
       if (type === 'project') { items[0]._x = 970; items[0]._y = 690; continue; }
+      if (type === 'custom') {
+        items.forEach((item, index) => {
+          item._x = useSaved ? Number(item.x ?? 1020) : 760 + (index % 4) * 190;
+          item._y = useSaved ? Number(item.y ?? 180) : 170 + Math.floor(index / 4) * 120;
+        });
+        continue;
+      }
       const x = columns[type] || 1100; const spacing = Math.min(135, 1080 / Math.max(1, items.length));
       items.forEach((item, index) => { item._x = x + (index % 2) * 85; item._y = 170 + index * spacing; });
     }
-    try {
-      const saved = JSON.parse(localStorage.getItem(`aapGraphPositions:${state.projectId}`) || '{}');
-      if (useSaved) for (const item of state.graph.nodes) if (saved[item.id]) { item._x = saved[item.id].x; item._y = saved[item.id].y; }
-    } catch (_) { /* Keep deterministic layout. */ }
+    const saved = state.graph.positions || {};
+    if (useSaved) for (const item of state.graph.nodes) {
+      if (saved[item.id]) { item._x = Number(saved[item.id].x); item._y = Number(saved[item.id].y); }
+    }
     renderGraph();
   }
 
+  function graphStatePayload() {
+    return {
+      revision: Number(state.graph.revision || 0),
+      viewport: { ...state.mapTransform },
+      positions: Object.fromEntries(state.graph.nodes.map((item) => [
+        item.id, { x: Number(item._x || 0), y: Number(item._y || 0) }
+      ])),
+      custom_nodes: state.graph.nodes.filter((item) => item.entity_type === 'custom').map((item) => ({
+        id: item.entity_id,
+        label: item.label,
+        kind: item.kind || 'note',
+        description: item.extra?.description || null,
+        color: item.extra?.color || '#6f61d9',
+        visibility: item.extra?.visibility || 'team',
+        linked_entity_type: item.extra?.linked_entity_type || null,
+        linked_entity_id: item.extra?.linked_entity_id || null,
+        x: Number(item._x || 0),
+        y: Number(item._y || 0),
+      })),
+    };
+  }
+
+  async function saveGraphState({ notify = false } = {}) {
+    if (!state.projectId || !editable(state.context)) return;
+    if (state.graphSaving) { state.graphSavePending = true; return; }
+    clearTimeout(state.graphSaveTimer); state.graphSaving = true; state.graphSavePending = false;
+    try {
+      const saved = await bridge.api(`/api/projects/${state.projectId}/graph-state`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(graphStatePayload()),
+      });
+      state.graph.revision = saved.revision;
+      state.graph.positions = saved.positions || {};
+      state.graph.viewport = saved.viewport || null;
+      if (notify) bridge.notify?.('Карта сохранена.');
+    } catch (error) {
+      if (Number(error?.status) === 409) {
+        bridge.notify?.('Карта изменилась у другого участника. Загружаю актуальную версию.', 'error');
+        await loadGraph();
+      } else throw error;
+    } finally {
+      state.graphSaving = false;
+      if (state.graphSavePending) scheduleGraphSave(0);
+    }
+  }
+
+  function scheduleGraphSave(delay = 700) {
+    if (!editable(state.context)) return;
+    state.graphSavePending = true;
+    clearTimeout(state.graphSaveTimer);
+    state.graphSaveTimer = setTimeout(() => saveGraphState().catch(showError), delay);
+  }
+
   function saveGraphPositions() {
-    const value = Object.fromEntries(state.graph.nodes.map((item) => [item.id, { x: item._x, y: item._y }]));
-    localStorage.setItem(`aapGraphPositions:${state.projectId}`, JSON.stringify(value));
+    state.graph.positions = Object.fromEntries(state.graph.nodes.map((item) => [
+      item.id, { x: item._x, y: item._y }
+    ]));
+    scheduleGraphSave();
   }
 
   function edgePath(source, target) {
@@ -90,6 +158,7 @@ export function initProjectGraph({ bus, bridge }) {
       if (item._x === undefined) { item._x = WORLD_WIDTH / 2 + Number(item.x || 0); item._y = WORLD_HEIGHT / 2 + Number(item.y || 0); }
       const visible = state.filters.has(item.entity_type) && (!query || `${item.label} ${item.subtitle}`.toLocaleLowerCase('ru-RU').includes(query));
       const card = node('button', `project-graph-node ${item.entity_type}${item.id === state.selectedGraphId ? ' selected' : ''}${visible ? '' : ' filtered'}`); card.type = 'button'; card.dataset.graphNodeId = item.id; card.style.transform = `translate(${item._x}px,${item._y}px)`;
+      if (item.entity_type === 'custom') card.style.setProperty('--graph-node-color', item.extra?.color || '#6f61d9');
       const icon = node('span', '', TYPE_ICONS[item.entity_type] || '•'); const copy = node('span'); copy.append(node('strong', '', item.label), node('small', '', item.subtitle || TYPE_LABELS[item.entity_type] || item.entity_type));
       if (item.status) copy.append(node('i', '', item.status)); card.append(icon, copy); graphNodes.append(card);
     }
@@ -104,12 +173,56 @@ export function initProjectGraph({ bus, bridge }) {
   }
 
   function graphNode(id) { return state.graph.nodes.find((item) => item.id === id); }
+  function customNodeForm(selected) {
+    const form = node('form', 'project-graph-custom-form');
+    form.innerHTML = `
+      <label>Название<input name="label" maxlength="240" required></label>
+      <label>Описание<textarea name="description" maxlength="2000" rows="4"></textarea></label>
+      <div><label>Тип<select name="kind"><option value="task">Задача</option><option value="decision">Условие</option><option value="document">Документ</option><option value="asset">Ассет</option><option value="person">Участник</option><option value="note">Заметка</option><option value="start">Старт</option><option value="end">Финиш</option></select></label><label>Цвет<input name="color" type="color"></label></div>
+      <label>Видимость<select name="visibility"><option value="team">Только команда</option><option value="client">Команда и клиент</option></select></label>
+      <label>Привязать к объекту<select name="linked"><option value="">Без привязки</option></select></label>
+      <button class="danger" data-graph-delete-custom type="button">Удалить узел</button>`;
+    form.elements.label.value = selected.label;
+    form.elements.description.value = selected.extra?.description || '';
+    form.elements.kind.value = selected.kind || 'note';
+    form.elements.color.value = selected.extra?.color || '#6f61d9';
+    form.elements.visibility.value = selected.extra?.visibility || 'team';
+    const linked = form.elements.linked;
+    for (const item of state.graph.nodes.filter((value) => value.entity_type !== 'custom')) {
+      linked.append(new Option(`${TYPE_LABELS[item.entity_type] || item.entity_type}: ${item.label}`, item.id));
+    }
+    linked.value = selected.extra?.linked_entity_type && selected.extra?.linked_entity_id
+      ? `${selected.extra.linked_entity_type}:${selected.extra.linked_entity_id}` : '';
+    const update = () => {
+      selected.label = form.elements.label.value.trim() || 'Без названия';
+      selected.kind = form.elements.kind.value;
+      selected.extra = {
+        ...(selected.extra || {}),
+        description: form.elements.description.value.trim() || null,
+        color: form.elements.color.value,
+        visibility: form.elements.visibility.value,
+      };
+      const linkedNode = graphNode(form.elements.linked.value);
+      selected.extra.linked_entity_type = linkedNode?.entity_type || null;
+      selected.extra.linked_entity_id = linkedNode?.entity_id || null;
+      const card = graphNodes.querySelector(`[data-graph-node-id="${CSS.escape(selected.id)}"]`);
+      card?.querySelector('strong')?.replaceChildren(document.createTextNode(selected.label));
+      card?.style.setProperty('--graph-node-color', selected.extra.color);
+      scheduleGraphSave();
+    };
+    form.addEventListener('input', update);
+    form.addEventListener('change', () => { update(); renderGraphEdges(); });
+    form.querySelector('[data-graph-delete-custom]').addEventListener('click', () => deleteCustomNode(selected));
+    return form;
+  }
+
   function renderGraphInspector() {
     const selected = graphNode(state.selectedGraphId); graphInspector.replaceChildren();
     if (!selected) { const empty = node('div', 'project-graph-inspector-empty'); empty.append(node('span', '', '⌘'), node('strong', '', 'Выберите узел'), node('p', '', 'Здесь появятся свойства, связи и быстрые действия.')); graphInspector.append(empty); return; }
     const header = node('header'); header.append(node('span', selected.entity_type, TYPE_ICONS[selected.entity_type] || '•'));
     const copy = node('div'); copy.append(node('small', '', TYPE_LABELS[selected.entity_type] || selected.entity_type), node('strong', '', selected.label)); header.append(copy); graphInspector.append(header);
     const meta = node('dl'); for (const [label, value] of [['Тип', selected.kind], ['Статус', selected.status || '—'], ['ID', selected.entity_id]]) meta.append(node('dt', '', label), node('dd', '', value)); graphInspector.append(meta);
+    if (selected.entity_type === 'custom' && editable(state.context)) graphInspector.append(customNodeForm(selected));
     const actions = node('div', 'project-graph-inspector-actions');
     const open = node('button', '', 'Открыть'); open.type = 'button'; open.dataset.graphOpen = selected.id; actions.append(open);
     if (editable(state.context)) { const link = node('button', '', 'Связать'); link.type = 'button'; link.dataset.graphLinkSource = selected.id; actions.append(link); } graphInspector.append(actions);
@@ -143,7 +256,78 @@ export function initProjectGraph({ bus, bridge }) {
     } catch (error) { showError(error); }
   }
 
+  function addCustomNode() {
+    if (!editable(state.context)) return;
+    const bounds = graphViewport.getBoundingClientRect();
+    const x = (bounds.width / 2 - state.mapTransform.x) / state.mapTransform.zoom - 78;
+    const y = (bounds.height / 2 - state.mapTransform.y) / state.mapTransform.zoom - 31;
+    const entityId = key();
+    const item = {
+      id: `custom:${entityId}`, entity_type: 'custom', entity_id: entityId,
+      label: 'Новый узел', kind: 'note', subtitle: 'Пользовательский узел', status: null,
+      x, y, _x: x, _y: y,
+      extra: {
+        description: null, color: '#6f61d9', visibility: 'team',
+        linked_entity_type: null, linked_entity_id: null,
+      },
+    };
+    state.graph.nodes.push(item);
+    state.selectedGraphId = item.id;
+    renderGraph(); renderGraphInspector();
+    scheduleGraphSave(0);
+    requestAnimationFrame(() => graphInspector.querySelector('input[name="label"]')?.select());
+  }
+
+  async function deleteCustomNode(item) {
+    if (item?.entity_type !== 'custom' || !editable(state.context)) return;
+    if (!confirm(`Удалить узел «${item.label}» и его связи?`)) return;
+    state.graph.nodes = state.graph.nodes.filter((value) => value !== item);
+    state.graph.edges = state.graph.edges.filter((edge) => edge.source !== item.id && edge.target !== item.id);
+    state.selectedGraphId = null;
+    renderGraph(); renderGraphInspector();
+    await saveGraphState();
+    await loadGraph();
+  }
+
+  async function showGraphHistory() {
+    const dialog = root.querySelector('#project-graph-history-dialog');
+    const list = root.querySelector('#project-graph-history-list');
+    list.replaceChildren(node('p', '', 'Загружаю версии…')); dialog.showModal();
+    state.graphHistory = await bridge.api(`/api/projects/${state.projectId}/graph-history`);
+    list.replaceChildren();
+    if (!state.graphHistory.length) {
+      list.append(node('p', 'graph-history-empty', 'История появится после первого изменения карты.'));
+      return;
+    }
+    for (const item of state.graphHistory) {
+      const row = node('article', 'graph-history-row');
+      const copy = node('div');
+      copy.append(
+        node('strong', '', `Версия ${item.revision}`),
+        node('small', '', `${item.changed_by} · ${new Date(item.changed_at).toLocaleString('ru-RU')}`)
+      );
+      row.append(copy);
+      if (editable(state.context) && item.revision !== state.graph.revision) {
+        const restore = node('button', '', 'Восстановить'); restore.type = 'button';
+        restore.dataset.graphRestore = item.id; row.append(restore);
+      }
+      list.append(row);
+    }
+  }
+
+  async function restoreGraphRevision(revisionId) {
+    if (!revisionId || !editable(state.context) || !confirm('Восстановить эту версию карты? Текущее состояние останется в истории.')) return;
+    await bridge.api(`/api/projects/${state.projectId}/graph-history/${revisionId}/restore`, { method: 'POST' });
+    root.querySelector('#project-graph-history-dialog').close();
+    await loadGraph();
+    bridge.notify?.('Версия карты восстановлена.');
+  }
+
   function openGraphEntity(item) {
+    if (item.entity_type === 'custom' && item.extra?.linked_entity_type && item.extra?.linked_entity_id) {
+      const linked = graphNode(`${item.extra.linked_entity_type}:${item.extra.linked_entity_id}`);
+      if (linked) openGraphEntity(linked);
+    }
     if (item.entity_type === 'asset') bus.emit('asset:open', { assetId: item.entity_id, projectId: state.projectId });
     else if (item.entity_type === 'conversation') bus.emit('chat:open', { conversationId: item.entity_id, context: state.context });
     else if (item.entity_type === 'content') bridge.navigate?.('content', true);
@@ -159,6 +343,10 @@ export function initProjectGraph({ bus, bridge }) {
     if (!state.projectId) return; const graph = await bridge.api(`/api/projects/${state.projectId}/graph`);
     state.graph = graph; state.selectedGraphId = state.graph.nodes.some((item) => item.id === state.selectedGraphId) ? state.selectedGraphId : null;
     layoutGraph(); renderGraphFilters(); renderGraphInspector();
+    if (graph.viewport?.zoom) {
+      Object.assign(state.mapTransform, graph.viewport);
+      applyTransform(graphWorld, state.mapTransform);
+    }
   }
 
   function fitGraph() {
@@ -172,7 +360,7 @@ export function initProjectGraph({ bus, bridge }) {
   function connectRealtime() {
     state.source?.close(); if (!state.projectId || typeof EventSource === 'undefined') return;
     const source = new EventSource(`/api/projects/${state.projectId}/message-events`); state.source = source;
-    for (const type of ['graph.link.created', 'graph.link.deleted', 'asset.version.created', 'asset.review.created', 'asset.review.updated', 'diagram.created', 'diagram.updated', 'diagram.deleted']) {
+    for (const type of ['graph.link.created', 'graph.link.deleted', 'graph.state.updated', 'graph.state.restored', 'asset.version.created', 'asset.review.created', 'asset.review.updated', 'diagram.created', 'diagram.updated', 'diagram.deleted']) {
       source.addEventListener(type, () => { clearTimeout(state.refreshTimer); state.refreshTimer = setTimeout(() => { if (!state.dirty) { loadGraph().catch(showError); loadDiagrams().catch(showError); } }, 250); });
     }
     for (const type of ['insight.created', 'insight.updated', 'insight.dismissed', 'insights.extracted']) {
@@ -309,14 +497,26 @@ export function initProjectGraph({ bus, bridge }) {
 
   function setView(view) {
     mapView.classList.toggle('hidden', view !== 'map'); diagramView.classList.toggle('hidden', view !== 'diagrams'); root.querySelectorAll('[data-graph-view]').forEach((button) => button.classList.toggle('active', button.dataset.graphView === view));
-    if (view === 'diagrams') loadDiagrams().catch(showError); else setTimeout(fitGraph);
+    if (view === 'diagrams') loadDiagrams().catch(showError);
+    else setTimeout(() => {
+      if (state.graph.viewport?.zoom) applyTransform(graphWorld, state.mapTransform);
+      else fitGraph();
+    });
   }
 
   root.addEventListener('click', async (event) => {
     const view = event.target.closest('[data-graph-view]')?.dataset.graphView; if (view) setView(view);
     const filter = event.target.closest('[data-graph-filter]')?.dataset.graphFilter; if (filter) { state.filters.has(filter) ? state.filters.delete(filter) : state.filters.add(filter); renderGraphFilters(); renderGraph(); }
     const graphAction = event.target.closest('[data-graph-action]')?.dataset.graphAction;
-    if (graphAction === 'layout') { layoutGraph(false); saveGraphPositions(); } else if (graphAction === 'fit') fitGraph(); else if (graphAction === 'refresh') loadGraph().catch(showError); else if (graphAction === 'link') startLinking();
+    if (graphAction === 'add') addCustomNode();
+    else if (graphAction === 'layout') { layoutGraph(false); saveGraphPositions(); }
+    else if (graphAction === 'fit') { fitGraph(); scheduleGraphSave(); }
+    else if (graphAction === 'refresh') loadGraph().catch(showError);
+    else if (graphAction === 'link') startLinking();
+    else if (graphAction === 'history') showGraphHistory().catch(showError);
+    else if (graphAction === 'close-history') root.querySelector('#project-graph-history-dialog').close();
+    const restoreRevision = event.target.closest('[data-graph-restore]')?.dataset.graphRestore;
+    if (restoreRevision) restoreGraphRevision(restoreRevision).catch(showError);
     const selectId = event.target.closest('[data-graph-select]')?.dataset.graphSelect; if (selectId) { state.selectedGraphId = selectId; renderGraph(); renderGraphInspector(); }
     const openId = event.target.closest('[data-graph-open]')?.dataset.graphOpen; if (openId) openGraphEntity(graphNode(openId));
     const sourceId = event.target.closest('[data-graph-link-source]')?.dataset.graphLinkSource; if (sourceId) startLinking(sourceId);
@@ -341,18 +541,23 @@ export function initProjectGraph({ bus, bridge }) {
   diagramForm.addEventListener('input', () => { const item = diagramNode(state.selectedNodeKey); if (!item) return; item.title = diagramForm.elements.title.value; item.description = diagramForm.elements.description.value; item.kind = diagramForm.elements.kind.value; item.color = diagramForm.elements.color.value; markDirty(); renderDiagram(); });
 
   let drag = null;
-  graphNodes.addEventListener('pointerdown', (event) => { const card = event.target.closest('[data-graph-node-id]'); if (!card || root.classList.contains('graph-linking')) return; const item = graphNode(card.dataset.graphNodeId); drag = { type: 'graph-node', item, x: event.clientX, y: event.clientY, startX: item._x, startY: item._y }; card.setPointerCapture(event.pointerId); event.stopPropagation(); });
+  graphNodes.addEventListener('pointerdown', (event) => { const card = event.target.closest('[data-graph-node-id]'); if (!card || !editable(state.context) || root.classList.contains('graph-linking')) return; const item = graphNode(card.dataset.graphNodeId); drag = { type: 'graph-node', item, x: event.clientX, y: event.clientY, startX: item._x, startY: item._y }; card.setPointerCapture(event.pointerId); event.stopPropagation(); });
   diagramNodes.addEventListener('pointerdown', (event) => { const card = event.target.closest('[data-diagram-node-key]'); if (!card || !editable(state.context)) return; const item = diagramNode(card.dataset.diagramNodeKey); remember(); drag = { type: 'diagram-node', item, x: event.clientX, y: event.clientY, startX: item.x, startY: item.y }; card.setPointerCapture(event.pointerId); event.stopPropagation(); });
   for (const [viewport, transform, world, type] of [[graphViewport, state.mapTransform, graphWorld, 'graph-pan'], [diagramViewport, state.diagramTransform, diagramWorld, 'diagram-pan']]) {
     viewport.addEventListener('pointerdown', (event) => { if (event.target !== viewport && !event.target.classList.contains(type === 'graph-pan' ? 'project-graph-world' : 'project-diagram-world')) return; drag = { type, x: event.clientX, y: event.clientY, startX: transform.x, startY: transform.y }; viewport.setPointerCapture(event.pointerId); });
-    viewport.addEventListener('wheel', (event) => { event.preventDefault(); const next = Math.max(.2, Math.min(2.5, transform.zoom * (event.deltaY > 0 ? .9 : 1.1))); const bounds = viewport.getBoundingClientRect(); const px = event.clientX - bounds.left, py = event.clientY - bounds.top; transform.x = px - ((px - transform.x) / transform.zoom) * next; transform.y = py - ((py - transform.y) / transform.zoom) * next; transform.zoom = next; applyTransform(world, transform); }, { passive: false });
+    viewport.addEventListener('wheel', (event) => { event.preventDefault(); const next = Math.max(.2, Math.min(2.5, transform.zoom * (event.deltaY > 0 ? .9 : 1.1))); const bounds = viewport.getBoundingClientRect(); const px = event.clientX - bounds.left, py = event.clientY - bounds.top; transform.x = px - ((px - transform.x) / transform.zoom) * next; transform.y = py - ((py - transform.y) / transform.zoom) * next; transform.zoom = next; applyTransform(world, transform); if (type === 'graph-pan') scheduleGraphSave(); }, { passive: false });
   }
   window.addEventListener('pointermove', (event) => { if (!drag) return; const dx = event.clientX - drag.x, dy = event.clientY - drag.y;
     if (drag.type === 'graph-node') { drag.item._x = drag.startX + dx / state.mapTransform.zoom; drag.item._y = drag.startY + dy / state.mapTransform.zoom; renderGraph(); }
     else if (drag.type === 'diagram-node') { drag.item.x = Math.round((drag.startX + dx / state.diagramTransform.zoom) / 20) * 20; drag.item.y = Math.round((drag.startY + dy / state.diagramTransform.zoom) / 20) * 20; renderDiagram(); }
     else { const transform = drag.type === 'graph-pan' ? state.mapTransform : state.diagramTransform; const world = drag.type === 'graph-pan' ? graphWorld : diagramWorld; transform.x = drag.startX + dx; transform.y = drag.startY + dy; applyTransform(world, transform); }
   });
-  window.addEventListener('pointerup', () => { if (drag?.type === 'diagram-node') markDirty(); else if (drag?.type === 'graph-node') saveGraphPositions(); drag = null; });
+  window.addEventListener('pointerup', () => {
+    if (drag?.type === 'diagram-node') markDirty();
+    else if (drag?.type === 'graph-node') saveGraphPositions();
+    else if (drag?.type === 'graph-pan') scheduleGraphSave();
+    drag = null;
+  });
   window.addEventListener('keydown', (event) => {
     if (state.context?.page !== 'graph' || event.target.matches('input,textarea,select')) return;
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); saveDiagram().catch(showError); }
@@ -363,6 +568,7 @@ export function initProjectGraph({ bus, bridge }) {
 
   async function activate(context) {
     state.context = context || bridge.getContext?.() || {}; const projectId = state.context?.project?.id;
+    syncGraphPermissions();
     if (!projectId) return;
     const projectChanged = projectId !== state.projectId;
     if (projectChanged) {
@@ -371,7 +577,8 @@ export function initProjectGraph({ bus, bridge }) {
     }
     if (state.context.page === 'graph') {
       requestAnimationFrame(() => {
-        if (!fitGraph()) setTimeout(fitGraph, 80);
+        if (state.graph.viewport?.zoom) applyTransform(graphWorld, state.mapTransform);
+        else if (!fitGraph()) setTimeout(fitGraph, 80);
       });
     }
   }
@@ -385,5 +592,6 @@ export function initProjectGraph({ bus, bridge }) {
   }).catch(showError); } });
   const initial = bridge.getContext?.(); if (initial?.project?.id) activate(initial).catch(showError);
   applyTransform(graphWorld, state.mapTransform); applyTransform(diagramWorld, state.diagramTransform); renderGraphFilters();
-  return { destroy: () => { state.source?.close(); clearTimeout(state.saveTimer); clearTimeout(state.refreshTimer); } };
+  syncGraphPermissions();
+  return { destroy: () => { state.source?.close(); clearTimeout(state.saveTimer); clearTimeout(state.graphSaveTimer); clearTimeout(state.refreshTimer); } };
 }

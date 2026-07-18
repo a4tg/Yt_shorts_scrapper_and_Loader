@@ -356,6 +356,42 @@ class EntityLink(TimestampMixin, Base):
     )
 
 
+class ProjectGraphState(TimestampMixin, Base):
+    __tablename__ = "project_graph_states"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, unique=True, index=True
+    )
+    viewport: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    positions: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    custom_nodes: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_by_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+
+
+class ProjectGraphRevision(Base):
+    __tablename__ = "project_graph_revisions"
+    __table_args__ = (
+        UniqueConstraint("project_id", "revision", name="uq_project_graph_revisions_number"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    changed_by_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+
+
 class ProjectDiagram(TimestampMixin, Base):
     __tablename__ = "project_diagrams"
     __table_args__ = (

@@ -1,3 +1,129 @@
 .project-diagram-edge-list{display:grid;gap:5px;padding-top:8px;border-top:1px solid #273950}.project-diagram-edge-list>strong{color:#788ca4;font-size:7px;text-transform:uppercase}.project-diagram-edge-list>div{display:grid;grid-template-columns:minmax(0,1fr) 72px 1fr 24px;gap:4px;align-items:center}.project-diagram-edge-list small{color:#8296ad;font-size:7px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.project-diagram-edge-list select,.project-diagram-edge-list input{min-width:0;padding:5px;font-size:7px}.project-diagram-edge-list button{width:24px;height:24px;padding:0;color:#e47a8e}
 @media(min-width:761px){.project-diagram-toolbar [data-diagram-action=library]{display:none}}
 @media(max-width:760px){.project-graph-page.show-diagram-library .project-diagram-library{transform:none;box-shadow:15px 0 50px rgba(0,0,0,.5)}.project-diagram-library{transition:transform .2s}.project-diagram-toolbar [data-diagram-action=library]{font-size:12px}}
+
+.project-graph-node.custom{
+  border-color:var(--graph-node-color,#6f61d9);
+  background:linear-gradient(145deg,color-mix(in srgb,var(--graph-node-color,#6f61d9),#101a26 72%),#111e2c);
+}
+.project-graph-viewport,.project-diagram-viewport{touch-action:none}
+.project-graph-node.custom>span:first-child{
+  color:#fff;
+  background:color-mix(in srgb,var(--graph-node-color,#6f61d9),transparent 55%);
+}
+.project-graph-minimap i.custom{background:#c4b8ff}
+.project-graph-custom-form{
+  display:grid;
+  gap:10px;
+  margin:12px 0;
+  padding:12px 0;
+  border-block:1px solid #26384e;
+}
+.project-graph-custom-form>div{display:grid;grid-template-columns:1fr 72px;gap:8px}
+.project-graph-custom-form label{display:grid;gap:5px;color:#91a4ba;font-size:11px}
+.project-graph-custom-form input,
+.project-graph-custom-form textarea,
+.project-graph-custom-form select{
+  width:100%;
+  min-width:0;
+  padding:8px 9px;
+  border:1px solid #344a63;
+  border-radius:8px;
+  color:#fff;
+  background:#0b1621;
+  font:inherit;
+  font-size:12px;
+}
+.project-graph-custom-form input[type=color]{height:38px;padding:4px}
+.project-graph-custom-form .danger{
+  padding:8px;
+  border:1px solid rgba(235,87,116,.4);
+  border-radius:8px;
+  color:#ff9aaa;
+  background:rgba(235,87,116,.08);
+}
+.graph-history-dialog{width:min(560px,calc(100% - 24px));padding:0}
+.graph-history-dialog>header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:18px 20px;
+  border-bottom:1px solid #2a3d54;
+}
+.graph-history-dialog h3{margin:3px 0 0}
+.graph-history-dialog>header>button{
+  width:36px;
+  height:36px;
+  padding:0;
+  border:1px solid #344a63;
+  border-radius:9px;
+  color:#d9e3ef;
+  background:#152438;
+  font-size:22px;
+}
+.graph-history-list{display:grid;gap:7px;max-height:min(62vh,560px);padding:14px;overflow:auto}
+.graph-history-row{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:12px;
+  border:1px solid #2d415a;
+  border-radius:11px;
+  background:#101c2a;
+}
+.graph-history-row strong,.graph-history-row small{display:block}
+.graph-history-row small{margin-top:4px;color:#8396ad;font-size:12px}
+.graph-history-row button{
+  padding:8px 10px;
+  border:1px solid #4b5f7b;
+  border-radius:8px;
+  color:#dce6f3;
+  background:#1a2a3f;
+}
+.graph-history-empty{padding:28px;color:#8295ac;text-align:center}
+
+/* The graph is a working surface, so labels must remain readable at 100% browser zoom. */
+.project-graph-page-head p,
+.project-graph-page-head nav button,
+.project-graph-toolbar input,
+.project-graph-toolbar>button,
+.project-graph-filters button,
+.project-graph-node strong,
+.project-graph-node small,
+.project-graph-node i,
+.project-graph-inspector-empty strong,
+.project-graph-inspector-empty p,
+.project-graph-inspector>header small,
+.project-graph-inspector>header strong,
+.project-graph-inspector dt,
+.project-graph-inspector dd,
+.project-graph-inspector-actions button,
+.project-graph-inspector>section>strong,
+.project-graph-inspector>section>button span,
+.project-graph-inspector>section>button b,
+.project-graph-link-form strong,
+.project-graph-link-form small,
+.project-graph-link-form select,
+.project-graph-link-form input,
+.project-graph-link-form button,
+.project-diagram-library>header strong,
+.project-diagram-list strong,
+.project-diagram-list small,
+.project-diagram-list p,
+.project-diagram-library>button,
+.project-diagram-toolbar button,
+.project-diagram-toolbar select,
+.project-diagram-palette>strong,
+.project-diagram-palette button,
+.project-diagram-node strong,
+.project-diagram-node small,
+.project-diagram-inspector-empty,
+.project-diagram-node-form label,
+.project-diagram-node-form input,
+.project-diagram-node-form textarea,
+.project-diagram-node-form select,
+.project-diagram-node-form button,
+.project-diagram-status{font-size:11px}
+.project-graph-edge text{font-size:10px}

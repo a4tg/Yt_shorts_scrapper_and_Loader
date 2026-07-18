@@ -14,13 +14,14 @@ from realtime_service import project_events
 from saas_models import (
     ApprovalStage, ApprovalWorkflow, AssetReview, ContentAttachment, ContentItem,
     Conversation, ConversationParticipant, DiagramEdge, DiagramNode, EntityLink, Message, Project,
-    InsightLink, ProjectDiagram, ProjectInsight, User, WorkspaceMember,
+    InsightLink, ProjectDiagram, ProjectGraphRevision, ProjectGraphState, ProjectInsight, User,
+    WorkspaceMember,
 )
 from workspace_service import has_role, project_membership
 
 
 router = APIRouter(prefix="/api", tags=["project-graph"])
-EntityType = Literal["project", "content", "asset", "conversation", "review", "user", "diagram", "insight"]
+EntityType = Literal["project", "content", "asset", "conversation", "review", "user", "diagram", "insight", "custom"]
 RelationType = Literal["relates_to", "depends_on", "blocks", "produces", "references", "assigned_to", "custom"]
 NodeKind = Literal["start", "end", "task", "decision", "document", "asset", "person", "note"]
 EdgeType = Literal["default", "success", "failure", "conditional"]
@@ -78,6 +79,37 @@ class DiagramSave(BaseModel):
     edges: list[DiagramEdgeInput] = Field(max_length=600)
 
 
+class GraphPosition(BaseModel):
+    x: float = Field(ge=-100_000, le=100_000)
+    y: float = Field(ge=-100_000, le=100_000)
+
+
+class GraphViewport(BaseModel):
+    x: float = Field(ge=-100_000, le=100_000)
+    y: float = Field(ge=-100_000, le=100_000)
+    zoom: float = Field(ge=0.2, le=2.5)
+
+
+class CustomGraphNodeInput(BaseModel):
+    id: str = Field(min_length=1, max_length=36, pattern=r"^[A-Za-z0-9_.:-]+$")
+    label: str = Field(min_length=1, max_length=240)
+    kind: NodeKind = "note"
+    description: str | None = Field(default=None, max_length=2000)
+    color: str = Field(default="#6f61d9", pattern=r"^#[0-9a-fA-F]{6}$")
+    visibility: Literal["team", "client"] = "team"
+    linked_entity_type: EntityType | None = None
+    linked_entity_id: str | None = Field(default=None, max_length=36)
+    x: float = Field(ge=-100_000, le=100_000)
+    y: float = Field(ge=-100_000, le=100_000)
+
+
+class ProjectGraphStateSave(BaseModel):
+    revision: int = Field(ge=0)
+    viewport: GraphViewport | None = None
+    positions: dict[str, GraphPosition] = Field(default_factory=dict, max_length=1000)
+    custom_nodes: list[CustomGraphNodeInput] = Field(default_factory=list, max_length=100)
+
+
 def _project_access(db: Session, project_id: str, user_id: str):
     access = project_membership(db, project_id, user_id)
     if access is None:
@@ -129,6 +161,12 @@ def _entity_project_id(db: Session, entity_type: str, entity_id: str) -> str | N
 
 
 def _validate_entity(db: Session, project: Project, entity_type: str, entity_id: str, user_id: str | None = None) -> None:
+    if entity_type == "custom":
+        graph_state = db.scalar(select(ProjectGraphState).where(ProjectGraphState.project_id == project.id))
+        custom_nodes = graph_state.custom_nodes or [] if graph_state else []
+        if any(item.get("id") == entity_id for item in custom_nodes if isinstance(item, dict)):
+            return
+        raise HTTPException(400, "Пользовательский узел не принадлежит проекту.")
     if entity_type == "conversation" and user_id:
         conversation = db.get(Conversation, entity_id)
         participant = db.scalar(select(ConversationParticipant.id).where(
@@ -285,12 +323,228 @@ def project_graph(
                                        link.relation_type, weight=link.weight)
                     edges[edge["id"]] = edge
 
+    graph_state = db.scalar(select(ProjectGraphState).where(ProjectGraphState.project_id == project.id))
+    custom_nodes = graph_state.custom_nodes or [] if graph_state else []
+    for item in custom_nodes:
+        if not isinstance(item, dict) or not item.get("id"):
+            continue
+        if member.role == "client" and item.get("visibility") != "client":
+            continue
+        custom = _graph_node(
+            "custom", str(item["id"]), str(item.get("label") or "Узел"),
+            kind=str(item.get("kind") or "note"), subtitle="Пользовательский узел",
+            x=float(item.get("x") or 0), y=float(item.get("y") or 0),
+            extra={
+                "description": item.get("description"),
+                "color": item.get("color") or "#6f61d9",
+                "visibility": item.get("visibility") or "team",
+                "linked_entity_type": item.get("linked_entity_type"),
+                "linked_entity_id": item.get("linked_entity_id"),
+            },
+        )
+        nodes[custom["id"]] = custom
+        linked_type = item.get("linked_entity_type"); linked_id = item.get("linked_entity_id")
+        linked_key = f"{linked_type}:{linked_id}" if linked_type and linked_id else None
+        if linked_key and linked_key in nodes:
+            edge = _graph_edge("custom", str(item["id"]), str(linked_type), str(linked_id), "linked_to")
+            edges[edge["id"]] = edge
+
     manual_links = db.scalars(select(EntityLink).where(EntityLink.project_id == project.id)).all()
     for link in manual_links:
         source = f"{link.source_type}:{link.source_id}"; target = f"{link.target_type}:{link.target_id}"
         if source in nodes and target in nodes:
             edge = _graph_edge(link.source_type, link.source_id, link.target_type, link.target_id, link.relation_type, label=link.label, manual_id=link.id, weight=link.weight); edges[edge["id"]] = edge
-    return {"project_id": project.id, "nodes": list(nodes.values()), "edges": list(edges.values()), "counts": {"nodes": len(nodes), "edges": len(edges)}, "truncated": len(nodes) >= 500}
+    saved_positions = graph_state.positions or {} if graph_state else {}
+    for node_id, graph_node in nodes.items():
+        position = saved_positions.get(node_id)
+        if isinstance(position, dict):
+            graph_node["x"] = position.get("x", graph_node["x"])
+            graph_node["y"] = position.get("y", graph_node["y"])
+    return {
+        "project_id": project.id,
+        "nodes": list(nodes.values()),
+        "edges": list(edges.values()),
+        "positions": {key: value for key, value in saved_positions.items() if key in nodes},
+        "viewport": graph_state.viewport if graph_state else None,
+        "revision": graph_state.revision if graph_state else 0,
+        "counts": {"nodes": len(nodes), "edges": len(edges)},
+        "truncated": len(nodes) >= 500,
+    }
+
+
+def _graph_snapshot(db: Session, state: ProjectGraphState) -> dict[str, object]:
+    manual_links = db.scalars(
+        select(EntityLink).where(EntityLink.project_id == state.project_id)
+    ).all()
+    return {
+        "viewport": state.viewport,
+        "positions": state.positions or {},
+        "custom_nodes": state.custom_nodes or [],
+        "manual_links": [{
+            "source_type": item.source_type,
+            "source_id": item.source_id,
+            "target_type": item.target_type,
+            "target_id": item.target_id,
+            "relation_type": item.relation_type,
+            "label": item.label,
+            "weight": item.weight,
+            "extra": item.extra,
+        } for item in manual_links],
+    }
+
+
+def _record_graph_revision(db: Session, state: ProjectGraphState, user_id: str) -> None:
+    db.add(ProjectGraphRevision(
+        project_id=state.project_id,
+        revision=state.revision,
+        snapshot=_graph_snapshot(db, state),
+        changed_by_user_id=user_id,
+    ))
+    stale_ids = db.scalars(
+        select(ProjectGraphRevision.id)
+        .where(ProjectGraphRevision.project_id == state.project_id)
+        .order_by(ProjectGraphRevision.revision.desc())
+        .offset(100)
+    ).all()
+    if stale_ids:
+        db.execute(delete(ProjectGraphRevision).where(ProjectGraphRevision.id.in_(stale_ids)))
+
+
+def _apply_graph_state(
+    db: Session,
+    project: Project,
+    payload: ProjectGraphStateSave,
+    user_id: str,
+) -> ProjectGraphState:
+    graph_state = db.scalar(
+        select(ProjectGraphState)
+        .where(ProjectGraphState.project_id == project.id)
+        .with_for_update()
+    )
+    current_revision = graph_state.revision if graph_state else 0
+    if payload.revision != current_revision:
+        raise HTTPException(409, f"Карта уже изменена другим участником. Текущая версия: {current_revision}.")
+    custom_ids = [item.id for item in payload.custom_nodes]
+    if len(custom_ids) != len(set(custom_ids)):
+        raise HTTPException(400, "Идентификаторы пользовательских узлов должны быть уникальными.")
+    for item in payload.custom_nodes:
+        if bool(item.linked_entity_type) != bool(item.linked_entity_id):
+            raise HTTPException(400, "Для привязки узла нужны тип и идентификатор сущности.")
+        if item.linked_entity_type and item.linked_entity_id:
+            if item.linked_entity_type == "custom":
+                raise HTTPException(400, "Пользовательский узел нельзя привязать к другому пользовательскому узлу.")
+            _validate_entity(db, project, item.linked_entity_type, item.linked_entity_id, user_id)
+    if graph_state is None:
+        graph_state = ProjectGraphState(project_id=project.id, updated_by_user_id=user_id)
+        db.add(graph_state)
+    graph_state.viewport = payload.viewport.model_dump() if payload.viewport else None
+    graph_state.positions = {node_id: value.model_dump() for node_id, value in payload.positions.items()}
+    graph_state.custom_nodes = [item.model_dump() for item in payload.custom_nodes]
+    graph_state.revision = current_revision + 1
+    graph_state.updated_by_user_id = user_id
+    removed_custom_links = (
+        (EntityLink.source_type == "custom") & EntityLink.source_id.not_in(custom_ids)
+    ) | (
+        (EntityLink.target_type == "custom") & EntityLink.target_id.not_in(custom_ids)
+    )
+    db.execute(delete(EntityLink).where(EntityLink.project_id == project.id, removed_custom_links))
+    _record_graph_revision(db, graph_state, user_id)
+    db.commit()
+    db.refresh(graph_state)
+    return graph_state
+
+
+def _bump_graph_revision(db: Session, project: Project, user_id: str) -> ProjectGraphState:
+    graph_state = db.scalar(
+        select(ProjectGraphState)
+        .where(ProjectGraphState.project_id == project.id)
+        .with_for_update()
+    )
+    if graph_state is None:
+        graph_state = ProjectGraphState(project_id=project.id, updated_by_user_id=user_id)
+        db.add(graph_state)
+    graph_state.revision = int(graph_state.revision or 0) + 1
+    graph_state.updated_by_user_id = user_id
+    db.flush()
+    _record_graph_revision(db, graph_state, user_id)
+    return graph_state
+
+
+@router.put("/projects/{project_id}/graph-state")
+def save_project_graph_state(
+    project_id: str,
+    payload: ProjectGraphStateSave,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    project, member = _project_access(db, project_id, request.state.user.id)
+    _require_editor(member)
+    graph_state = _apply_graph_state(db, project, payload, request.state.user.id)
+    _event(project.id, "graph.state.updated", request.state.user.id, revision=graph_state.revision)
+    return {"project_id": project.id, "revision": graph_state.revision, **_graph_snapshot(db, graph_state)}
+
+
+@router.get("/projects/{project_id}/graph-history")
+def project_graph_history(
+    project_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> list[dict[str, object]]:
+    _, member = _project_access(db, project_id, request.state.user.id)
+    rows = db.execute(
+        select(ProjectGraphRevision, User)
+        .join(User, User.id == ProjectGraphRevision.changed_by_user_id)
+        .where(ProjectGraphRevision.project_id == project_id)
+        .order_by(ProjectGraphRevision.revision.desc())
+        .limit(50)
+    ).all()
+    return [{
+        "id": revision.id,
+        "revision": revision.revision,
+        "changed_at": revision.created_at.isoformat(),
+        "changed_by": "Команда проекта" if member.role == "client" else user.display_name or user.email,
+    } for revision, user in rows]
+
+
+@router.post("/projects/{project_id}/graph-history/{revision_id}/restore")
+def restore_project_graph_revision(
+    project_id: str,
+    revision_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    project, member = _project_access(db, project_id, request.state.user.id)
+    _require_editor(member)
+    revision = db.get(ProjectGraphRevision, revision_id)
+    if revision is None or revision.project_id != project.id:
+        raise HTTPException(404, "Версия карты не найдена.")
+    graph_state = db.scalar(select(ProjectGraphState).where(ProjectGraphState.project_id == project.id))
+    current_revision = graph_state.revision if graph_state else 0
+    snapshot = revision.snapshot or {}
+    db.execute(delete(EntityLink).where(EntityLink.project_id == project.id))
+    for item in snapshot.get("manual_links") or []:
+        db.add(EntityLink(
+            project_id=project.id,
+            source_type=item["source_type"],
+            source_id=item["source_id"],
+            target_type=item["target_type"],
+            target_id=item["target_id"],
+            relation_type=item["relation_type"],
+            label=item.get("label"),
+            weight=item.get("weight") or 1,
+            extra=item.get("extra"),
+            created_by_user_id=request.state.user.id,
+        ))
+    db.flush()
+    payload = ProjectGraphStateSave(
+        revision=current_revision,
+        viewport=snapshot.get("viewport"),
+        positions=snapshot.get("positions") or {},
+        custom_nodes=snapshot.get("custom_nodes") or [],
+    )
+    graph_state = _apply_graph_state(db, project, payload, request.state.user.id)
+    _event(project.id, "graph.state.restored", request.state.user.id, revision=graph_state.revision)
+    return {"project_id": project.id, "revision": graph_state.revision, **_graph_snapshot(db, graph_state)}
 
 
 @router.post("/projects/{project_id}/entity-links", status_code=201)
@@ -306,7 +560,10 @@ def create_entity_link(project_id: str, payload: EntityLinkCreate, request: Requ
                       label=(payload.label or "").strip() or None, weight=payload.weight, extra=payload.extra,
                       created_by_user_id=request.state.user.id)
     db.add(link)
-    try: db.commit()
+    try:
+        db.flush()
+        _bump_graph_revision(db, project, request.state.user.id)
+        db.commit()
     except Exception as exc:
         db.rollback(); raise HTTPException(409, "Такая связь уже существует.") from exc
     _event(project.id, "graph.link.created", request.state.user.id, link_id=link.id)
@@ -318,7 +575,11 @@ def delete_entity_link(link_id: str, request: Request, db: Session = Depends(get
     link = db.get(EntityLink, link_id)
     if link is None: raise HTTPException(404, "Связь не найдена.")
     _, member = _project_access(db, link.project_id, request.state.user.id); _require_editor(member)
-    project_id = link.project_id; db.delete(link); db.commit()
+    project_id = link.project_id
+    project = db.get(Project, project_id)
+    db.delete(link); db.flush()
+    _bump_graph_revision(db, project, request.state.user.id)
+    db.commit()
     _event(project_id, "graph.link.deleted", request.state.user.id, link_id=link_id)
 
 
