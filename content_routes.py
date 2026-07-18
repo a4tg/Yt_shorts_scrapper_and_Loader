@@ -2,7 +2,7 @@ import os
 import re
 import shutil
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -22,6 +22,7 @@ from saas_models import (
     ContentAttachment,
     ContentItem,
     ContentRevision,
+    DocumentComment,
     Job,
     JobFile,
     Overlay,
@@ -73,6 +74,21 @@ class ContentUpdate(BaseModel):
     due_at: datetime | None = None
     assignee_user_id: str | None = Field(default=None, max_length=36)
     status: Literal["active", "archived"] | None = None
+    expected_updated_at: datetime | None = None
+    expected_revision: int | None = Field(default=None, ge=1)
+
+
+class DocumentCommentCreate(BaseModel):
+    body: str = Field(min_length=1, max_length=10_000)
+    parent_id: str | None = Field(default=None, max_length=36)
+    quoted_text: str | None = Field(default=None, max_length=1000)
+    start_offset: int | None = Field(default=None, ge=0)
+    end_offset: int | None = Field(default=None, ge=1)
+
+
+class DocumentCommentUpdate(BaseModel):
+    body: str | None = Field(default=None, min_length=1, max_length=10_000)
+    status: Literal["open", "resolved"] | None = None
 
 
 class FolderCreate(BaseModel):
@@ -238,6 +254,11 @@ def _item_payload(db: Session, item: ContentItem, *, include_body: bool = True) 
     attachment_count = db.scalar(
         select(func.count(ContentAttachment.id)).where(ContentAttachment.content_item_id == item.id)
     ) or 0
+    revision_version = db.scalar(
+        select(func.max(ContentRevision.version_number)).where(
+            ContentRevision.content_item_id == item.id
+        )
+    ) or 0
     payload: dict[str, object] = {
         "id": item.id,
         "project_id": item.project_id,
@@ -262,6 +283,7 @@ def _item_payload(db: Session, item: ContentItem, *, include_body: bool = True) 
             "email": assignee.email,
         } if assignee else None),
         "attachment_count": attachment_count,
+        "revision_version": revision_version,
         "created_at": item.created_at.isoformat(),
         "updated_at": item.updated_at.isoformat(),
     }
@@ -270,19 +292,29 @@ def _item_payload(db: Session, item: ContentItem, *, include_body: bool = True) 
     return payload
 
 
-def _add_revision(db: Session, item: ContentItem, user_id: str) -> None:
+def _add_revision(db: Session, item: ContentItem, user_id: str) -> ContentRevision | None:
+    latest = db.scalar(
+        select(ContentRevision)
+        .where(ContentRevision.content_item_id == item.id)
+        .order_by(ContentRevision.version_number.desc())
+        .limit(1)
+    )
+    if latest and latest.title == item.title and (latest.body or "") == (item.body or ""):
+        return None
     version = db.scalar(
         select(func.max(ContentRevision.version_number)).where(
             ContentRevision.content_item_id == item.id
         )
     ) or 0
-    db.add(ContentRevision(
+    revision = ContentRevision(
         content_item_id=item.id,
         version_number=version + 1,
         title=item.title,
         body=item.body,
         changed_by_user_id=user_id,
-    ))
+    )
+    db.add(revision)
+    return revision
 
 
 @router.get("/projects/{project_id}/content")
@@ -396,6 +428,30 @@ def update_content(
     require_entitlement(db, request.state.user.id)
     project, _ = _project_access(db, item.project_id, request.state.user.id)
     values = payload.model_dump(exclude_unset=True)
+    expected_updated_at = values.pop("expected_updated_at", None)
+    expected_revision = values.pop("expected_revision", None)
+    if expected_revision is not None:
+        current_revision = db.scalar(
+            select(func.max(ContentRevision.version_number)).where(
+                ContentRevision.content_item_id == item.id
+            )
+        ) or 0
+        if current_revision != expected_revision:
+            raise HTTPException(
+                409,
+                "Документ уже изменён другим участником. Обновите страницу перед сохранением.",
+            )
+    if expected_updated_at is not None:
+        current_updated_at = item.updated_at
+        if current_updated_at.tzinfo is None:
+            current_updated_at = current_updated_at.replace(tzinfo=timezone.utc)
+        if expected_updated_at.tzinfo is None:
+            expected_updated_at = expected_updated_at.replace(tzinfo=timezone.utc)
+        if abs((current_updated_at - expected_updated_at).total_seconds()) > 0.001:
+            raise HTTPException(
+                409,
+                "Документ уже изменён другим участником. Обновите страницу перед сохранением.",
+            )
     if "stage_id" in values:
         stage = _stage_for_project(db, item.project_id, values["stage_id"])
         if values["stage_id"] and stage is None:
@@ -450,6 +506,159 @@ def list_revisions(
         "author": user.display_name or user.email,
         "created_at": revision.created_at.isoformat(),
     } for revision, user in rows]
+
+
+@router.post("/content/{item_id}/revisions/{revision_id}/restore")
+def restore_revision(
+    item_id: str,
+    revision_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    item, member = _item_access(db, item_id, request.state.user.id)
+    _require_editor(member)
+    revision = db.get(ContentRevision, revision_id)
+    if revision is None or revision.content_item_id != item.id:
+        raise HTTPException(404, "Версия документа не найдена.")
+    if item.item_type not in {"document", "note"}:
+        raise HTTPException(400, "Восстановление версий доступно только для документов.")
+    item.title = revision.title
+    item.body = revision.body
+    _add_revision(db, item, request.state.user.id)
+    db.commit()
+    return _item_payload(db, item)
+
+
+def _document_comment_payload(
+    db: Session,
+    comment: DocumentComment,
+    viewer_id: str,
+) -> dict[str, object]:
+    author = db.get(User, comment.author_user_id)
+    resolver = db.get(User, comment.resolved_by_user_id) if comment.resolved_by_user_id else None
+    return {
+        "id": comment.id,
+        "content_item_id": comment.content_item_id,
+        "parent_id": comment.parent_id,
+        "body": comment.body,
+        "quoted_text": comment.quoted_text,
+        "start_offset": comment.start_offset,
+        "end_offset": comment.end_offset,
+        "status": comment.status,
+        "author": {
+            "id": author.id,
+            "name": author.display_name or author.email,
+            "email": author.email,
+        },
+        "resolved_by": ({
+            "id": resolver.id,
+            "name": resolver.display_name or resolver.email,
+            "email": resolver.email,
+        } if resolver else None),
+        "resolved_at": comment.resolved_at.isoformat() if comment.resolved_at else None,
+        "created_at": comment.created_at.isoformat(),
+        "updated_at": comment.updated_at.isoformat(),
+        "is_own": comment.author_user_id == viewer_id,
+    }
+
+
+@router.get("/content/{item_id}/comments")
+def list_document_comments(
+    item_id: str,
+    request: Request,
+    status: Literal["open", "resolved", "all"] = "all",
+    db: Session = Depends(get_db),
+) -> list[dict[str, object]]:
+    item, _ = _item_access(db, item_id, request.state.user.id)
+    if item.item_type not in {"document", "note"}:
+        raise HTTPException(400, "Комментарии доступны только для документов.")
+    statement = select(DocumentComment).where(DocumentComment.content_item_id == item.id)
+    if status != "all":
+        statement = statement.where(DocumentComment.status == status)
+    comments = db.scalars(
+        statement.order_by(DocumentComment.created_at, DocumentComment.id)
+    ).all()
+    return [
+        _document_comment_payload(db, comment, request.state.user.id)
+        for comment in comments
+    ]
+
+
+@router.post("/content/{item_id}/comments", status_code=201)
+def create_document_comment(
+    item_id: str,
+    payload: DocumentCommentCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    item, _ = _item_access(db, item_id, request.state.user.id)
+    if item.item_type not in {"document", "note"}:
+        raise HTTPException(400, "Комментарии доступны только для документов.")
+    if (payload.start_offset is None) != (payload.end_offset is None):
+        raise HTTPException(400, "Для выделения нужны начало и конец диапазона.")
+    if payload.start_offset is not None and payload.end_offset <= payload.start_offset:
+        raise HTTPException(400, "Конец выделения должен быть после начала.")
+    parent = None
+    if payload.parent_id:
+        parent = db.get(DocumentComment, payload.parent_id)
+        if parent is None or parent.content_item_id != item.id:
+            raise HTTPException(400, "Родительский комментарий не принадлежит документу.")
+    comment = DocumentComment(
+        content_item_id=item.id,
+        parent_id=parent.id if parent else None,
+        author_user_id=request.state.user.id,
+        body=payload.body.strip(),
+        quoted_text=(payload.quoted_text or "").strip() or None,
+        start_offset=payload.start_offset,
+        end_offset=payload.end_offset,
+    )
+    db.add(comment)
+    db.commit()
+    return _document_comment_payload(db, comment, request.state.user.id)
+
+
+@router.patch("/document-comments/{comment_id}")
+def update_document_comment(
+    comment_id: str,
+    payload: DocumentCommentUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    comment = db.get(DocumentComment, comment_id)
+    if comment is None:
+        raise HTTPException(404, "Комментарий не найден.")
+    _, member = _item_access(db, comment.content_item_id, request.state.user.id)
+    values = payload.model_dump(exclude_unset=True)
+    if "body" in values:
+        if comment.author_user_id != request.state.user.id and not has_role(member, "admin"):
+            raise HTTPException(403, "Изменить комментарий может автор или администратор.")
+        comment.body = values["body"].strip()
+    if "status" in values:
+        comment.status = values["status"]
+        if comment.status == "resolved":
+            comment.resolved_by_user_id = request.state.user.id
+            comment.resolved_at = datetime.now(timezone.utc)
+        else:
+            comment.resolved_by_user_id = None
+            comment.resolved_at = None
+    db.commit()
+    return _document_comment_payload(db, comment, request.state.user.id)
+
+
+@router.delete("/document-comments/{comment_id}", status_code=204)
+def delete_document_comment(
+    comment_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> None:
+    comment = db.get(DocumentComment, comment_id)
+    if comment is None:
+        raise HTTPException(404, "Комментарий не найден.")
+    _, member = _item_access(db, comment.content_item_id, request.state.user.id)
+    if comment.author_user_id != request.state.user.id and not has_role(member, "admin"):
+        raise HTTPException(403, "Удалить комментарий может автор или администратор.")
+    db.delete(comment)
+    db.commit()
 
 
 async def _store_upload(

@@ -258,6 +258,41 @@ class ContentRevision(Base):
     )
 
 
+class DocumentComment(TimestampMixin, Base):
+    __tablename__ = "document_comments"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('open', 'resolved')",
+            name="ck_document_comments_status",
+        ),
+        CheckConstraint(
+            "(start_offset IS NULL AND end_offset IS NULL) OR "
+            "(start_offset >= 0 AND end_offset > start_offset)",
+            name="ck_document_comments_selection",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    content_item_id: Mapped[str] = mapped_column(
+        ForeignKey("content_items.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    parent_id: Mapped[str | None] = mapped_column(
+        ForeignKey("document_comments.id", ondelete="CASCADE"), index=True
+    )
+    author_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    quoted_text: Mapped[str | None] = mapped_column(String(1000))
+    start_offset: Mapped[int | None] = mapped_column(Integer)
+    end_offset: Mapped[int | None] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="open", index=True)
+    resolved_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class ProjectFolder(TimestampMixin, Base):
     __tablename__ = "project_folders"
 

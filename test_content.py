@@ -124,6 +124,119 @@ def test_content_permissions_and_tenant_isolation() -> None:
     assert outsider.get(f"/api/projects/{project['id']}/content").status_code == 404
 
 
+def test_document_comments_threads_resolution_and_permissions() -> None:
+    owner, _ = register_user()
+    viewer, viewer_user = register_user()
+    outsider, _ = register_user()
+    workspace, project = current_project(owner)
+    assert owner.post(
+        f"/api/workspaces/{workspace['id']}/members",
+        headers=csrf(owner),
+        json={"email": viewer_user["email"], "role": "viewer"},
+    ).status_code == 201
+    document = owner.post(
+        f"/api/projects/{project['id']}/content",
+        headers=csrf(owner),
+        json={
+            "title": "Бриф кампании",
+            "item_type": "document",
+            "body": "Первый абзац документа",
+        },
+    ).json()
+
+    root = viewer.post(
+        f"/api/content/{document['id']}/comments",
+        headers=csrf(viewer),
+        json={
+            "body": "Нужно уточнить формулировку",
+            "quoted_text": "Первый абзац",
+            "start_offset": 0,
+            "end_offset": 13,
+        },
+    )
+    assert root.status_code == 201, root.text
+    comment = root.json()
+    assert comment["author"]["id"] == viewer_user["id"]
+    assert comment["status"] == "open"
+    reply = owner.post(
+        f"/api/content/{document['id']}/comments",
+        headers=csrf(owner),
+        json={"body": "Уточнил в следующей версии", "parent_id": comment["id"]},
+    )
+    assert reply.status_code == 201
+    assert reply.json()["parent_id"] == comment["id"]
+
+    resolved = owner.patch(
+        f"/api/document-comments/{comment['id']}",
+        headers=csrf(owner),
+        json={"status": "resolved"},
+    )
+    assert resolved.status_code == 200
+    assert resolved.json()["resolved_by"] is not None
+    listing = viewer.get(f"/api/content/{document['id']}/comments")
+    assert [entry["id"] for entry in listing.json()] == [comment["id"], reply.json()["id"]]
+    assert viewer.get(
+        f"/api/content/{document['id']}/comments", params={"status": "resolved"}
+    ).json()[0]["id"] == comment["id"]
+
+    invalid = owner.post(
+        f"/api/content/{document['id']}/comments",
+        headers=csrf(owner),
+        json={"body": "Некорректное выделение", "start_offset": 5},
+    )
+    assert invalid.status_code == 400
+    assert outsider.get(f"/api/content/{document['id']}/comments").status_code == 404
+    assert owner.delete(
+        f"/api/document-comments/{reply.json()['id']}", headers=csrf(owner)
+    ).status_code == 204
+
+
+def test_document_revision_restore_and_optimistic_edit_conflict() -> None:
+    owner, _ = register_user()
+    _, project = current_project(owner)
+    created = owner.post(
+        f"/api/projects/{project['id']}/content",
+        headers=csrf(owner),
+        json={"title": "Стратегия", "item_type": "document", "body": "Версия один"},
+    ).json()
+    assert created["revision_version"] == 1
+
+    updated = owner.patch(
+        f"/api/content/{created['id']}",
+        headers=csrf(owner),
+        json={
+            "body": "Версия два",
+            "expected_revision": created["revision_version"],
+        },
+    )
+    assert updated.status_code == 200
+    assert updated.json()["revision_version"] == 2
+    stale = owner.patch(
+        f"/api/content/{created['id']}",
+        headers=csrf(owner),
+        json={"body": "Затереть чужую версию", "expected_revision": 1},
+    )
+    assert stale.status_code == 409
+
+    revisions = owner.get(f"/api/content/{created['id']}/revisions").json()
+    first = next(revision for revision in revisions if revision["version"] == 1)
+    restored = owner.post(
+        f"/api/content/{created['id']}/revisions/{first['id']}/restore",
+        headers=csrf(owner),
+    )
+    assert restored.status_code == 200
+    assert restored.json()["body"] == "Версия один"
+    assert restored.json()["revision_version"] == 3
+
+    no_text_change = owner.patch(
+        f"/api/content/{created['id']}",
+        headers=csrf(owner),
+        json={"priority": "high", "expected_revision": 3},
+    )
+    assert no_text_change.status_code == 200
+    assert no_text_change.json()["revision_version"] == 3
+
+
 def test_content_attachments_feed_project_library(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(content_routes, "CONTENT_DIR", tmp_path)
     client, _ = register_user()
