@@ -5,8 +5,11 @@ const KIND = {
 const PRIORITY = { low: 'Низкий', normal: 'Обычный', high: 'Высокий', urgent: 'Срочный' };
 const STATS = [
   ['open_insights', 'Сигналы', '◆', ''], ['urgent', 'Срочные', '!', 'urgent'],
-  ['open_reviews', 'Замечания', '◉', ''], ['overdue', 'Просрочки', '⌛', 'warning'],
-  ['changes_requested', 'Нужны правки', '↻', 'warning'], ['unread_messages', 'Непрочитано', '◌', ''],
+  ['overdue', 'Просрочки', '⌛', 'warning'], ['pending_approvals', 'На согласовании', '✓', ''],
+  ['overdue_approvals', 'Просрочены согласования', '!', 'urgent'],
+  ['open_reviews', 'Замечания', '◉', ''], ['open_document_comments', 'Комментарии', '✎', ''],
+  ['due_this_week', 'Срок на неделе', '◷', ''], ['unassigned', 'Без ответственного', '○', 'warning'],
+  ['unread_messages', 'Непрочитано', '◌', ''],
 ];
 
 function node(tag, className, text) {
@@ -52,7 +55,8 @@ export function initDecisionIntelligence({ bus, bridge, router }) {
       for (const item of items.slice(0, 5)) column.append(node('span', '', item.title || item.detail || 'Сигнал'));
       host.append(column);
     }
-    host.append(node('small', 'briefing-meta', `${briefing.provider === 'openai' ? 'AI-сводка' : 'Сводка по правилам'} · ${dateText(briefing.generated_at) || ''}`));
+    const source = briefing.provider === 'openai' ? 'AI-сводка' : briefing.is_live ? 'Живая сводка' : 'Сводка по правилам';
+    host.append(node('small', 'briefing-meta', `${source} · ${dateText(briefing.generated_at) || ''}`));
   }
 
   async function patchInsight(id, payload) {
@@ -85,8 +89,26 @@ export function initDecisionIntelligence({ bus, bridge, router }) {
     const items = (state.data?.items || []).filter((item) => { const key = `${item.type}:${item.id}`; if (seen.has(key)) return false; seen.add(key); return true; }).slice(0, 30);
     if (!items.length) { host.append(node('div', 'decision-empty', 'Очередь пуста — срочных точек внимания нет.')); return; }
     for (const item of items) {
-      const card = node('article', `attention-queue-item ${item.priority || ''}`); card.dataset.queueType = item.type; card.dataset.queueId = item.id; if (item.attachment_id) card.dataset.attachmentId = item.attachment_id;
-      card.append(node('i')); const copy = node('div'); copy.append(node('strong', '', item.title), node('small', '', item.detail || ({ review: 'Открытое замечание', overdue: 'Просроченный материал', insight: 'Сигнал проекта' }[item.type] || 'Требует реакции'))); card.append(copy, node('b', '', item.due_at ? dateText(item.due_at) : `+${item.impact_score || 0}`)); host.append(card);
+      const card = node('article', `attention-queue-item ${item.priority || ''}`);
+      card.dataset.queueType = item.type; card.dataset.queueId = item.id;
+      card.dataset.queueRoute = item.route || '';
+      if (item.attachment_id) card.dataset.attachmentId = item.attachment_id;
+      if (item.content_id) card.dataset.contentId = item.content_id;
+      card.tabIndex = 0; card.setAttribute('role', 'button');
+      card.setAttribute('aria-label', `${item.action_label || 'Открыть'}: ${item.title}`);
+      card.append(node('i'));
+      const copy = node('div');
+      copy.append(
+        node('strong', '', item.title),
+        node('small', '', item.detail || ({
+          approval: 'Ожидает согласования', review: 'Открытое замечание',
+          document_comment: 'Комментарий к документу', upcoming: 'Приближается срок',
+          overdue: 'Просроченный материал', insight: 'Сигнал проекта',
+        }[item.type] || 'Требует реакции')),
+        node('span', 'attention-queue-action', item.action_label || 'Открыть'),
+      );
+      card.append(copy, node('b', '', item.due_at ? dateText(item.due_at) : `+${item.impact_score || 0}`));
+      host.append(card);
     }
   }
 
@@ -173,7 +195,13 @@ export function initDecisionIntelligence({ bus, bridge, router }) {
     if (queue?.dataset.queueType === 'review' && queue.dataset.attachmentId) {
       bus.emit('asset:open', { assetId: queue.dataset.attachmentId, projectId: state.projectId });
       bus.emit('review:focus', { reviewId: queue.dataset.queueId, attachmentId: queue.dataset.attachmentId });
-    } else if (queue?.dataset.queueType === 'overdue') router.open('content');
+    } else if (queue?.dataset.queueType === 'document_comment' && queue.dataset.contentId) {
+      bridge.openDocument?.(queue.dataset.contentId);
+    } else if (queue?.dataset.queueRoute) router.open(queue.dataset.queueRoute);
+  });
+  root.addEventListener('keydown', (event) => {
+    if (!event.target.matches('[data-queue-type]') || !['Enter', ' '].includes(event.key)) return;
+    event.preventDefault(); event.target.click();
   });
   root.addEventListener('change', (event) => { const id = event.target.dataset.insightStatus; if (id) patchInsight(id, { status: event.target.value }).catch(errorMessage); });
   dialog.querySelector('form').addEventListener('submit', createInsight);

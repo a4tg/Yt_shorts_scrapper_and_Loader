@@ -113,11 +113,28 @@ def deterministic_briefing(project_name: str, insights: Iterable[dict[str, objec
     decisions = [item for item in items if item.get("kind") == "decision"]
     risks = [item for item in items if item.get("kind") == "risk"]
     actions = [item for item in items if item.get("kind") in {"action", "commitment"}]
-    summary = (
-        f"В проекте «{project_name}» сейчас {stats.get('open_insights', 0)} активных сигналов, "
-        f"{stats.get('open_reviews', 0)} незакрытых замечаний и {stats.get('overdue', 0)} просроченных материалов. "
-        f"Зафиксировано решений: {len(decisions)}; действий и обязательств: {len(actions)}."
+    pressure = (
+        stats.get("overdue", 0)
+        + stats.get("overdue_approvals", 0)
+        + stats.get("changes_requested", 0)
+        + stats.get("open_reviews", 0)
+        + stats.get("open_document_comments", 0)
     )
+    if pressure:
+        summary = (
+            f"Проект «{project_name}» требует внимания: просрочено материалов — {stats.get('overdue', 0)}, "
+            f"просрочено согласований — {stats.get('overdue_approvals', 0)}, "
+            f"запрошено правок — {stats.get('changes_requested', 0)}. "
+            f"Открытых замечаний и комментариев — "
+            f"{stats.get('open_reviews', 0) + stats.get('open_document_comments', 0)}."
+        )
+    else:
+        summary = (
+            f"В проекте «{project_name}» критичных блокеров не найдено. "
+            f"На ближайшие 7 дней запланировано материалов: {stats.get('due_this_week', 0)}; "
+            f"ожидают согласования: {stats.get('pending_approvals', 0)}. "
+            f"Зафиксировано решений: {len(decisions)}; действий и обязательств: {len(actions)}."
+        )
     def compact(values, limit=5):
         return [{"id": item.get("id"), "title": item.get("title"), "priority": item.get("priority"), "impact_score": item.get("impact_score")} for item in values[:limit]]
     return {"summary": summary, "highlights": compact(decisions), "risks": compact(risks), "next_actions": compact(actions)}

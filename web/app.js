@@ -4280,6 +4280,10 @@ window.AAPLegacyApp = Object.freeze({
   getAuthConfig: () => ({ ...state.authConfig }),
   getContext: workspaceContextSnapshot,
   navigate: (page, syncUrl = true) => showWorkspacePage(page, syncUrl),
+  openDocument: async (itemId) => {
+    showWorkspacePage('documents', true);
+    await openDocumentEditor(itemId);
+  },
   notify: showToast,
 });
 window.dispatchEvent(new CustomEvent('aap:legacy-ready'));

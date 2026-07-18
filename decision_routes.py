@@ -19,9 +19,10 @@ from decision_intelligence import (
 from graph_routes import _validate_entity
 from realtime_service import project_events
 from saas_models import (
-    AssetApproval, AssetReview, ContentAttachment, ContentItem, Conversation,
-    ConversationParticipant, EntityLink, InsightLink, Message, Project,
-    ProjectBriefing, ProjectInsight, User, WorkspaceMember,
+    ApprovalRequest, AssetApproval, AssetReview, ContentAttachment, ContentItem,
+    Conversation, ConversationParticipant, DocumentComment, EntityLink,
+    InsightLink, Message, Project, ProjectBriefing, ProjectInsight, User,
+    WorkspaceMember,
 )
 from workspace_service import has_role, project_membership
 
@@ -331,9 +332,40 @@ def _attention_data(db: Session, project: Project, member: WorkspaceMember, view
     ).where(ContentAttachment.project_id == project.id, AssetReview.status.in_(["open", "in_progress"]))
     if member.role == "client": review_statement = review_statement.where(AssetReview.visibility == "client")
     reviews = db.execute(review_statement.order_by(AssetReview.updated_at.desc()).limit(100)).all()
+    approval_statement = select(ApprovalRequest, ContentAttachment, ContentItem).join(
+        ContentAttachment, ContentAttachment.id == ApprovalRequest.attachment_id
+    ).outerjoin(
+        ContentItem, ContentItem.id == ContentAttachment.content_item_id
+    ).where(
+        ApprovalRequest.project_id == project.id,
+        ApprovalRequest.status.in_(["pending", "changes_requested"]),
+    )
+    if member.role == "client":
+        approval_statement = approval_statement.where(ApprovalRequest.visibility == "client")
+    approvals = db.execute(
+        approval_statement.order_by(
+            ApprovalRequest.due_at.asc().nullslast(),
+            ApprovalRequest.updated_at.desc(),
+        ).limit(100)
+    ).all()
+    document_comments = db.execute(
+        select(DocumentComment, ContentItem).join(
+            ContentItem, ContentItem.id == DocumentComment.content_item_id
+        ).where(
+            ContentItem.project_id == project.id,
+            ContentItem.item_type == "document",
+            DocumentComment.parent_id.is_(None),
+            DocumentComment.status == "open",
+        ).order_by(DocumentComment.updated_at.desc()).limit(100)
+    ).all()
     overdue = db.scalars(select(ContentItem).where(
         ContentItem.project_id == project.id, ContentItem.status == "active",
         ContentItem.due_at.is_not(None), ContentItem.due_at < now,
+    ).order_by(ContentItem.due_at).limit(100)).all()
+    upcoming = db.scalars(select(ContentItem).where(
+        ContentItem.project_id == project.id, ContentItem.status == "active",
+        ContentItem.due_at.is_not(None), ContentItem.due_at >= now,
+        ContentItem.due_at <= now + timedelta(days=7),
     ).order_by(ContentItem.due_at).limit(100)).all()
     changes = db.execute(select(AssetApproval, ContentAttachment).join(
         ContentAttachment, ContentAttachment.id == AssetApproval.attachment_id
@@ -358,19 +390,108 @@ def _attention_data(db: Session, project: Project, member: WorkspaceMember, view
         "open_insights": len(insights), "urgent": sum(item.priority == "urgent" for item in insights),
         "open_reviews": len(reviews), "overdue": len(overdue), "changes_requested": len(changes),
         "unread_messages": unread,
+        "pending_approvals": sum(item.status == "pending" for item, _, _ in approvals),
+        "overdue_approvals": sum(
+            item.status == "pending"
+            and bool(item.due_at)
+            and aware_datetime(item.due_at) < now
+            for item, _, _ in approvals
+        ),
+        "open_document_comments": len(document_comments),
+        "due_this_week": len(upcoming),
+        "unassigned": (
+            sum(item.assignee_user_id is None for item in overdue + upcoming)
+            + sum(item.assignee_user_id is None for item, _, _ in approvals)
+        ),
     }
     items = []
-    for insight in insights[:50]: items.append({"type": "insight", "id": insight.id, "title": insight.title, "detail": insight.description, "priority": insight.priority, "impact_score": insight.impact_score, "due_at": insight.due_at.isoformat() if insight.due_at else None})
-    for review, attachment in reviews[:20]: items.append({"type": "review", "id": review.id, "title": review.body[:240], "detail": attachment.original_name, "priority": "high" if review.status == "open" else "normal", "impact_score": 6, "attachment_id": attachment.id})
-    for content in overdue[:20]: items.append({"type": "overdue", "id": content.id, "title": content.title, "detail": "Просрочен материал", "priority": "urgent", "impact_score": 10, "due_at": content.due_at.isoformat()})
+    for insight in insights[:50]:
+        items.append({
+            "type": "insight", "id": insight.id, "title": insight.title,
+            "detail": insight.description, "priority": insight.priority,
+            "impact_score": insight.impact_score,
+            "due_at": insight.due_at.isoformat() if insight.due_at else None,
+            "route": "graph", "action_label": "Открыть на карте",
+        })
+    for approval, attachment, content in approvals[:30]:
+        is_overdue = (
+            approval.status == "pending"
+            and bool(approval.due_at)
+            and aware_datetime(approval.due_at) < now
+        )
+        items.append({
+            "type": "approval", "id": approval.id,
+            "title": content.title if content else attachment.original_name,
+            "detail": (
+                "Согласование просрочено" if is_overdue
+                else "Запрошены правки" if approval.status == "changes_requested"
+                else "Ожидает согласования"
+            ),
+            "priority": "urgent" if is_overdue else "high",
+            "impact_score": 12 if is_overdue else 8,
+            "due_at": approval.due_at.isoformat() if approval.due_at else None,
+            "attachment_id": attachment.id, "route": "approvals",
+            "action_label": "Открыть согласование",
+        })
+    for review, attachment in reviews[:20]:
+        items.append({
+            "type": "review", "id": review.id, "title": review.body[:240],
+            "detail": attachment.original_name,
+            "priority": "high" if review.status == "open" else "normal",
+            "impact_score": 6, "attachment_id": attachment.id,
+            "route": "library", "action_label": "Открыть замечание",
+        })
+    for comment, content in document_comments[:20]:
+        items.append({
+            "type": "document_comment", "id": comment.id,
+            "title": content.title, "detail": comment.body[:240],
+            "priority": "high", "impact_score": 7,
+            "content_id": content.id, "route": "documents",
+            "action_label": "Открыть документ",
+        })
+    for content in overdue[:20]:
+        items.append({
+            "type": "overdue", "id": content.id, "title": content.title,
+            "detail": "Просрочен материал", "priority": "urgent",
+            "impact_score": 10, "due_at": content.due_at.isoformat(),
+            "content_id": content.id, "route": "content",
+            "action_label": "Открыть контент-план",
+        })
+    for content in upcoming[:20]:
+        days_left = max(0, (aware_datetime(content.due_at).date() - now.date()).days)
+        items.append({
+            "type": "upcoming", "id": content.id, "title": content.title,
+            "detail": f"Срок через {days_left} дн.",
+            "priority": "high" if days_left <= 2 else "normal",
+            "impact_score": 7 if days_left <= 2 else 4,
+            "due_at": content.due_at.isoformat(), "content_id": content.id,
+            "route": "content", "action_label": "Открыть контент-план",
+        })
     items.sort(key=lambda item: (-float(item.get("impact_score") or 0), item.get("due_at") or "9999"))
     briefing_statement = select(ProjectBriefing).where(ProjectBriefing.project_id == project.id)
     if member.role == "client": briefing_statement = briefing_statement.where(ProjectBriefing.visibility == "client")
     latest = db.scalar(briefing_statement.order_by(ProjectBriefing.generated_at.desc()).limit(1))
-    score = min(100, stats["urgent"] * 15 + stats["overdue"] * 12 + stats["changes_requested"] * 8 + stats["open_reviews"] * 3 + min(15, stats["unread_messages"]))
+    score = min(
+        100,
+        stats["urgent"] * 15
+        + stats["overdue"] * 12
+        + stats["overdue_approvals"] * 12
+        + stats["changes_requested"] * 8
+        + stats["open_reviews"] * 3
+        + stats["open_document_comments"] * 2
+        + min(15, stats["unread_messages"]),
+    )
+    insight_payloads = [_insight_payload(db, item, viewer_id) for item in insights]
+    live_briefing = deterministic_briefing(project.name, insight_payloads, stats)
+    live_briefing.update({
+        "id": None, "project_id": project.id,
+        "visibility": "client" if member.role == "client" else "team",
+        "provider": "live-rules", "model": None, "source_stats": stats,
+        "generated_at": now.isoformat(), "is_live": True,
+    })
     return {"project_id": project.id, "score": score, "stats": stats, "items": items,
-            "insights": [_insight_payload(db, item, viewer_id) for item in insights],
-            "latest_briefing": _briefing_payload(latest) if latest else None}
+            "insights": insight_payloads,
+            "latest_briefing": _briefing_payload(latest) if latest else live_briefing}
 
 
 def _briefing_payload(item: ProjectBriefing) -> dict[str, object]:

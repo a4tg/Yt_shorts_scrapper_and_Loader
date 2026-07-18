@@ -152,6 +152,53 @@ def test_briefing_has_deterministic_fallback_and_sanitized_ai(monkeypatch) -> No
     assert len(owner.get(f"/api/projects/{project['id']}/briefings").json()) == 2
 
 
+def test_attention_builds_live_briefing_and_queue_from_project_work() -> None:
+    owner, _ = register("attention-owner")
+    _, project = context(owner)
+    overdue = owner.post(
+        f"/api/projects/{project['id']}/content",
+        headers=csrf(owner),
+        json={
+            "title": "Просроченный медиаплан",
+            "item_type": "campaign",
+            "due_at": "2026-01-10T12:00:00Z",
+        },
+    )
+    assert overdue.status_code == 201, overdue.text
+    document = owner.post(
+        f"/api/projects/{project['id']}/content",
+        headers=csrf(owner),
+        json={
+            "title": "Редакционная политика",
+            "item_type": "document",
+            "body": "Черновик документа",
+        },
+    )
+    assert document.status_code == 201, document.text
+    comment = owner.post(
+        f"/api/content/{document.json()['id']}/comments",
+        headers=csrf(owner),
+        json={"body": "Нужно уточнить правила публикации."},
+    )
+    assert comment.status_code == 201, comment.text
+
+    response = owner.get(f"/api/projects/{project['id']}/attention")
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["stats"]["overdue"] == 1
+    assert payload["stats"]["open_document_comments"] == 1
+    assert payload["latest_briefing"]["provider"] == "live-rules"
+    assert payload["latest_briefing"]["is_live"] is True
+    assert "Просроченный медиаплан" in {
+        item["title"] for item in payload["items"] if item["type"] == "overdue"
+    }
+    document_item = next(
+        item for item in payload["items"] if item["type"] == "document_comment"
+    )
+    assert document_item["content_id"] == document.json()["id"]
+    assert document_item["route"] == "documents"
+
+
 def test_client_cannot_use_ai_briefing_or_link_internal_diagram(monkeypatch) -> None:
     owner, _ = register("client-intel-owner")
     client, client_user = register("client-intel-client")
