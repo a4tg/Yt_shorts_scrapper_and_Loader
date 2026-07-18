@@ -31,6 +31,7 @@ from admin_routes import router as admin_router
 from billing_routes import router as billing_router
 from content_routes import CONTENT_DIR, router as content_router
 from asset_review_routes import router as asset_review_router
+from approval_routes import router as approval_router
 from graph_routes import router as graph_router
 from decision_routes import router as decision_router
 from messaging_routes import router as messaging_router
@@ -500,6 +501,7 @@ app.include_router(admin_router)
 app.include_router(billing_router)
 app.include_router(content_router)
 app.include_router(asset_review_router)
+app.include_router(approval_router)
 app.include_router(graph_router)
 app.include_router(decision_router)
 app.include_router(messaging_router)

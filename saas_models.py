@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import JSON, BigInteger, Boolean, CheckConstraint, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, false, func, true
@@ -133,6 +133,60 @@ class ApprovalStage(Base):
     color: Mapped[str] = mapped_column(String(16), nullable=False, default="#7c6cff")
     required_role: Mapped[str | None] = mapped_column(String(24))
     is_terminal: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class ApprovalRequest(TimestampMixin, Base):
+    __tablename__ = "approval_requests"
+    __table_args__ = (
+        UniqueConstraint("attachment_id", name="uq_approval_requests_attachment"),
+        CheckConstraint(
+            "status IN ('pending', 'approved', 'changes_requested', 'cancelled')",
+            name="ck_approval_requests_status",
+        ),
+        CheckConstraint("visibility IN ('team', 'client')", name="ck_approval_requests_visibility"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    attachment_id: Mapped[str] = mapped_column(
+        ForeignKey("content_attachments.id", ondelete="CASCADE"), nullable=False, unique=True, index=True
+    )
+    stage_id: Mapped[str | None] = mapped_column(
+        ForeignKey("approval_stages.id", ondelete="SET NULL"), index=True
+    )
+    requested_by_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    assignee_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="pending", index=True)
+    visibility: Mapped[str] = mapped_column(String(16), nullable=False, default="team", index=True)
+    note: Mapped[str | None] = mapped_column(Text)
+
+
+class ApprovalEvent(Base):
+    __tablename__ = "approval_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    approval_request_id: Mapped[str] = mapped_column(
+        ForeignKey("approval_requests.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    event_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    actor_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    details: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        index=True,
+    )
 
 
 class ContentItem(TimestampMixin, Base):

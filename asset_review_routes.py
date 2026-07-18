@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
+from approval_service import sync_approval_request_after_decision
 from content_routes import _attachment_access, _attachment_payload, _require_editor, _store_upload
 from database import get_db
 from realtime_service import project_events
@@ -311,7 +312,16 @@ def decide_asset(
                                  decision=payload.decision)
         db.add(approval)
     approval.decision = payload.decision; approval.comment = (payload.comment or "").strip() or None
-    approval.decided_at = _now(); db.commit()
+    approval.decided_at = _now(); db.flush()
+    sync_approval_request_after_decision(
+        db,
+        attachment.id,
+        request.state.user.id,
+        event_type="decision",
+        decision=approval.decision,
+        comment=approval.comment,
+    )
+    db.commit()
     _event(attachment.project_id, "asset.approval.updated", request.state.user.id,
            attachment_id=attachment.id, decision=approval.decision)
     return {**_approval_payload(db, approval, request.state.user.id),
@@ -324,6 +334,13 @@ def clear_asset_decision(attachment_id: str, request: Request, db: Session = Dep
     _require_decider(member)
     db.execute(delete(AssetApproval).where(
         AssetApproval.attachment_id == attachment.id, AssetApproval.user_id == request.state.user.id,
-    )); db.commit()
+    )); db.flush()
+    sync_approval_request_after_decision(
+        db,
+        attachment.id,
+        request.state.user.id,
+        event_type="decision_withdrawn",
+    )
+    db.commit()
     _event(attachment.project_id, "asset.approval.cleared", request.state.user.id,
            attachment_id=attachment.id)
