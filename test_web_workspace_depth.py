@@ -42,6 +42,8 @@ class WorkspaceDepthFoundationTests(unittest.TestCase):
         self.assertIn("registerModule('project-graph'", entrypoint)
         for marker in ("loadGraph", "createLink", "saveDiagram", "undo", "redo", "EventSource", "project-diagram-edges", "project-diagram-visibility", "review:focus"):
             self.assertIn(marker, script)
+        self.assertIn("if (bounds.width < 1 || bounds.height < 1) return false", script)
+        self.assertIn("const projectChanged = projectId !== state.projectId", script)
         for selector in (".project-graph-node", ".project-diagram-node", ".project-diagram-edge", ".project-graph-minimap"):
             self.assertIn(selector, styles)
         self.assertIn(".project-diagram-edge-list", editor_styles)

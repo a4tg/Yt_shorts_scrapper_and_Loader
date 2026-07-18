@@ -162,8 +162,11 @@ export function initProjectGraph({ bus, bridge }) {
   }
 
   function fitGraph() {
-    const bounds = graphViewport.getBoundingClientRect(); const zoom = Math.min(.9, bounds.width / WORLD_WIDTH, bounds.height / WORLD_HEIGHT);
+    const bounds = graphViewport.getBoundingClientRect();
+    if (bounds.width < 1 || bounds.height < 1) return false;
+    const zoom = Math.min(.9, bounds.width / WORLD_WIDTH, bounds.height / WORLD_HEIGHT);
     Object.assign(state.mapTransform, { x: (bounds.width - WORLD_WIDTH * zoom) / 2, y: (bounds.height - WORLD_HEIGHT * zoom) / 2, zoom }); applyTransform(graphWorld, state.mapTransform);
+    return true;
   }
 
   function connectRealtime() {
@@ -360,8 +363,17 @@ export function initProjectGraph({ bus, bridge }) {
 
   async function activate(context) {
     state.context = context || bridge.getContext?.() || {}; const projectId = state.context?.project?.id;
-    if (!projectId || projectId === state.projectId) return; state.projectId = projectId; state.diagram = null; state.dirty = false; connectRealtime();
-    await Promise.all([loadGraph(), loadDiagrams()]); setTimeout(fitGraph);
+    if (!projectId) return;
+    const projectChanged = projectId !== state.projectId;
+    if (projectChanged) {
+      state.projectId = projectId; state.diagram = null; state.dirty = false; connectRealtime();
+      await Promise.all([loadGraph(), loadDiagrams()]);
+    }
+    if (state.context.page === 'graph') {
+      requestAnimationFrame(() => {
+        if (!fitGraph()) setTimeout(fitGraph, 80);
+      });
+    }
   }
   bus.on('context:change', (context) => { state.context = context; if (context.page === 'graph') activate(context).catch(showError); });
   bus.on('route:change', ({ page, params }) => { if (page === 'graph') { activate(bridge.getContext?.()).then(() => {
@@ -369,7 +381,7 @@ export function initProjectGraph({ bus, bridge }) {
     else if (params.insight && graphNode(`insight:${params.insight}`)) {
       setView('map'); state.selectedGraphId = `insight:${params.insight}`; renderGraph(); renderGraphInspector();
       graphNodes.querySelector(`[data-graph-node-id="insight:${params.insight}"]`)?.focus();
-    }
+    } else setView('map');
   }).catch(showError); } });
   const initial = bridge.getContext?.(); if (initial?.project?.id) activate(initial).catch(showError);
   applyTransform(graphWorld, state.mapTransform); applyTransform(diagramWorld, state.diagramTransform); renderGraphFilters();
