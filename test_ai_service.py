@@ -56,6 +56,30 @@ def test_generate_text_uses_responses_api_and_extracts_output(monkeypatch) -> No
     assert call.call_args.kwargs["json"]["store"] is False
 
 
+def test_generate_text_falls_back_to_chat_completions(monkeypatch) -> None:
+    monkeypatch.setenv("AAP_AI_PROVIDER", "aitunnel")
+    monkeypatch.setenv("AAP_AI_API_KEY", "tunnel-key")
+    monkeypatch.setenv("AAP_AI_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("AAP_AI_API_MODE", "auto")
+    unavailable = MagicMock()
+    unavailable.is_success = False
+    unavailable.status_code = 404
+    unavailable.json.return_value = {
+        "error": {"message": "Responses API is unavailable"}
+    }
+    chat = response({
+        "model": "compatible-model",
+        "choices": [{"message": {"content": "Готовый ответ"}}],
+        "usage": {"total_tokens": 21},
+    })
+    with patch("ai_service.httpx.post", side_effect=[unavailable, chat]) as call:
+        result = ai_service.generate_text("Тема", "Инструкция")
+    assert result["text"] == "Готовый ответ"
+    assert result["provider"] == "aitunnel"
+    assert result["api_mode"] == "chat_completions"
+    assert call.call_args_list[1].args[0].endswith("/chat/completions")
+
+
 def test_generate_image_decodes_base64(monkeypatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     upstream = response({"data": [{"b64_json": base64.b64encode(b"png-data").decode()}]})
@@ -66,11 +90,36 @@ def test_generate_image_decodes_base64(monkeypatch) -> None:
 
 
 def test_highlight_selection_validates_duration() -> None:
-    transcript = {"segments": [{"start": 0, "end": 70, "text": "Фрагмент"}]}
+    transcript = {
+        "duration": 70,
+        "segments": [{"start": 0, "end": 70, "text": "Фрагмент"}],
+    }
     answer = {"text": '[{"start": 5, "end": 35, "title": "Момент", "reason": "Сильный заход"}]'}
     with patch("ai_service.generate_text", return_value=answer):
         clips = ai_service.select_highlights(transcript, 1, 20, 60)
-    assert clips == [{"start": 5.0, "end": 35.0, "title": "Момент", "reason": "Сильный заход"}]
+    assert clips == [{
+        "start": 5.0, "end": 35.0, "title": "Момент",
+        "reason": "Сильный заход", "score": 50,
+    }]
+
+
+def test_highlight_selection_rejects_overlap_and_out_of_bounds() -> None:
+    transcript = {
+        "duration": 120,
+        "segments": [
+            {"start": 0, "end": 60, "text": "Первый смысловой фрагмент"},
+            {"start": 60, "end": 120, "text": "Второй смысловой фрагмент"},
+        ],
+    }
+    answer = {"text": """[
+      {"start": 10, "end": 50, "title": "Первый", "score": 90},
+      {"start": 20, "end": 55, "title": "Пересечение", "score": 80},
+      {"start": 90, "end": 140, "title": "Обрезается", "score": 70}
+    ]"""}
+    with patch("ai_service.generate_text", return_value=answer):
+        clips = ai_service.select_highlights(transcript, 3, 20, 60)
+    assert [item["title"] for item in clips] == ["Первый", "Обрезается"]
+    assert clips[-1]["end"] == 120
 
 
 def test_long_media_transcription_restores_absolute_timestamps(tmp_path, monkeypatch) -> None:
@@ -89,7 +138,8 @@ def test_long_media_transcription_restores_absolute_timestamps(tmp_path, monkeyp
     assert result["segments"][1]["start"] == 605
 
 
-def test_ai_text_endpoint_is_project_scoped_and_reserves_credit() -> None:
+def test_ai_text_endpoint_is_project_scoped_and_reserves_credit(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     client = register_user(); project = project_id(client)
     result = client.post(
         "/api/ai/text", headers=csrf(client),
@@ -103,7 +153,8 @@ def test_ai_text_endpoint_is_project_scoped_and_reserves_credit() -> None:
         assert job.credits_reserved == 1
 
 
-def test_ai_clips_endpoint_accepts_project_video_attachment() -> None:
+def test_ai_clips_endpoint_accepts_project_video_attachment(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     client = register_user(); project = project_id(client)
     created = client.post(
         f"/api/projects/{project}/content", headers=csrf(client),
@@ -136,3 +187,29 @@ def test_ai_config_never_exposes_api_key(monkeypatch) -> None:
     payload = client.get("/api/ai/config").json()
     assert payload["enabled"] is True
     assert "super-secret" not in str(payload)
+
+
+def test_ai_config_supports_provider_capabilities(monkeypatch) -> None:
+    client = register_user()
+    monkeypatch.setenv("AAP_AI_API_KEY", "provider-secret")
+    monkeypatch.setenv("AAP_AI_PROVIDER", "aitunnel")
+    monkeypatch.setenv("AAP_AI_API_MODE", "chat_completions")
+    monkeypatch.setenv("AAP_AI_FEATURES", "text,transcription,clips")
+    payload = client.get("/api/ai/config").json()
+    assert payload["provider"] == "aitunnel"
+    assert payload["api_mode"] == "chat_completions"
+    assert payload["features"] == ["text", "transcription", "clips"]
+    assert "provider-secret" not in str(payload)
+
+
+def test_disabled_ai_feature_is_rejected_before_job_creation(monkeypatch) -> None:
+    client = register_user()
+    project = project_id(client)
+    monkeypatch.setenv("AAP_AI_API_KEY", "text-only-secret")
+    monkeypatch.setenv("AAP_AI_FEATURES", "text")
+    response = client.post(
+        "/api/ai/images",
+        headers=csrf(client),
+        json={"project_id": project, "prompt": "Баннер", "size": "1024x1024"},
+    )
+    assert response.status_code == 503

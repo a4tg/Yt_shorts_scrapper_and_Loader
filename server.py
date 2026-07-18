@@ -55,6 +55,7 @@ from billing_service import (
 )
 from ai_service import (
     AIServiceError,
+    ai_feature_enabled,
     ai_public_config,
     generate_image,
     generate_text,
@@ -648,6 +649,8 @@ def ai_config() -> dict[str, object]:
 
 @app.post("/api/ai/text", status_code=202)
 def create_ai_text(payload: AITextRequest, request: Request) -> dict[str, object]:
+    if not ai_feature_enabled("text"):
+        raise HTTPException(503, "Текстовая AI-модель не настроена у текущего провайдера.")
     workspace_id, project_id = resolve_media_project(payload.project_id, request)
     try:
         return manager.create(
@@ -661,6 +664,8 @@ def create_ai_text(payload: AITextRequest, request: Request) -> dict[str, object
 
 @app.post("/api/ai/images", status_code=202)
 def create_ai_image(payload: AIImageRequest, request: Request) -> dict[str, object]:
+    if not ai_feature_enabled("image"):
+        raise HTTPException(503, "Генерация изображений не настроена у текущего AI-провайдера.")
     workspace_id, project_id = resolve_media_project(payload.project_id, request)
     try:
         return manager.create(
@@ -673,6 +678,15 @@ def create_ai_image(payload: AIImageRequest, request: Request) -> dict[str, obje
 
 @app.post("/api/ai/clips", status_code=202)
 def create_ai_clips(payload: AIClipsRequest, request: Request) -> dict[str, object]:
+    if not (
+        ai_feature_enabled("clips")
+        and ai_feature_enabled("transcription")
+        and ai_feature_enabled("text")
+    ):
+        raise HTTPException(
+            503,
+            "Для AI-нарезки провайдер должен поддерживать текст и расшифровку аудио.",
+        )
     if payload.min_seconds >= payload.max_seconds:
         raise HTTPException(400, "Максимальная длительность должна быть больше минимальной.")
     workspace_id, project_id = resolve_media_project(payload.project_id, request)

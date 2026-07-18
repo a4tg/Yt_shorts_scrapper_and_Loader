@@ -2104,11 +2104,17 @@ async function loadAIStudio() {
   ]);
   state.aiConfig = config; state.libraryItems = library; state.libraryFolders = folders; renderAIVideoOptions();
   const badge = $('#ai-provider-status');
-  badge.textContent = config.enabled ? `OpenAI подключён · ${config.text_model}` : 'AI не настроен на сервере';
+  const provider = config.provider ? config.provider.toUpperCase() : 'AI';
+  badge.textContent = config.enabled
+    ? `${provider} подключён · ${config.text_model}`
+    : 'AI не настроен на сервере';
   badge.classList.toggle('ready', config.enabled);
-  document.querySelectorAll('#ai-text-form button[type=submit],#ai-image-form button[type=submit],#ai-clips-form button[type=submit]').forEach((button) => {
-    button.disabled = !config.enabled;
-  });
+  const features = new Set(config.features || []);
+  $('#ai-text-form button[type=submit]').disabled = !features.has('text');
+  $('#ai-image-form button[type=submit]').disabled = !features.has('image');
+  $('#ai-clips-form button[type=submit]').disabled = !(
+    features.has('clips') && features.has('transcription') && features.has('text')
+  );
 }
 
 function localDateTimeValue(value) {

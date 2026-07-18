@@ -55,7 +55,9 @@ export function initDecisionIntelligence({ bus, bridge, router }) {
       for (const item of items.slice(0, 5)) column.append(node('span', '', item.title || item.detail || 'Сигнал'));
       host.append(column);
     }
-    const source = briefing.provider === 'openai' ? 'AI-сводка' : briefing.is_live ? 'Живая сводка' : 'Сводка по правилам';
+    const source = !['rules', 'live-rules'].includes(briefing.provider)
+      ? `AI-сводка · ${briefing.provider}`
+      : briefing.is_live ? 'Живая сводка' : 'Сводка по правилам';
     host.append(node('small', 'briefing-meta', `${source} · ${dateText(briefing.generated_at) || ''}`));
   }
 

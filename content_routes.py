@@ -576,7 +576,11 @@ def list_document_comments(
     if status != "all":
         statement = statement.where(DocumentComment.status == status)
     comments = db.scalars(
-        statement.order_by(DocumentComment.created_at, DocumentComment.id)
+        statement.order_by(
+            DocumentComment.parent_id.is_not(None),
+            DocumentComment.created_at,
+            DocumentComment.id,
+        )
     ).all()
     return [
         _document_comment_payload(db, comment, request.state.user.id)

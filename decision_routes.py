@@ -624,7 +624,8 @@ def generate_briefing(project_id: str, payload: BriefingRequest, request: Reques
                              "highlights": _briefing_entries(parsed.get("highlights")),
                              "risks": _briefing_entries(parsed.get("risks")),
                              "next_actions": _briefing_entries(parsed.get("next_actions"))}
-                provider = "openai"; model = response.get("model")
+                provider = str(response.get("provider") or "openai")[:32]
+                model = response.get("model")
         except (AIServiceError, ValueError, json.JSONDecodeError):
             pass
     briefing = ProjectBriefing(project_id=project.id, **generated, visibility=visibility, provider=provider,
