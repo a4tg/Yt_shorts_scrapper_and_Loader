@@ -10,6 +10,8 @@ const state = {
   workspaceMembers: [], approvalWorkflow: null, approvalQueue: [], approvalQueueSummary: {},
   approvalFilter: 'all', approvalLibrary: [], contentItems: [], contentView: 'board',
   contentCalendarDate: new Date(),
+  activeDocument: null, documentComments: [], documentRevisions: [],
+  documentMode: 'edit', documentAutosaveTimer: null, documentCommentContext: null,
   libraryItems: [], libraryFolders: [], currentLibraryFolderId: null,
   videoLibraryJobs: [], directSourceChannel: '', directSourceTitle: '',
   conversations: [], activeConversationId: null, messages: [], messageReplyTo: null,
@@ -1276,8 +1278,276 @@ function renderDocuments() {
     const stage = document.createElement('span'); stage.textContent = item.stage?.name || 'Без этапа';
     const updated = document.createElement('span'); updated.textContent = `Изменён ${contentDate(item.updated_at)}`;
     footer.append(stage, updated); card.append(icon, title, description, footer);
-    card.addEventListener('click', () => openContentEditor(item.id, 'post', card).catch(showWorkspaceError));
+    card.addEventListener('click', () => openDocumentEditor(item.id, card).catch(showWorkspaceError));
     container.append(card);
+  }
+}
+
+function setDocumentSaveStatus(text, tone = '') {
+  const status = $('#document-save-status');
+  status.textContent = text;
+  status.className = `document-save-status${tone ? ` ${tone}` : ''}`;
+}
+
+function appendDocumentInline(target, text) {
+  const pattern = /(\*\*[^*]+\*\*|\[[^\]]+\]\(https?:\/\/[^)]+\))/g;
+  let cursor = 0;
+  for (const match of text.matchAll(pattern)) {
+    if (match.index > cursor) target.append(document.createTextNode(text.slice(cursor, match.index)));
+    const token = match[0];
+    if (token.startsWith('**')) {
+      const strong = document.createElement('strong'); strong.textContent = token.slice(2, -2); target.append(strong);
+    } else {
+      const parts = token.match(/^\[([^\]]+)\]\((https?:\/\/[^)]+)\)$/);
+      const link = document.createElement('a'); link.textContent = parts[1]; link.href = parts[2];
+      link.target = '_blank'; link.rel = 'noopener'; target.append(link);
+    }
+    cursor = match.index + token.length;
+  }
+  if (cursor < text.length) target.append(document.createTextNode(text.slice(cursor)));
+}
+
+function renderDocumentReader() {
+  const reader = $('#document-reader'); reader.replaceChildren();
+  const lines = ($('#document-editor-body-input').value || '').split(/\r?\n/);
+  let list = null;
+  const closeList = () => { list = null; };
+  for (const rawLine of lines) {
+    const line = rawLine.trimEnd();
+    if (!line.trim()) { closeList(); continue; }
+    const heading = line.match(/^(#{1,3})\s+(.+)$/);
+    if (heading) {
+      closeList();
+      const element = document.createElement(`h${heading[1].length}`);
+      appendDocumentInline(element, heading[2]); reader.append(element); continue;
+    }
+    const bullet = line.match(/^\s*[-*]\s+(.+)$/);
+    if (bullet) {
+      if (!list) { list = document.createElement('ul'); reader.append(list); }
+      const item = document.createElement('li'); appendDocumentInline(item, bullet[1]); list.append(item); continue;
+    }
+    closeList();
+    const quote = line.match(/^>\s?(.+)$/);
+    const element = document.createElement(quote ? 'blockquote' : 'p');
+    appendDocumentInline(element, quote ? quote[1] : line); reader.append(element);
+  }
+  if (!reader.children.length) {
+    const empty = document.createElement('p'); empty.textContent = 'Документ пока пуст.'; reader.append(empty);
+  }
+}
+
+function updateDocumentMetrics() {
+  const value = $('#document-editor-body-input').value.trim();
+  const words = value ? value.split(/\s+/).length : 0;
+  $('#document-word-count').textContent = `${words} ${words === 1 ? 'слово' : 'слов'}`;
+  $('#document-revision-label').textContent = `Версия ${state.activeDocument?.revision_version || 1}`;
+}
+
+function setDocumentMode(mode) {
+  state.documentMode = mode;
+  document.querySelectorAll('[data-document-mode]').forEach((button) => {
+    button.classList.toggle('active', button.dataset.documentMode === mode);
+  });
+  const reading = mode === 'read';
+  if (reading) renderDocumentReader();
+  $('#document-editor-body-input').classList.toggle('hidden', reading);
+  $('#document-reader').classList.toggle('hidden', !reading);
+  $('#document-format-toolbar').classList.toggle('hidden', reading);
+}
+
+async function loadDocumentSideData(itemId) {
+  [state.documentComments, state.documentRevisions] = await Promise.all([
+    api(`/api/content/${itemId}/comments`),
+    api(`/api/content/${itemId}/revisions`)
+  ]);
+  renderDocumentComments();
+  renderDocumentRevisions();
+}
+
+async function openDocumentEditor(itemId, sourceElement = null) {
+  const sourceRect = sourceElement?.getBoundingClientRect?.();
+  const item = await api(`/api/content/${itemId}`);
+  if (!['document', 'note'].includes(item.item_type)) return openContentEditor(itemId, item.item_type, sourceElement);
+  state.activeDocument = item;
+  state.documentCommentContext = null;
+  clearTimeout(state.documentAutosaveTimer);
+  $('#document-editor-title').value = item.title;
+  $('#document-editor-body-input').value = item.body || '';
+  const editable = canEditContent();
+  $('#document-editor-title').disabled = !editable;
+  $('#document-editor-body-input').disabled = !editable;
+  $('#document-format-toolbar').querySelectorAll('button').forEach((button) => { button.disabled = !editable; });
+  clearDocumentCommentContext();
+  updateDocumentMetrics();
+  setDocumentMode(editable ? 'edit' : 'read');
+  setDocumentSaveStatus(editable ? 'Сохранено' : 'Только чтение');
+  await loadDocumentSideData(item.id);
+  $('#document-editor-dialog').showModal();
+  window.AAPAppMotion?.dialogFromSource?.($('#document-editor-dialog'), sourceRect);
+}
+
+async function createDocumentAndOpen() {
+  if (!state.currentProjectId || !canEditContent()) return;
+  try {
+    const item = await api(`/api/projects/${state.currentProjectId}/content`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Без названия', item_type: 'document', body: '' })
+    });
+    await loadContent();
+    await openDocumentEditor(item.id);
+  } catch (error) { showWorkspaceError(error); }
+}
+
+async function saveActiveDocument({ quiet = false } = {}) {
+  const item = state.activeDocument;
+  if (!item || !canEditContent()) return true;
+  const title = $('#document-editor-title').value.trim() || 'Без названия';
+  const body = $('#document-editor-body-input').value;
+  if (title === item.title && body === (item.body || '')) {
+    setDocumentSaveStatus('Сохранено'); return true;
+  }
+  setDocumentSaveStatus('Сохраняем…', 'saving');
+  try {
+    const saved = await api(`/api/content/${item.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title,
+        body,
+        expected_revision: item.revision_version
+      })
+    });
+    state.activeDocument = { ...item, ...saved };
+    const index = state.contentItems.findIndex((entry) => entry.id === saved.id);
+    if (index >= 0) state.contentItems[index] = { ...state.contentItems[index], ...saved };
+    setDocumentSaveStatus('Сохранено');
+    updateDocumentMetrics();
+    state.documentRevisions = await api(`/api/content/${item.id}/revisions`);
+    renderDocumentRevisions();
+    return true;
+  } catch (error) {
+    setDocumentSaveStatus(
+      error.status === 409 ? 'Есть более новая версия — обновите документ' : 'Не удалось сохранить',
+      'error'
+    );
+    if (!quiet) showWorkspaceError(error);
+    return false;
+  }
+}
+
+function scheduleDocumentAutosave() {
+  updateDocumentMetrics();
+  if (!canEditContent()) return;
+  setDocumentSaveStatus('Есть изменения', 'saving');
+  clearTimeout(state.documentAutosaveTimer);
+  state.documentAutosaveTimer = setTimeout(() => saveActiveDocument({ quiet: true }), 1400);
+}
+
+function clearDocumentCommentContext() {
+  state.documentCommentContext = null;
+  const context = $('#document-comment-context'); context.textContent = ''; context.classList.add('hidden');
+  $('#document-comment-context-clear').classList.add('hidden');
+}
+
+function setDocumentCommentContext(context) {
+  state.documentCommentContext = context;
+  const target = $('#document-comment-context');
+  target.textContent = context.quoted_text
+    ? `Фрагмент: «${context.quoted_text.slice(0, 180)}»`
+    : `Ответ на комментарий ${context.parent_author || ''}`.trim();
+  target.classList.remove('hidden');
+  $('#document-comment-context-clear').classList.remove('hidden');
+  $('#document-comment-body').focus();
+}
+
+function documentCommentCard(comment) {
+  const card = document.createElement('article');
+  card.className = `document-comment${comment.parent_id ? ' reply' : ''}${comment.status === 'resolved' ? ' resolved' : ''}`;
+  const head = document.createElement('header');
+  const author = document.createElement('strong'); author.textContent = comment.author.name || comment.author.email;
+  const time = document.createElement('time'); time.textContent = contentDate(comment.created_at, true);
+  head.append(author, time); card.append(head);
+  if (comment.quoted_text) {
+    const quote = document.createElement('blockquote'); quote.textContent = comment.quoted_text; card.append(quote);
+  }
+  const body = document.createElement('p'); body.textContent = comment.body; card.append(body);
+  const actions = document.createElement('footer');
+  const reply = document.createElement('button'); reply.className = 'text-button'; reply.type = 'button'; reply.textContent = 'Ответить';
+  reply.addEventListener('click', () => setDocumentCommentContext({
+    parent_id: comment.parent_id || comment.id,
+    parent_author: comment.author.name || comment.author.email
+  }));
+  const resolve = document.createElement('button'); resolve.className = 'text-button'; resolve.type = 'button';
+  resolve.textContent = comment.status === 'resolved' ? 'Открыть снова' : 'Закрыть';
+  resolve.addEventListener('click', async () => {
+    try {
+      await api(`/api/document-comments/${comment.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: comment.status === 'resolved' ? 'open' : 'resolved' })
+      });
+      await loadDocumentSideData(state.activeDocument.id);
+    } catch (error) { showWorkspaceError(error); }
+  });
+  actions.append(reply, resolve);
+  if (comment.is_own) {
+    const remove = document.createElement('button'); remove.className = 'text-button danger-text';
+    remove.type = 'button'; remove.textContent = 'Удалить';
+    remove.addEventListener('click', async () => {
+      if (!confirm('Удалить комментарий?')) return;
+      try {
+        await api(`/api/document-comments/${comment.id}`, { method: 'DELETE' });
+        await loadDocumentSideData(state.activeDocument.id);
+      } catch (error) { showWorkspaceError(error); }
+    });
+    actions.append(remove);
+  }
+  card.append(actions); return card;
+}
+
+function renderDocumentComments() {
+  const container = $('#document-comments-list'); container.replaceChildren();
+  const openCount = state.documentComments.filter((comment) => comment.status === 'open').length;
+  $('#document-open-comments').textContent = openCount;
+  const roots = state.documentComments.filter((comment) => !comment.parent_id);
+  if (!roots.length) {
+    const empty = document.createElement('div'); empty.className = 'approval-empty';
+    const title = document.createElement('h3'); title.textContent = 'Комментариев пока нет';
+    const text = document.createElement('p'); text.textContent = 'Выделите фрагмент или оставьте общее замечание.';
+    empty.append(title, text); container.append(empty); return;
+  }
+  for (const root of roots) {
+    container.append(documentCommentCard(root));
+    state.documentComments
+      .filter((comment) => comment.parent_id === root.id)
+      .forEach((comment) => container.append(documentCommentCard(comment)));
+  }
+}
+
+function renderDocumentRevisions() {
+  const container = $('#document-revisions-list'); container.replaceChildren();
+  for (const revision of state.documentRevisions) {
+    const card = document.createElement('article'); card.className = 'document-revision-card';
+    const head = document.createElement('header');
+    const title = document.createElement('strong'); title.textContent = `Версия ${revision.version}`;
+    const date = document.createElement('small'); date.textContent = `${revision.author} · ${contentDate(revision.created_at, true)}`;
+    head.append(title, date);
+    const preview = document.createElement('p');
+    preview.textContent = revision.body.slice(0, 240) || 'Пустой документ';
+    const restore = document.createElement('button'); restore.className = 'ghost'; restore.type = 'button';
+    restore.textContent = 'Восстановить эту версию'; restore.disabled = !canEditContent();
+    restore.addEventListener('click', async () => {
+      if (!confirm(`Восстановить версию ${revision.version}? Текущая версия останется в истории.`)) return;
+      try {
+        const saved = await api(`/api/content/${state.activeDocument.id}/revisions/${revision.id}/restore`, { method: 'POST' });
+        state.activeDocument = { ...state.activeDocument, ...saved };
+        $('#document-editor-title').value = saved.title;
+        $('#document-editor-body-input').value = saved.body || '';
+        await loadDocumentSideData(saved.id); updateDocumentMetrics(); renderDocumentReader();
+        setDocumentSaveStatus('Версия восстановлена'); await loadContent();
+      } catch (error) { showWorkspaceError(error); }
+    });
+    card.append(head, preview, restore); container.append(card);
   }
 }
 
@@ -3479,7 +3749,7 @@ $('#approval-request-form').addEventListener('submit', async (event) => {
 });
 
 $('#create-content-button').addEventListener('click', () => openContentEditor().catch(showWorkspaceError));
-$('#create-document-button').addEventListener('click', () => openContentEditor(null, 'document').catch(showWorkspaceError));
+$('#create-document-button').addEventListener('click', createDocumentAndOpen);
 $('#refresh-library-button').addEventListener('click', () => loadLibrary().catch(showWorkspaceError));
 $('#create-library-folder').addEventListener('click', createLibraryFolder);
 $('#library-search').addEventListener('input', renderLibrary);
@@ -3719,6 +3989,77 @@ $('#calendar-today').addEventListener('click', () => {
 
 $('#content-dialog-close').addEventListener('click', () => $('#content-dialog').close());
 $('#content-dialog-cancel').addEventListener('click', () => $('#content-dialog').close());
+
+$('#document-editor-close').addEventListener('click', async () => {
+  clearTimeout(state.documentAutosaveTimer);
+  if (await saveActiveDocument()) {
+    $('#document-editor-dialog').close();
+    state.activeDocument = null;
+    await loadContent();
+  }
+});
+$('#document-editor-dialog').addEventListener('cancel', (event) => {
+  event.preventDefault();
+  $('#document-editor-close').click();
+});
+for (const input of [$('#document-editor-title'), $('#document-editor-body-input')]) {
+  input.addEventListener('input', scheduleDocumentAutosave);
+}
+$('#document-editor-body-input').addEventListener('keydown', async (event) => {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === 's') {
+    event.preventDefault(); clearTimeout(state.documentAutosaveTimer); await saveActiveDocument();
+  }
+});
+document.querySelectorAll('[data-document-mode]').forEach((button) => {
+  button.addEventListener('click', () => setDocumentMode(button.dataset.documentMode));
+});
+document.querySelectorAll('[data-document-panel]').forEach((button) => {
+  button.addEventListener('click', () => {
+    document.querySelectorAll('[data-document-panel]').forEach((item) => item.classList.toggle('active', item === button));
+    $('#document-comments-panel').classList.toggle('hidden', button.dataset.documentPanel !== 'comments');
+    $('#document-history-panel').classList.toggle('hidden', button.dataset.documentPanel !== 'history');
+  });
+});
+document.querySelectorAll('[data-document-markdown]').forEach((button) => {
+  button.addEventListener('click', () => {
+    const editor = $('#document-editor-body-input'); const template = button.dataset.documentMarkdown;
+    const separator = template.indexOf('|'); const start = editor.selectionStart; const end = editor.selectionEnd;
+    const before = template.slice(0, separator); const after = template.slice(separator + 1);
+    editor.setRangeText(`${before}${editor.value.slice(start, end)}${after}`, start, end, 'end');
+    editor.focus(); scheduleDocumentAutosave();
+  });
+});
+$('#document-selection-comment').addEventListener('click', () => {
+  const editor = $('#document-editor-body-input');
+  if (editor.selectionEnd <= editor.selectionStart) {
+    showToast('Сначала выделите фрагмент текста.', 'error'); return;
+  }
+  setDocumentCommentContext({
+    quoted_text: editor.value.slice(editor.selectionStart, editor.selectionEnd),
+    start_offset: editor.selectionStart,
+    end_offset: editor.selectionEnd
+  });
+});
+$('#document-comment-context-clear').addEventListener('click', clearDocumentCommentContext);
+$('#document-comment-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!state.activeDocument) return;
+  const submit = event.submitter; submit.disabled = true;
+  try {
+    await api(`/api/content/${state.activeDocument.id}/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        body: $('#document-comment-body').value.trim(),
+        ...(state.documentCommentContext || {})
+      })
+    });
+    $('#document-comment-form').reset(); clearDocumentCommentContext();
+    await loadDocumentSideData(state.activeDocument.id);
+    showToast('Комментарий добавлен.');
+  } catch (error) { showWorkspaceError(error); }
+  finally { submit.disabled = false; }
+});
 
 document.querySelectorAll('[data-markdown]').forEach((button) => {
   button.addEventListener('click', () => {

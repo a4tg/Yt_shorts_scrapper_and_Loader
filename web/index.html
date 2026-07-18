@@ -24,6 +24,7 @@
   <link rel="stylesheet" href="/assets/asset-viewer.css">
   <link rel="stylesheet" href="/assets/asset-reviews.css">
   <link rel="stylesheet" href="/assets/approvals.css">
+  <link rel="stylesheet" href="/assets/documents.css">
   <link rel="stylesheet" href="/assets/project-graph.css">
   <link rel="stylesheet" href="/assets/project-graph-editor.css">
   <link rel="stylesheet" href="/assets/decision-intelligence.css">
@@ -660,6 +661,51 @@
       <div class="dialog-actions"><button id="password-dialog-cancel" class="ghost" type="button">Отмена</button><button class="primary" type="submit">Сохранить</button></div>
       <div id="change-password-status" class="auth-status" aria-live="polite"></div>
     </form>
+  </dialog>
+  <dialog id="document-editor-dialog" class="document-editor-dialog">
+    <section class="document-editor-shell">
+      <header class="document-editor-head">
+        <button id="document-editor-close" class="icon-button" type="button" aria-label="Закрыть редактор">←</button>
+        <input id="document-editor-title" type="text" maxlength="240" aria-label="Название документа">
+        <span id="document-save-status" class="document-save-status" aria-live="polite">Сохранено</span>
+        <div class="document-mode-switch" role="group" aria-label="Режим документа">
+          <button class="active" type="button" data-document-mode="edit">Редактирование</button>
+          <button type="button" data-document-mode="read">Чтение</button>
+        </div>
+      </header>
+      <div class="document-editor-body">
+        <main class="document-canvas">
+          <nav id="document-format-toolbar" class="document-format-toolbar" aria-label="Форматирование">
+            <button type="button" data-document-markdown="**|**"><strong>Ж</strong></button>
+            <button type="button" data-document-markdown="## |">H2</button>
+            <button type="button" data-document-markdown="- |">Список</button>
+            <button type="button" data-document-markdown="[|](https://)">Ссылка</button>
+            <span></span>
+            <button id="document-selection-comment" type="button">+ Комментарий к выделению</button>
+          </nav>
+          <textarea id="document-editor-body-input" maxlength="2000000" spellcheck="true" aria-label="Текст документа" placeholder="Начните писать документ…"></textarea>
+          <article id="document-reader" class="document-reader hidden" aria-label="Режим чтения"></article>
+          <footer class="document-editor-footer"><span id="document-word-count">0 слов</span><span id="document-revision-label">Версия 1</span></footer>
+        </main>
+        <aside class="document-side-panel">
+          <nav class="document-side-tabs" role="tablist">
+            <button class="active" type="button" role="tab" data-document-panel="comments">Комментарии <span id="document-open-comments">0</span></button>
+            <button type="button" role="tab" data-document-panel="history">Версии</button>
+          </nav>
+          <section id="document-comments-panel" class="document-panel">
+            <form id="document-comment-form">
+              <div id="document-comment-context" class="document-comment-context hidden"></div>
+              <textarea id="document-comment-body" rows="3" maxlength="10000" placeholder="Оставьте замечание или вопрос" aria-label="Новый комментарий" required></textarea>
+              <div><button id="document-comment-context-clear" class="text-button hidden" type="button">Сбросить привязку</button><button class="primary" type="submit">Добавить</button></div>
+            </form>
+            <div id="document-comments-list" class="document-comments-list" aria-live="polite"></div>
+          </section>
+          <section id="document-history-panel" class="document-panel hidden">
+            <div id="document-revisions-list" class="document-revisions-list" aria-live="polite"></div>
+          </section>
+        </aside>
+      </div>
+    </section>
   </dialog>
   <dialog id="approval-request-dialog" class="account-dialog approval-request-dialog">
     <form id="approval-request-form">
