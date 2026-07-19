@@ -1,9 +1,11 @@
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
 from app import (
+    SUBPROCESS_CREATION_FLAGS,
     build_logo_filter,
     build_overlay_input_args,
     build_variant_directories,
@@ -120,6 +122,12 @@ class YoutubeRateLimitTests(unittest.TestCase):
 
 
 class LogoOverlayTests(unittest.TestCase):
+    def test_uses_cross_platform_subprocess_creation_flags(self) -> None:
+        self.assertEqual(
+            SUBPROCESS_CREATION_FLAGS,
+            getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+
     def test_loops_static_images_and_animated_media_correctly(self) -> None:
         self.assertEqual(
             build_overlay_input_args(Path("logo.png")),

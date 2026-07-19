@@ -54,6 +54,7 @@ WINDOWS_RESERVED_NAMES = {
     *(f"LPT{index}" for index in range(1, 10)),
 }
 _NVENC_AVAILABLE: bool | None = None
+SUBPROCESS_CREATION_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 def detect_cookies(url: str) -> Path | None:
@@ -257,7 +258,7 @@ def is_supported_overlay(overlay_path: Path, ffprobe_path: str) -> bool:
             text=True,
             encoding="utf-8",
             errors="replace",
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=SUBPROCESS_CREATION_FLAGS,
             timeout=20,
         )
     except (OSError, subprocess.SubprocessError):
@@ -282,7 +283,7 @@ def load_overlay_preview(overlay_path: Path) -> Image.Image | None:
                 "-f", "image2pipe", "-vcodec", "png", "pipe:1",
             ],
             capture_output=True,
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=SUBPROCESS_CREATION_FLAGS,
         )
         if result.returncode != 0 or not result.stdout:
             return None
@@ -314,7 +315,7 @@ def probe_video_width(video_path: Path, ffprobe_path: str) -> int:
         text=True,
         encoding="utf-8",
         errors="replace",
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=SUBPROCESS_CREATION_FLAGS,
     )
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or "FFprobe не смог определить размер видео")
@@ -333,7 +334,7 @@ def has_nvenc(ffmpeg_path: str) -> bool:
             text=True,
             encoding="utf-8",
             errors="replace",
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=SUBPROCESS_CREATION_FLAGS,
         )
         _NVENC_AVAILABLE = result.returncode == 0 and "h264_nvenc" in result.stdout
     return _NVENC_AVAILABLE
@@ -402,7 +403,7 @@ def overlay_logo(
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                creationflags=subprocess.CREATE_NO_WINDOW,
+                creationflags=SUBPROCESS_CREATION_FLAGS,
             )
             if result.returncode == 0 and output_path.exists():
                 output_path.replace(video_path)
@@ -1090,7 +1091,7 @@ class DownloaderApp:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                creationflags=subprocess.CREATE_NO_WINDOW,
+                creationflags=SUBPROCESS_CREATION_FLAGS,
             )
         except Exception as exc:
             self.log_queue.put(("SHORTS_ERROR", f"Ошибка запуска yt-dlp: {exc}"))
@@ -1268,7 +1269,7 @@ class DownloaderApp:
                     text=True,
                     encoding="utf-8",
                     errors="replace",
-                    creationflags=subprocess.CREATE_NO_WINDOW,
+                    creationflags=SUBPROCESS_CREATION_FLAGS,
                 )
             except Exception as exc:
                 self._log(f"Ошибка запуска: {exc}")
@@ -1302,7 +1303,7 @@ class DownloaderApp:
                         ffmpeg_path = find_media_tool("ffmpeg")
                         if not ffmpeg_path or not process_video_metadata(
                             downloaded_path, ffmpeg_path, metadata_mode, self._log,
-                            subprocess.CREATE_NO_WINDOW,
+                            SUBPROCESS_CREATION_FLAGS,
                         ):
                             self._log("Файл скачан, но обработка метаданных не завершена.")
                             index += 1
