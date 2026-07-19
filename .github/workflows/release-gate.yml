@@ -1,0 +1,82 @@
+name: Release gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-gate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Tests, migrations and static checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements-server.txt
+            requirements-dev.txt
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+
+      - name: Install test dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
+
+      - name: Run release gate
+        run: python deploy/release_gate.py --require-clean
+
+  docker-image:
+    name: Build and inspect production image
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build production image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          load: true
+          push: false
+          tags: allasplanned:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify application import
+        run: >-
+          docker run --rm --network none allasplanned:ci
+          python -c "import server; print('Container import: OK')"
+
+      - name: Verify media runtime
+        run: |
+          docker run --rm --network none allasplanned:ci ffmpeg -version
+          docker run --rm --network none allasplanned:ci node --version

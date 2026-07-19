@@ -69,6 +69,11 @@ production.
 
 ## Release gate
 
+Перед серверной выкладкой workflow `.github/workflows/release-gate.yml` должен
+завершиться зелёным для выбранного commit. Он повторяет тестовый gate и
+дополнительно собирает настоящий production Docker image без публикации в
+registry.
+
 ```bash
 ./deploy/release-gate.sh --require-clean
 alembic current
