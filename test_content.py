@@ -336,6 +336,41 @@ def test_attachment_preview_is_inline_tenant_isolated_and_exposes_text_data(tmp_
     assert outsider.get(image["preview_url"]).status_code == 404
 
 
+def test_mov_upload_builds_and_serves_browser_safe_proxy(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(content_routes, "CONTENT_DIR", tmp_path)
+
+    def fake_prepare(source, name):
+        content_routes.video_proxy_path(source).write_bytes(b"browser-mp4")
+
+    monkeypatch.setattr(content_routes, "prepare_video_proxy", fake_prepare)
+    client, _ = register_user()
+    _, project = current_project(client)
+    mov = b"\x00\x00\x00\x18ftypqt  \x00\x00\x00\x00video"
+
+    uploaded = client.post(
+        f"/api/projects/{project['id']}/files",
+        headers=csrf(client),
+        files={"file": ("camera.mov", mov, "video/quicktime")},
+    )
+
+    assert uploaded.status_code == 201, uploaded.text
+    asset = uploaded.json()
+    assert asset["preview"]["proxy_required"] is True
+    assert asset["preview"]["proxy_status"] == "processing"
+    assert client.get(f"/api/content-attachments/{asset['id']}").json()[
+        "preview"
+    ]["proxy_status"] == "ready"
+    preview = client.get(asset["preview_url"])
+    assert preview.status_code == 200
+    assert preview.headers["content-type"].startswith("video/mp4")
+    assert preview.content == b"browser-mp4"
+
+    assert client.delete(
+        f"/api/content-attachments/{asset['id']}", headers=csrf(client)
+    ).status_code == 204
+    assert not list(tmp_path.rglob("*.browser.mp4"))
+
+
 def test_csv_preview_returns_bounded_table_data(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(content_routes, "CONTENT_DIR", tmp_path)
     client, _ = register_user()

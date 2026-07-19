@@ -3,7 +3,12 @@ from __future__ import annotations
 import csv
 import io
 import json
+import logging
+import os
 import re
+import shutil
+import subprocess
+import threading
 import zipfile
 from pathlib import Path
 from xml.etree import ElementTree
@@ -13,6 +18,14 @@ MAX_PREVIEW_BYTES = 2 * 1024 * 1024
 MAX_ARCHIVE_MEMBER_BYTES = 8 * 1024 * 1024
 MAX_TABLE_ROWS = 300
 MAX_TABLE_COLUMNS = 80
+VIDEO_PROXY_EXTENSIONS = {".m4v", ".mov", ".webm", ".mkv", ".avi"}
+VIDEO_PROXY_MAX_WIDTH = max(320, int(os.getenv("YT_LOADER_PREVIEW_MAX_WIDTH", "1920")))
+VIDEO_PROXY_CRF = min(35, max(18, int(os.getenv("YT_LOADER_PREVIEW_CRF", "24"))))
+VIDEO_PROXY_PRESET = os.getenv("YT_LOADER_PREVIEW_PRESET", "veryfast").strip() or "veryfast"
+_VIDEO_PROXY_LOCKS: dict[str, threading.Lock] = {}
+_VIDEO_PROXY_LOCKS_GUARD = threading.Lock()
+_VIDEO_PROXY_TRANSCODE_LOCK = threading.Lock()
+logger = logging.getLogger(__name__)
 
 MEDIA_EXTENSIONS = {
     ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tif", ".tiff",
@@ -27,6 +40,80 @@ DATA_EXTENSIONS = {
 
 class PreviewError(ValueError):
     pass
+
+
+def needs_video_proxy(name: str) -> bool:
+    return Path(name).suffix.lower() in VIDEO_PROXY_EXTENSIONS
+
+
+def video_proxy_path(source: Path) -> Path:
+    return source.with_name(f"{source.name}.browser.mp4")
+
+
+def _proxy_lock(target: Path) -> threading.Lock:
+    key = str(target.resolve())
+    with _VIDEO_PROXY_LOCKS_GUARD:
+        return _VIDEO_PROXY_LOCKS.setdefault(key, threading.Lock())
+
+
+def ensure_video_proxy(source: Path, name: str) -> Path:
+    """Return a browser-safe video, transcoding non-portable containers once."""
+    if not needs_video_proxy(name):
+        return source
+    target = video_proxy_path(source)
+    if target.is_file() and target.stat().st_size > 0:
+        return target
+    with _proxy_lock(target):
+        if target.is_file() and target.stat().st_size > 0:
+            return target
+        with _VIDEO_PROXY_TRANSCODE_LOCK:
+            if target.is_file() and target.stat().st_size > 0:
+                return target
+            ffmpeg = shutil.which("ffmpeg")
+            if not ffmpeg:
+                raise PreviewError("FFmpeg недоступен: браузерное превью видео пока не подготовлено.")
+            temporary = target.with_name(f"{target.name}.part.mp4")
+            temporary.unlink(missing_ok=True)
+            command = [
+                ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
+                "-i", str(source),
+                "-map", "0:v:0", "-map", "0:a:0?",
+                "-vf", (
+                    f"scale='min({VIDEO_PROXY_MAX_WIDTH},iw)':-2:"
+                    "force_original_aspect_ratio=decrease,format=yuv420p"
+                ),
+                "-c:v", "libx264", "-preset", VIDEO_PROXY_PRESET,
+                "-crf", str(VIDEO_PROXY_CRF),
+                "-c:a", "aac", "-b:a", "128k",
+                "-movflags", "+faststart", "-sn", "-dn",
+                str(temporary),
+            ]
+            try:
+                completed = subprocess.run(
+                    command, capture_output=True, text=True, check=False, timeout=60 * 60,
+                )
+                if completed.returncode != 0 or not temporary.is_file() or temporary.stat().st_size == 0:
+                    detail = (completed.stderr or "").strip().splitlines()
+                    logger.warning(
+                        "Video preview generation failed for %s: %s",
+                        source, detail[-1] if detail else f"ffmpeg code {completed.returncode}",
+                    )
+                    raise PreviewError("Не удалось подготовить H.264-превью этого видео.")
+                temporary.replace(target)
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                logger.warning("Video preview generation failed for %s", source, exc_info=True)
+                raise PreviewError("Не удалось подготовить H.264-превью этого видео.") from exc
+            finally:
+                temporary.unlink(missing_ok=True)
+        return target
+
+
+def prepare_video_proxy(source: Path, name: str) -> None:
+    """Best-effort background preparation; preview endpoint can retry later."""
+    try:
+        ensure_video_proxy(source, name)
+    except PreviewError:
+        logger.warning("Background video preview is unavailable for %s", source)
 
 
 def preview_kind(name: str) -> str:

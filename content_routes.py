@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
@@ -15,7 +15,15 @@ from sqlalchemy.orm import Session
 from database import get_db
 from billing_service import require_entitlement
 from file_validation import FileValidationError, validate_file
-from asset_preview import PreviewError, build_preview_data, preview_capabilities
+from asset_preview import (
+    PreviewError,
+    build_preview_data,
+    ensure_video_proxy,
+    needs_video_proxy,
+    prepare_video_proxy,
+    preview_capabilities,
+    video_proxy_path,
+)
 from saas_models import (
     ApprovalStage,
     ApprovalWorkflow,
@@ -225,6 +233,18 @@ def _check_stage_permission(member: WorkspaceMember, stage: ApprovalStage | None
 
 
 def _attachment_payload(attachment: ContentAttachment) -> dict[str, object]:
+    preview = preview_capabilities(attachment.original_name)
+    if needs_video_proxy(attachment.original_name):
+        source = Path(attachment.storage_path)
+        preview = {
+            **preview,
+            "proxy_required": True,
+            "proxy_status": (
+                "ready"
+                if video_proxy_path(source).is_file()
+                else "processing"
+            ),
+        }
     return {
         "id": attachment.id,
         "project_id": attachment.project_id,
@@ -238,7 +258,7 @@ def _attachment_payload(attachment: ContentAttachment) -> dict[str, object]:
         "download_url": f"/api/content-attachments/{attachment.id}/download",
         "preview_url": f"/api/content-attachments/{attachment.id}/preview",
         "preview_data_url": f"/api/content-attachments/{attachment.id}/preview-data",
-        "preview": preview_capabilities(attachment.original_name),
+        "preview": preview,
         "asset_key": attachment.asset_key,
         "version_number": attachment.version_number,
         "version_label": attachment.version_label,
@@ -750,6 +770,7 @@ async def upload_attachment(
     item_id: str,
     request: Request,
     file: UploadFile,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> dict[str, object]:
     item, member = _item_access(db, item_id, request.state.user.id)
@@ -758,6 +779,10 @@ async def upload_attachment(
         file, project_id=item.project_id, user_id=request.state.user.id,
         db=db, content_item_id=item.id,
     )
+    if needs_video_proxy(attachment.original_name):
+        background_tasks.add_task(
+            prepare_video_proxy, Path(attachment.storage_path), attachment.original_name
+        )
     return _attachment_payload(attachment)
 
 
@@ -766,6 +791,7 @@ async def upload_project_file(
     project_id: str,
     request: Request,
     file: UploadFile,
+    background_tasks: BackgroundTasks,
     folder_id: str | None = Form(default=None),
     db: Session = Depends(get_db),
 ) -> dict[str, object]:
@@ -776,6 +802,10 @@ async def upload_project_file(
         file, project_id=project_id, user_id=request.state.user.id,
         db=db, folder_id=folder.id if folder else None,
     )
+    if needs_video_proxy(attachment.original_name):
+        background_tasks.add_task(
+            prepare_video_proxy, Path(attachment.storage_path), attachment.original_name
+        )
     return _attachment_payload(attachment)
 
 
@@ -824,8 +854,14 @@ def preview_attachment(
     if not capability["inline_url"]:
         raise HTTPException(415, "Для этого формата используется структурированный просмотр.")
     path = _attachment_path(attachment)
+    if needs_video_proxy(attachment.original_name):
+        try:
+            path = ensure_video_proxy(path, attachment.original_name)
+        except PreviewError as exc:
+            raise HTTPException(503, str(exc)) from exc
     return FileResponse(
-        path, media_type=attachment.mime_type,
+        path,
+        media_type="video/mp4" if path != Path(attachment.storage_path).resolve() else attachment.mime_type,
         headers={"Content-Disposition": "inline", "Accept-Ranges": "bytes"},
     )
 
@@ -850,6 +886,7 @@ def delete_attachment(
     attachment, _, member = _attachment_access(db, attachment_id, request.state.user.id)
     _require_editor(member)
     path = Path(attachment.storage_path)
+    proxy_path = video_proxy_path(path)
     overlay_preview = None
     if attachment.source_type == "overlay":
         overlay = db.get(Overlay, attachment.asset_key)
@@ -870,6 +907,7 @@ def delete_attachment(
     db.delete(attachment)
     db.commit()
     path.unlink(missing_ok=True)
+    proxy_path.unlink(missing_ok=True)
     if overlay_preview is not None:
         overlay_preview.unlink(missing_ok=True)
 
