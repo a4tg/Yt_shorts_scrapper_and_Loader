@@ -87,9 +87,9 @@ WORKSPACE_DEPTH_FEATURES = (
 
 
 def workspace_depth_features() -> dict[str, bool]:
-    """Return public rollout flags without exposing environment values."""
+    """Return public product flags without exposing environment values."""
     return {
-        name: os.getenv(f"YT_LOADER_FEATURE_{name.upper()}", "false").strip().lower()
+        name: os.getenv(f"YT_LOADER_FEATURE_{name.upper()}", "true").strip().lower()
         in {"1", "true", "yes", "on"}
         for name in WORKSPACE_DEPTH_FEATURES
     }

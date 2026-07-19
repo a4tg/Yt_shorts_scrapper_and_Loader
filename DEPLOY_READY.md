@@ -13,7 +13,7 @@
 - публичные юридические документы и сохранение согласия при регистрации;
 - fail-safe блокировка ЮKassa до заполнения и проверки реквизитов.
 
-Головная миграция Alembic: `o0d1e2f3g4h5`.
+Головная миграция Alembic: `s4h5i6j7k8l9`.
 
 ## Локальная проверка кандидата
 
@@ -28,6 +28,18 @@ Linux:
 ```bash
 chmod +x deploy/release-gate.sh
 ./deploy/release-gate.sh
+```
+
+Перед закрытой бетой проверить production `.env` без вывода секретов:
+
+```bash
+python3 deploy/production_preflight.py --env-file .env
+```
+
+Перед включением реальных платежей использовать строгий режим:
+
+```bash
+python3 deploy/production_preflight.py --env-file .env --commercial
 ```
 
 После финального коммита можно добавить `--require-clean`. Локальный каталог
@@ -58,7 +70,7 @@ curl -fsS https://allasplanned.ru/api/health/ready
 curl -fsS https://allasplanned.ru/api/legal/config
 ```
 
-Ожидается миграция `o0d1e2f3g4h5`, healthy-контейнеры и `status=ok`.
+Ожидается миграция `s4h5i6j7k8l9`, healthy-контейнеры и `status=ok`.
 
 ## Что не включать автоматически
 
