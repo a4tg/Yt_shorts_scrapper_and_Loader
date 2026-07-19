@@ -81,6 +81,25 @@ docker compose exec yt-loader python manage_users.py audit-payments
 docker compose exec yt-loader python manage_users.py audit-credits
 ```
 
+После выкладки выполни безопасную smoke-проверку существующим подтверждённым
+аккаунтом. Пароль передаётся только через переменную окружения и не выводится:
+
+```bash
+read -rsp 'Smoke account password: ' AAP_SMOKE_PASSWORD
+echo
+export AAP_SMOKE_EMAIL='owner@example.com'
+export AAP_SMOKE_PASSWORD
+python3 deploy/production_smoke.py \
+  --base-url https://allasplanned.ru \
+  --require-ai \
+  --commercial
+unset AAP_SMOKE_EMAIL AAP_SMOKE_PASSWORD
+```
+
+Команда не создаёт проекты, материалы или платежи; только открывает обычную
+сессию входа. Она проверяет readiness, регистрацию и восстановление пароля,
+юридические страницы, workspace, AI-возможности, ЮKassa и тарифы.
+
 Ожидаемая ревизия Alembic: `s4h5i6j7k8l9`. Readiness должен вернуть `status`, `database`
 и `workers` со значением `ok`.
 
