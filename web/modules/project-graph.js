@@ -340,7 +340,11 @@ export function initProjectGraph({ bus, bridge }) {
   }
 
   async function loadGraph() {
-    if (!state.projectId) return; const graph = await bridge.api(`/api/projects/${state.projectId}/graph`);
+    const context = bridge.getContext?.() || {};
+    const projectId = state.projectId || context?.project?.id;
+    if (!projectId) return;
+    state.projectId = projectId;
+    const graph = await bridge.api(`/api/projects/${projectId}/graph`);
     state.graph = graph; state.selectedGraphId = state.graph.nodes.some((item) => item.id === state.selectedGraphId) ? state.selectedGraphId : null;
     layoutGraph(); renderGraphFilters(); renderGraphInspector();
     if (graph.viewport?.zoom) {
@@ -590,8 +594,12 @@ export function initProjectGraph({ bus, bridge }) {
       graphNodes.querySelector(`[data-graph-node-id="insight:${params.insight}"]`)?.focus();
     } else setView('map');
   }).catch(showError); } });
+  const pageObserver = new MutationObserver(() => {
+    if (!root.classList.contains('hidden')) activate(bridge.getContext?.()).catch(showError);
+  });
+  pageObserver.observe(root, { attributes: true, attributeFilter: ['class'] });
   const initial = bridge.getContext?.(); if (initial?.project?.id) activate(initial).catch(showError);
   applyTransform(graphWorld, state.mapTransform); applyTransform(diagramWorld, state.diagramTransform); renderGraphFilters();
   syncGraphPermissions();
-  return { destroy: () => { state.source?.close(); clearTimeout(state.saveTimer); clearTimeout(state.graphSaveTimer); clearTimeout(state.refreshTimer); } };
+  return { destroy: () => { pageObserver.disconnect(); state.source?.close(); clearTimeout(state.saveTimer); clearTimeout(state.graphSaveTimer); clearTimeout(state.refreshTimer); } };
 }

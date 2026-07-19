@@ -117,8 +117,12 @@ export function initDecisionIntelligence({ bus, bridge, router }) {
   function render() { if (!state.data) return; renderScore(); renderBriefing(); renderSignals(); renderQueue(); }
 
   async function load() {
-    if (!state.projectId || state.loading) return; setBusy(true);
-    try { state.data = await bridge.api(`/api/projects/${state.projectId}/attention`); render(); }
+    const context = bridge.getContext?.() || {};
+    const projectId = state.projectId || context?.project?.id;
+    if (!projectId || state.loading) return;
+    state.projectId = projectId;
+    setBusy(true);
+    try { state.data = await bridge.api(`/api/projects/${projectId}/attention`); render(); }
     finally { setBusy(false); }
   }
 
@@ -210,6 +214,13 @@ export function initDecisionIntelligence({ bus, bridge, router }) {
   dialog.querySelector('[name="visibility"]').addEventListener('change', renderAssignees);
   bus.on('context:change', (context) => { state.context = context; if (context.page === 'attention') activate(context, true).catch(errorMessage); });
   bus.on('route:change', ({ page }) => { if (page === 'attention') activate(bridge.getContext?.(), true).catch(errorMessage); });
+  let pageWasHidden = root.classList.contains('hidden');
+  const pageObserver = new MutationObserver(() => {
+    const pageIsHidden = root.classList.contains('hidden');
+    if (pageWasHidden && !pageIsHidden) activate(bridge.getContext?.(), true).catch(errorMessage);
+    pageWasHidden = pageIsHidden;
+  });
+  pageObserver.observe(root, { attributes: true, attributeFilter: ['class'] });
   const initial = bridge.getContext?.(); if (initial?.project?.id) activate(initial).catch(errorMessage);
-  return { refresh: load, destroy: () => { state.source?.close(); clearTimeout(state.timer); } };
+  return { refresh: load, destroy: () => { pageObserver.disconnect(); state.source?.close(); clearTimeout(state.timer); } };
 }

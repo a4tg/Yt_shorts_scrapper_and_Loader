@@ -56,6 +56,8 @@ class WorkspaceDepthFoundationTests(unittest.TestCase):
             self.assertIn(marker, script)
         self.assertIn("if (bounds.width < 1 || bounds.height < 1) return false", script)
         self.assertIn("const projectChanged = projectId !== state.projectId", script)
+        self.assertIn("new MutationObserver", script)
+        self.assertIn("state.projectId || context?.project?.id", script)
         for selector in (".project-graph-node", ".project-diagram-node", ".project-diagram-edge", ".project-graph-minimap"):
             self.assertIn(selector, styles)
         self.assertIn(".project-diagram-edge-list", editor_styles)
@@ -72,6 +74,10 @@ class WorkspaceDepthFoundationTests(unittest.TestCase):
         self.assertIn("registerModule('decision-intelligence'", entrypoint)
         for marker in ("/attention", "/insights/extract", "/briefings", "EventSource", "patchInsight"):
             self.assertIn(marker, script)
+        self.assertIn("state.projectId || context?.project?.id", script)
+        self.assertIn("new MutationObserver", script)
+        self.assertIn("pageWasHidden && !pageIsHidden", script)
+        self.assertIn("pageObserver.disconnect()", script)
         for selector in (".attention-score-ring", ".decision-signal", ".attention-queue-panel", ".decision-create-dialog"):
             self.assertIn(selector, styles)
 
