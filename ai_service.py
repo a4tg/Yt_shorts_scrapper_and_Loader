@@ -2,6 +2,7 @@ import base64
 import json
 import os
 import subprocess
+import time
 import zipfile
 from pathlib import Path
 from typing import Any, Callable
@@ -13,6 +14,9 @@ from server_core import resolve_tool
 
 class AIServiceError(RuntimeError):
     pass
+
+
+RETRYABLE_AI_STATUS_CODES = {429, 502, 503, 504}
 
 
 def _setting(name: str, legacy_name: str, default: str = "") -> str:
@@ -70,6 +74,49 @@ def _base_url() -> str:
     ).rstrip("/")
 
 
+def _retry_settings() -> tuple[int, float]:
+    try:
+        attempts = int(_setting("AAP_AI_RETRY_ATTEMPTS", "OPENAI_RETRY_ATTEMPTS", "3"))
+    except ValueError:
+        attempts = 3
+    try:
+        base_delay = float(_setting("AAP_AI_RETRY_BASE_SECONDS", "OPENAI_RETRY_BASE_SECONDS", "0.75"))
+    except ValueError:
+        base_delay = 0.75
+    return max(1, min(attempts, 5)), max(0.0, min(base_delay, 10.0))
+
+
+def _retry_delay(response: httpx.Response | None, attempt: int, base_delay: float) -> float:
+    if response is not None:
+        raw = response.headers.get("retry-after", "").strip()
+        try:
+            return max(0.0, min(float(raw), 30.0))
+        except ValueError:
+            pass
+    return min(base_delay * (2 ** max(0, attempt - 1)), 30.0)
+
+
+def _post_with_retry(url: str, **kwargs: Any) -> httpx.Response:
+    """Retry explicit temporary failures without duplicating uncertain timed-out jobs."""
+    attempts, base_delay = _retry_settings()
+    for attempt in range(1, attempts + 1):
+        response: httpx.Response | None = None
+        try:
+            response = httpx.post(url, **kwargs)
+        except httpx.ConnectError:
+            if attempt >= attempts:
+                raise
+        except httpx.HTTPError:
+            # A read/write timeout may happen after the provider accepted a paid
+            # generation. Retrying it could create a duplicate charge.
+            raise
+        else:
+            if response.status_code not in RETRYABLE_AI_STATUS_CODES or attempt >= attempts:
+                return response
+        time.sleep(_retry_delay(response, attempt, base_delay))
+    raise RuntimeError("unreachable")
+
+
 def _raise_api_error(response: httpx.Response) -> None:
     if response.is_success:
         return
@@ -90,7 +137,7 @@ def _responses_text(
         "max_output_tokens": max_output_tokens,
         "store": False,
     }
-    response = httpx.post(
+    response = _post_with_retry(
         f"{_base_url()}/responses",
         headers={**_headers(), "Content-Type": "application/json"},
         json=payload,
@@ -123,7 +170,7 @@ def _chat_completions_text(
         ],
         "max_tokens": max_output_tokens,
     }
-    response = httpx.post(
+    response = _post_with_retry(
         f"{_base_url()}/chat/completions",
         headers={**_headers(), "Content-Type": "application/json"},
         json=payload,
@@ -183,7 +230,7 @@ def generate_image(prompt: str, *, size: str = "1024x1024") -> tuple[bytes, dict
         "output_format": "png",
     }
     try:
-        response = httpx.post(
+        response = _post_with_retry(
             f"{_base_url()}/images/generations",
             headers={**_headers(), "Content-Type": "application/json"}, json=payload, timeout=180,
         )
@@ -214,7 +261,7 @@ def transcribe_audio(audio_path: Path) -> dict[str, Any]:
         form.update({"response_format": "verbose_json", "timestamp_granularities[]": "segment"})
     try:
         with audio_path.open("rb") as source:
-            response = httpx.post(
+            response = _post_with_retry(
                 f"{_base_url()}/audio/transcriptions", headers=_headers(), data=form,
                 files={"file": (audio_path.name, source, "audio/mpeg")}, timeout=300,
             )

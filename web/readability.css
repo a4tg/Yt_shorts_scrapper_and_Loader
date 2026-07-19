@@ -1,0 +1,73 @@
+/*
+ * Final readability layer for dense production workspaces.
+ * Legacy compact modules used 7–11px labels; 12px is the minimum for
+ * operational text while titles and message bodies remain larger.
+ */
+.app-shell :where(
+  .asset-viewer,
+  .asset-review-panel,
+  .asset-compare,
+  .chat-anywhere,
+  .video-library,
+  .admin-workspace
+) :where(
+  small,
+  label,
+  input,
+  select,
+  textarea,
+  button,
+  a,
+  time,
+  dt,
+  dd,
+  p,
+  strong,
+  span
+) {
+  font-size: max(12px, 0.75rem) !important;
+  line-height: 1.4;
+}
+
+.app-shell :where(
+  .asset-viewer,
+  .asset-review-panel,
+  .asset-compare,
+  .chat-anywhere,
+  .video-library,
+  .admin-workspace
+) :where(h1, h2, h3, h4) {
+  line-height: 1.25;
+}
+
+.chat-anywhere-message-avatar,
+.chat-anywhere-conversation-avatar,
+.asset-review-counts,
+.asset-approval-state {
+  min-width: 24px;
+  min-height: 24px;
+}
+
+.chat-anywhere-bubble {
+  min-width: min(180px, 86vw);
+}
+
+@media (max-width: 760px) {
+  .app-shell :where(
+    .asset-viewer,
+    .asset-review-panel,
+    .asset-compare,
+    .chat-anywhere,
+    .video-library,
+    .admin-workspace
+  ) :where(button, a, input, select, textarea) {
+    min-height: 40px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-anywhere-bubble,
+  .asset-review-panel {
+    scroll-behavior: auto;
+  }
+}

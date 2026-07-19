@@ -244,6 +244,26 @@ class VisualQualityTests(unittest.TestCase):
         self.assertIn("forced-colors: active", styles)
         self.assertIn(".video-stage", motion)
 
+    def test_dense_workspace_modules_have_a_final_readability_floor(self) -> None:
+        index = (WEB / "index.html").read_text(encoding="utf-8")
+        styles = (WEB / "readability.css").read_text(encoding="utf-8")
+        self.assertIn('/assets/readability.css', index)
+        self.assertGreater(
+            index.index('/assets/readability.css'),
+            index.index('/assets/performance.css'),
+        )
+        self.assertIn("font-size: max(12px, 0.75rem) !important", styles)
+        for marker in (
+            ".asset-viewer",
+            ".asset-review-panel",
+            ".chat-anywhere",
+            ".video-library",
+            ".admin-workspace",
+        ):
+            self.assertIn(marker, styles)
+        self.assertIn("max-width: 760px", styles)
+        self.assertIn("prefers-reduced-motion: reduce", styles)
+
     def test_brand_assets_stay_within_delivery_budget(self) -> None:
         budgets = {
             "og-image.png": 100_000,

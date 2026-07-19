@@ -3,6 +3,7 @@ import uuid
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import httpx
 from fastapi.testclient import TestClient
 
 import ai_service
@@ -38,6 +39,8 @@ def project_id(client: TestClient) -> str:
 def response(payload: dict) -> MagicMock:
     result = MagicMock()
     result.is_success = True
+    result.status_code = 200
+    result.headers = {}
     result.json.return_value = payload
     return result
 
@@ -78,6 +81,39 @@ def test_generate_text_falls_back_to_chat_completions(monkeypatch) -> None:
     assert result["provider"] == "aitunnel"
     assert result["api_mode"] == "chat_completions"
     assert call.call_args_list[1].args[0].endswith("/chat/completions")
+
+
+def test_generate_text_retries_explicit_temporary_provider_failure(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("AAP_AI_RETRY_BASE_SECONDS", "0")
+    busy = MagicMock()
+    busy.is_success = False
+    busy.status_code = 429
+    busy.headers = {"retry-after": "0"}
+    busy.json.return_value = {"error": {"message": "rate limited"}}
+    ready = response({
+        "model": "test-model",
+        "output": [{"type": "message", "content": [{"type": "output_text", "text": "Готово"}]}],
+    })
+    with patch("ai_service.httpx.post", side_effect=[busy, ready]) as call:
+        result = ai_service.generate_text("Тема", "Инструкция")
+    assert result["text"] == "Готово"
+    assert call.call_count == 2
+
+
+def test_ai_request_does_not_retry_ambiguous_timeout(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    with patch(
+        "ai_service.httpx.post",
+        side_effect=httpx.ReadTimeout("provider response timed out"),
+    ) as call:
+        try:
+            ai_service.generate_text("Тема", "Инструкция")
+        except ai_service.AIServiceError:
+            pass
+        else:
+            raise AssertionError("Timeout must become a controlled AIServiceError")
+    assert call.call_count == 1
 
 
 def test_generate_image_decodes_base64(monkeypatch) -> None:

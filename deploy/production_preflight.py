@@ -17,6 +17,8 @@ FEATURE_KEYS = (
     "YT_LOADER_FEATURE_PROJECT_GRAPH",
     "YT_LOADER_FEATURE_DECISION_INTELLIGENCE",
 )
+AI_FEATURES = {"text", "image", "transcription", "clips"}
+AI_API_MODES = {"auto", "responses", "chat_completions"}
 
 
 def load_env(path: Path) -> dict[str, str]:
@@ -71,6 +73,43 @@ def validate(values: dict[str, str], *, commercial: bool) -> list[str]:
     ai_key = values.get("AAP_AI_API_KEY", "") or values.get("OPENAI_API_KEY", "")
     if not ai_key:
         errors.append("AAP_AI_API_KEY or OPENAI_API_KEY must be configured")
+    ai_base_url = (
+        values.get("AAP_AI_BASE_URL", "").strip()
+        or values.get("OPENAI_BASE_URL", "").strip()
+        or "https://api.openai.com/v1"
+    )
+    ai_parsed = urlparse(ai_base_url)
+    if ai_parsed.scheme != "https" or not ai_parsed.hostname:
+        errors.append("AAP_AI_BASE_URL or OPENAI_BASE_URL must be a complete HTTPS URL")
+    ai_mode = (
+        values.get("AAP_AI_API_MODE", "").strip()
+        or values.get("OPENAI_API_MODE", "").strip()
+        or "auto"
+    ).lower()
+    if ai_mode not in AI_API_MODES:
+        errors.append("AAP_AI_API_MODE must be auto, responses or chat_completions")
+    configured_ai_features = {
+        item.strip().lower()
+        for item in (
+            values.get("AAP_AI_FEATURES", "")
+            or values.get("OPENAI_FEATURES", "")
+            or ",".join(sorted(AI_FEATURES))
+        ).split(",")
+        if item.strip()
+    }
+    missing_ai_features = sorted(AI_FEATURES - configured_ai_features)
+    if missing_ai_features:
+        errors.append(
+            "AAP_AI_FEATURES must enable the complete product: "
+            + ", ".join(missing_ai_features)
+        )
+    for key, legacy_key in (
+        ("AAP_AI_TEXT_MODEL", "OPENAI_TEXT_MODEL"),
+        ("AAP_AI_IMAGE_MODEL", "OPENAI_IMAGE_MODEL"),
+        ("AAP_AI_TRANSCRIPTION_MODEL", "OPENAI_TRANSCRIPTION_MODEL"),
+    ):
+        if not (values.get(key, "").strip() or values.get(legacy_key, "").strip()):
+            errors.append(f"{key} or {legacy_key} must be configured")
 
     if commercial:
         if not enabled(values, "YT_LOADER_ENABLE_PAYMENTS"):

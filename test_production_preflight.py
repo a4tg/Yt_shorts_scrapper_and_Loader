@@ -15,6 +15,12 @@ def complete_env() -> dict[str, str]:
         "SMTP_PASSWORD": "secret",
         "SMTP_FROM_EMAIL": "no-reply@example.com",
         "AAP_AI_API_KEY": "ai-secret",
+        "AAP_AI_BASE_URL": "https://api.openai.com/v1",
+        "AAP_AI_API_MODE": "auto",
+        "AAP_AI_FEATURES": "text,image,transcription,clips",
+        "AAP_AI_TEXT_MODEL": "text-model",
+        "AAP_AI_IMAGE_MODEL": "image-model",
+        "AAP_AI_TRANSCRIPTION_MODEL": "transcription-model",
         "YT_LOADER_FEATURE_WORKSPACE_DEPTH_SHELL": "true",
         "YT_LOADER_FEATURE_CHAT_ANYWHERE": "true",
         "YT_LOADER_FEATURE_ASSET_VIEWER": "true",
@@ -50,6 +56,19 @@ def test_production_preflight_reports_incomplete_product_without_secrets() -> No
     assert any("PROJECT_GRAPH" in error for error in errors)
     assert any("AI_API_KEY" in error for error in errors)
     assert "YOOKASSA_SECRET_KEY must be configured" in errors
+
+
+def test_production_preflight_rejects_partial_or_insecure_ai_gateway() -> None:
+    values = complete_env()
+    values["AAP_AI_BASE_URL"] = "http://provider.example/v1"
+    values["AAP_AI_API_MODE"] = "unknown"
+    values["AAP_AI_FEATURES"] = "text,image"
+
+    errors = validate(values, commercial=False)
+
+    assert any("HTTPS URL" in error for error in errors)
+    assert any("API_MODE" in error for error in errors)
+    assert any("clips" in error and "transcription" in error for error in errors)
 
 
 def test_load_env_supports_comments_quotes_and_equals(tmp_path) -> None:
