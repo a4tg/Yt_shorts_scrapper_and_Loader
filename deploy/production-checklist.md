@@ -81,6 +81,19 @@ docker compose exec yt-loader python manage_users.py audit-payments
 docker compose exec yt-loader python manage_users.py audit-credits
 ```
 
+Для единой проверенной выкладки после `git pull --ff-only` используй:
+
+```bash
+export AAP_RELEASE_COMMIT="$(git rev-parse HEAD)"
+./deploy/production-rollout.sh
+unset AAP_RELEASE_COMMIT
+```
+
+Скрипт сам проверит production `.env`, соберёт контейнеры, сделает backup,
+запустит миграции и сервис, дождётся readiness и проверит публичный домен.
+Он намеренно не выполняет `git pull`: выкладывается только уже просмотренный
+и явно выбранный commit.
+
 После выкладки выполни безопасную smoke-проверку существующим подтверждённым
 аккаунтом. Пароль передаётся только через переменную окружения и не выводится:
 
