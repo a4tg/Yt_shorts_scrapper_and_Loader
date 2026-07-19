@@ -37,7 +37,12 @@ def summary(request: Request, db: Session = Depends(get_db)) -> dict[str, object
     user_id = str(request.state.user.id)
     credits = credit_snapshot(db, user_id)
     entitlement = entitlement_snapshot(db, user_id)
-    subscription = db.scalar(select(Subscription).where(Subscription.user_id == user_id, Subscription.status == "active").order_by(Subscription.created_at.desc()))
+    subscription = db.scalar(
+        select(Subscription).where(
+            Subscription.user_id == user_id,
+            Subscription.status.in_(["active", "past_due"]),
+        ).order_by(Subscription.created_at.desc())
+    )
     plan = entitlement.plan
     workspace_ids = select(Workspace.id).where(
         Workspace.owner_user_id == user_id, Workspace.status == "active"
@@ -65,6 +70,11 @@ def summary(request: Request, db: Session = Depends(get_db)) -> dict[str, object
         ),
         "cancel_at_period_end": bool(subscription.cancel_at_period_end) if subscription else False,
         "auto_renew": bool(subscription.payment_method_id) if subscription else False,
+        "grace_until": (
+            subscription.grace_until.isoformat()
+            if subscription and subscription.grace_until
+            else None
+        ),
     }
 
 

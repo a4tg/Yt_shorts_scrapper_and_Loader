@@ -101,7 +101,10 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertIn("idempotency_key", ledger_columns)
         payment_columns = {column["name"] for column in inspect(engine).get_columns("payments")}
         self.assertTrue(
-            {"plan_id", "subscription_id", "credits", "billing_period_key"}.issubset(
+            {
+                "plan_id", "subscription_id", "credits", "billing_period_key",
+                "offer_accepted_at", "recurring_consent_at", "legal_version",
+            }.issubset(
                 payment_columns
             )
         )

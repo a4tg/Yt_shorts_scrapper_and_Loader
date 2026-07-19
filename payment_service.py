@@ -119,6 +119,14 @@ def payment_payload(payment: Payment) -> dict[str, object]:
         "paid_at": payment.paid_at.isoformat() if payment.paid_at else None,
         "refunded_at": payment.refunded_at.isoformat() if payment.refunded_at else None,
         "failure_reason": payment.failure_reason,
+        "offer_accepted_at": (
+            payment.offer_accepted_at.isoformat() if payment.offer_accepted_at else None
+        ),
+        "recurring_consent_at": (
+            payment.recurring_consent_at.isoformat()
+            if payment.recurring_consent_at else None
+        ),
+        "legal_version": payment.legal_version,
     }
 
 
@@ -265,6 +273,8 @@ def create_checkout_payment(
     provider: PaymentProvider,
     user_id: str,
     plan_id: str,
+    *,
+    legal_version: str,
 ) -> dict[str, object]:
     if not provider.configured:
         raise PaymentNotConfiguredError("ЮKassa пока не настроена администратором.")
@@ -310,6 +320,9 @@ def create_checkout_payment(
             amount_minor=plan.price_minor,
             currency=plan.currency,
             credits=plan.monthly_credits,
+            offer_accepted_at=now,
+            recurring_consent_at=now,
+            legal_version=legal_version[:40],
         )
         db.add(payment)
         db.flush()
@@ -516,6 +529,15 @@ class SubscriptionRenewalWorker:
                 subscription.status = "past_due"
                 return True
             period_key = f"renewal:{subscription.id}:{period_end.isoformat()}"
+            consent_payment = db.scalar(
+                select(Payment)
+                .where(
+                    Payment.subscription_id == subscription.id,
+                    Payment.recurring_consent_at.is_not(None),
+                )
+                .order_by(Payment.created_at)
+                .limit(1)
+            )
             payment = db.scalar(
                 select(Payment).where(Payment.billing_period_key == period_key)
             )
@@ -541,6 +563,15 @@ class SubscriptionRenewalWorker:
                         amount_minor=plan.price_minor,
                         currency=plan.currency,
                         credits=plan.monthly_credits,
+                        offer_accepted_at=(
+                            consent_payment.offer_accepted_at if consent_payment else None
+                        ),
+                        recurring_consent_at=(
+                            consent_payment.recurring_consent_at if consent_payment else None
+                        ),
+                        legal_version=(
+                            consent_payment.legal_version if consent_payment else None
+                        ),
                     )
                     db.add(payment)
                     db.flush()

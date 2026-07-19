@@ -25,6 +25,8 @@ class WebBillingTests(unittest.TestCase):
         self.assertIn("recurring_consent: true", script)
         self.assertIn("offer_accepted: true", script)
         self.assertIn("function openCheckoutDialog(plan, sourceButton)", script)
+        self.assertIn("summary.subscription_status === 'grace'", script)
+        self.assertIn("Доступ временно сохранён", script)
 
 
 if __name__ == "__main__":

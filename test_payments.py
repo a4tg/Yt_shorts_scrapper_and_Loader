@@ -10,7 +10,7 @@ import server
 from auth_service import attempt_limiter
 from billing_service import credit_snapshot
 from payment_service import SubscriptionRenewalWorker, as_utc, utc_now
-from saas_models import CreditLedger, Payment, Subscription, WebhookEvent
+from saas_models import CreditLedger, Payment, Subscription, User, WebhookEvent
 from yookassa_client import webhook_ip_allowed
 
 
@@ -168,6 +168,14 @@ def test_checkout_is_idempotent_for_double_click_and_scoped_to_user() -> None:
     assert len(provider.create_calls) == 1
     assert first.json()["confirmation_url"].startswith("https://yoomoney.ru/")
     assert provider.create_calls[0]["save_payment_method"] is True
+    assert first.json()["offer_accepted_at"]
+    assert first.json()["recurring_consent_at"]
+    assert first.json()["legal_version"] == "test-version"
+    with server.SessionLocal() as db:
+        payment = db.get(Payment, first.json()["id"])
+        assert payment.offer_accepted_at is not None
+        assert payment.recurring_consent_at is not None
+        assert payment.legal_version == "test-version"
     assert other_client.get(f"/api/payments/{first.json()['id']}").status_code == 404
 
 
@@ -285,7 +293,48 @@ def test_renewal_uses_saved_method_and_grants_next_period_once() -> None:
                 )
         )
         assert renewal_count == 1
+        renewal = db.scalar(
+            select(Payment).where(Payment.billing_period_key.is_not(None))
+        )
+        assert renewal.recurring_consent_at is not None
+        assert renewal.legal_version == "test-version"
     assert worker.run_once() == 0
+
+
+def test_failed_renewal_grace_keeps_access_then_expires() -> None:
+    client, user = registered_client()
+    provider = FakeYooKassa()
+    create_checkout(client, provider)
+    provider_id = next(iter(provider.payments))
+    provider.succeed(provider_id)
+    webhook(client, provider, provider_id)
+
+    with server.SessionLocal() as db:
+        subscription = db.scalar(
+            select(Subscription).where(Subscription.user_id == str(user["id"]))
+        )
+        subscription.status = "past_due"
+        subscription.current_period_end = utc_now() - timedelta(hours=1)
+        subscription.grace_until = utc_now() + timedelta(days=3)
+        account = db.get(User, str(user["id"]))
+        account.trial_expires_at = utc_now() - timedelta(days=1)
+        db.commit()
+
+    grace = client.get("/api/billing/summary")
+    assert grace.status_code == 200
+    assert grace.json()["subscription_status"] == "grace"
+    assert grace.json()["plan"]["id"] == "creator"
+    assert grace.json()["grace_until"]
+
+    with server.SessionLocal() as db:
+        subscription = db.scalar(
+            select(Subscription).where(Subscription.user_id == str(user["id"]))
+        )
+        subscription.grace_until = utc_now() - timedelta(seconds=1)
+        db.commit()
+    expired = client.get("/api/billing/summary").json()
+    assert expired["subscription_status"] == "expired"
+    assert expired["plan"]["id"] == "free"
 
 
 def test_renewal_recovers_when_webhook_is_missing() -> None:

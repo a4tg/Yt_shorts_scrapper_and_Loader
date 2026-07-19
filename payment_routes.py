@@ -86,6 +86,7 @@ def create_checkout(payload: CheckoutRequest, request: Request) -> dict[str, obj
             provider,
             str(request.state.user.id),
             payload.plan_id,
+            legal_version=legal_config().version,
         )
     except PaymentNotConfiguredError as exc:
         raise HTTPException(503, str(exc)) from exc

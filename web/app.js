@@ -2263,6 +2263,11 @@ async function loadBilling() {
   entitlement.classList.toggle('expired', summary.subscription_status === 'expired');
   if (summary.subscription_status === 'active') {
     entitlement.textContent = summary.current_period_end ? `Подписка активна до ${new Date(summary.current_period_end).toLocaleDateString('ru-RU')}.` : 'Подписка активна.';
+  } else if (summary.subscription_status === 'grace') {
+    const until = summary.grace_until || summary.current_period_end;
+    entitlement.textContent = until
+      ? `Не удалось продлить подписку. Доступ временно сохранён до ${new Date(until).toLocaleDateString('ru-RU')}; проверьте способ оплаты.`
+      : 'Не удалось продлить подписку. Доступ временно сохранён; проверьте способ оплаты.';
   } else if (summary.subscription_status === 'expired') {
     entitlement.textContent = 'Пробный период завершён. Материалы доступны для просмотра, но новые операции требуют подписку.';
   } else {
@@ -2303,7 +2308,7 @@ async function loadBilling() {
   }
 
   const subscriptionAction = $('#billing-subscription-action');
-  const canManage = summary.subscription_status === 'active' && summary.plan?.id !== 'free';
+  const canManage = ['active', 'grace'].includes(summary.subscription_status) && summary.plan?.id !== 'free';
   subscriptionAction.classList.toggle('hidden', !canManage);
   subscriptionAction.dataset.action = summary.cancel_at_period_end ? 'resume' : 'cancel';
   subscriptionAction.textContent = summary.cancel_at_period_end

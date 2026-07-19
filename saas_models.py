@@ -856,6 +856,9 @@ class Payment(TimestampMixin, Base):
     provider_payment_method_id: Mapped[str | None] = mapped_column(String(160))
     provider_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     failure_reason: Mapped[str | None] = mapped_column(Text)
+    offer_accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    recurring_consent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    legal_version: Mapped[str | None] = mapped_column(String(40))
 
 
 class WebhookEvent(Base):

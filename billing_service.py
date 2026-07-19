@@ -1,7 +1,7 @@
 import os
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session
@@ -63,17 +63,59 @@ def entitlement_snapshot(db: Session, user_id: str) -> EntitlementSnapshot:
     subscription = db.scalar(
         select(Subscription).where(
             Subscription.user_id == user_id,
-            Subscription.status == "active",
-            or_(Subscription.current_period_end.is_(None), Subscription.current_period_end > now),
+            Subscription.status.in_(["active", "past_due"]),
         ).order_by(Subscription.created_at.desc())
     )
-    plan = db.get(Plan, subscription.plan_id if subscription else "free")
+    subscription_status: str | None = None
+    if subscription:
+        period_end = subscription.current_period_end
+        normalized_end = (
+            period_end.replace(tzinfo=timezone.utc)
+            if period_end and period_end.tzinfo is None
+            else period_end
+        )
+        grace_until = subscription.grace_until
+        normalized_grace = (
+            grace_until.replace(tzinfo=timezone.utc)
+            if grace_until and grace_until.tzinfo is None
+            else grace_until
+        )
+        try:
+            renewal_grace_hours = max(
+                1, min(int(os.getenv("YT_LOADER_RENEWAL_GRACE_HOURS", "24")), 168)
+            )
+        except ValueError:
+            renewal_grace_hours = 24
+        if subscription.status == "active" and (
+            normalized_end is None or normalized_end > now
+        ):
+            subscription_status = "active"
+        elif (
+            subscription.status == "active"
+            and normalized_end is not None
+            and normalized_end + timedelta(hours=renewal_grace_hours) > now
+        ):
+            subscription_status = "grace"
+        elif (
+            subscription.status == "past_due"
+            and normalized_grace is not None
+            and normalized_grace > now
+        ):
+            subscription_status = "grace"
+    plan = db.get(Plan, subscription.plan_id if subscription_status else "free")
     if plan is None:
         raise RuntimeError("Тариф пользователя не найден.")
     expires = user.trial_expires_at
     normalized = expires.replace(tzinfo=timezone.utc) if expires and expires.tzinfo is None else expires
-    status = "active" if subscription else ("trial" if normalized is None or normalized > now else "expired")
-    return EntitlementSnapshot(status, plan, normalized, subscription.current_period_end if subscription else None)
+    status = subscription_status or (
+        "trial" if normalized is None or normalized > now else "expired"
+    )
+    return EntitlementSnapshot(
+        status,
+        plan,
+        normalized,
+        subscription.current_period_end if subscription_status else None,
+    )
 
 
 def require_entitlement(db: Session, user_id: str) -> EntitlementSnapshot:
