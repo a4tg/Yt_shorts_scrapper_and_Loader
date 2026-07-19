@@ -91,7 +91,15 @@ function showWorkspacePage(page, syncUrl = false) {
 
   if (nativeTransition) {
     const transition = document.startViewTransition(applyPage);
-    transition.finished.finally(() => delete document.documentElement.dataset.pageDirection);
+    const handleTransitionError = (error) => {
+      // Rapid navigation legitimately skips an in-flight transition.
+      // Consume only that expected browser signal and surface real failures.
+      if (error?.name !== 'AbortError') console.error(error);
+    };
+    transition.ready.catch(handleTransitionError);
+    transition.finished
+      .catch(handleTransitionError)
+      .finally(() => delete document.documentElement.dataset.pageDirection);
   } else {
     applyPage();
     delete document.documentElement.dataset.pageDirection;

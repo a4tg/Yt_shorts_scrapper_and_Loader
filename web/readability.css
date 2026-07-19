@@ -8,6 +8,9 @@
   .asset-review-panel,
   .asset-compare,
   .chat-anywhere,
+  .messages-workspace,
+  .project-graph-page,
+  .decision-page,
   .video-library,
   .admin-workspace
 ) :where(
@@ -22,6 +25,8 @@
   dt,
   dd,
   p,
+  b,
+  i,
   strong,
   span
 ) {
@@ -29,15 +34,70 @@
   line-height: 1.4;
 }
 
+.workspace-brand small,
+.workspace-switcher label,
+.role-badge,
+.billing-limit span,
+.approval-status-pill,
+.approval-stage-pill,
+.overlay-editor small,
+.overlay-editor .editor-badge,
+.settings-grid small,
+.project-card span,
+.conversation-section-label,
+.message-day {
+  font-size: max(12px, 0.75rem) !important;
+}
+
 .app-shell :where(
   .asset-viewer,
   .asset-review-panel,
   .asset-compare,
   .chat-anywhere,
+  .messages-workspace,
+  .project-graph-page,
+  .decision-page,
   .video-library,
   .admin-workspace
 ) :where(h1, h2, h3, h4) {
   line-height: 1.25;
+}
+
+.project-graph-body {
+  grid-template-columns: minmax(0, 1fr) 320px;
+}
+
+.project-graph-node {
+  width: 190px;
+  min-height: 76px;
+  height: auto;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px;
+}
+
+.project-graph-node > span:first-child {
+  width: 40px;
+  height: 40px;
+}
+
+.project-graph-toolbar > button,
+.project-graph-filters button,
+.project-diagram-toolbar button,
+.project-diagram-palette button,
+.project-diagram-node-form button {
+  min-height: 36px;
+}
+
+.project-graph-toolbar input,
+.project-graph-link-form :where(input, select),
+.project-diagram-node-form :where(input, select, textarea) {
+  min-height: 38px;
+}
+
+.project-graph-edge text,
+.project-diagram-edge text {
+  font-size: 12px;
 }
 
 .chat-anywhere-message-avatar,
@@ -58,10 +118,21 @@
     .asset-review-panel,
     .asset-compare,
     .chat-anywhere,
+    .messages-workspace,
+    .project-graph-page,
+    .decision-page,
     .video-library,
     .admin-workspace
   ) :where(button, a, input, select, textarea) {
     min-height: 40px;
+  }
+
+  .project-graph-body {
+    display: block;
+  }
+
+  .project-graph-node {
+    width: 176px;
   }
 }
 

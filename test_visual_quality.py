@@ -205,6 +205,8 @@ class VisualQualityTests(unittest.TestCase):
         styles = (WEB / "app-shell-premium.css").read_text(encoding="utf-8")
         self.assertIn('/assets/app-shell-premium.css', index)
         self.assertIn("document.startViewTransition", app)
+        self.assertIn("error?.name !== 'AbortError'", app)
+        self.assertIn("transition.ready.catch(handleTransitionError)", app)
         self.assertIn("syncNavigationIndicator", motion)
         self.assertIn("prefers-reduced-motion: reduce", styles)
         self.assertIn("view-transition-name: workspace-page", styles)
@@ -257,10 +259,15 @@ class VisualQualityTests(unittest.TestCase):
             ".asset-viewer",
             ".asset-review-panel",
             ".chat-anywhere",
+            ".messages-workspace",
+            ".project-graph-page",
+            ".decision-page",
             ".video-library",
             ".admin-workspace",
         ):
             self.assertIn(marker, styles)
+        self.assertIn("width: 190px", styles)
+        self.assertIn("grid-template-columns: minmax(0, 1fr) 320px", styles)
         self.assertIn("max-width: 760px", styles)
         self.assertIn("prefers-reduced-motion: reduce", styles)
 
