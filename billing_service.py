@@ -50,9 +50,9 @@ class EntitlementSnapshot:
 
 def trial_days() -> int:
     try:
-        return max(1, min(int(os.getenv("YT_LOADER_TRIAL_DAYS", "14")), 90))
+        return max(1, min(int(os.getenv("YT_LOADER_TRIAL_DAYS", "7")), 90))
     except ValueError:
-        return 14
+        return 7
 
 
 def entitlement_snapshot(db: Session, user_id: str) -> EntitlementSnapshot:
@@ -134,9 +134,9 @@ def require_plan_capacity(db: Session, user_id: str, key: str, current: int, *, 
 
 def signup_credits() -> int:
     try:
-        return max(0, min(int(os.getenv("YT_LOADER_SIGNUP_CREDITS", "5")), 10000))
+        return max(0, min(int(os.getenv("YT_LOADER_SIGNUP_CREDITS", "20")), 10000))
     except ValueError:
-        return 5
+        return 20
 
 
 def job_credit_cost(kind: str, args: dict[str, object]) -> int:

@@ -188,14 +188,14 @@ def test_webhook_uses_provider_status_and_duplicate_does_not_double_grant() -> N
     # A forged succeeded body cannot grant credits while provider GET still says pending.
     pending = webhook(client, provider, provider_id)
     assert pending.status_code == 200
-    assert client.get("/api/billing/summary").json()["balance"] == 5
+    assert client.get("/api/billing/summary").json()["balance"] == 20
 
     provider.succeed(provider_id)
     succeeded = webhook(client, provider, provider_id)
     assert succeeded.status_code == 200, succeeded.text
     assert succeeded.json()["status"] == "processed"
     summary = client.get("/api/billing/summary").json()
-    assert summary["balance"] == 205
+    assert summary["balance"] == 220
     assert summary["plan"]["id"] == "creator"
     assert summary["auto_renew"] is True
 
@@ -219,7 +219,7 @@ def test_webhook_uses_provider_status_and_duplicate_does_not_double_grant() -> N
             select(Subscription).where(Subscription.user_id == str(user["id"]))
         )
         assert subscription.current_period_end == period_end
-        assert credit_snapshot(db, str(user["id"])).balance == 205
+        assert credit_snapshot(db, str(user["id"])).balance == 220
 
 
 def test_verified_amount_mismatch_is_rejected_and_audited() -> None:
@@ -233,7 +233,7 @@ def test_verified_amount_mismatch_is_rejected_and_audited() -> None:
     response = webhook(client, provider, provider_id)
     assert response.status_code == 409
     with server.SessionLocal() as db:
-        assert credit_snapshot(db, str(user["id"])).balance == 5
+        assert credit_snapshot(db, str(user["id"])).balance == 20
         event = db.scalar(
             select(WebhookEvent).where(WebhookEvent.object_id == provider_id)
         )
@@ -279,7 +279,7 @@ def test_renewal_uses_saved_method_and_grants_next_period_once() -> None:
     assert recurring_call.get("return_url") is None
 
     with server.SessionLocal() as db:
-        assert credit_snapshot(db, str(user["id"])).balance == 405
+        assert credit_snapshot(db, str(user["id"])).balance == 420
         subscription = db.scalar(
             select(Subscription).where(Subscription.user_id == str(user["id"]))
         )
@@ -358,7 +358,7 @@ def test_renewal_recovers_when_webhook_is_missing() -> None:
     renewal_provider_id = list(provider.payments)[-1]
     assert len(provider.create_calls) == 2
     with server.SessionLocal() as db:
-        assert credit_snapshot(db, str(user["id"])).balance == 205
+        assert credit_snapshot(db, str(user["id"])).balance == 220
 
     # No webhook is delivered. The next renewal pass asks YooKassa for the
     # already-created payment instead of creating a second charge.
@@ -366,7 +366,7 @@ def test_renewal_recovers_when_webhook_is_missing() -> None:
     assert worker.run_once() == 1
     assert len(provider.create_calls) == 2
     with server.SessionLocal() as db:
-        assert credit_snapshot(db, str(user["id"])).balance == 405
+        assert credit_snapshot(db, str(user["id"])).balance == 420
         payment = db.scalar(
             select(Payment).where(Payment.provider_payment_id == renewal_provider_id)
         )
@@ -392,4 +392,4 @@ def test_return_page_can_safely_sync_status_if_webhook_is_delayed() -> None:
     assert response.status_code == 200
     assert response.json()["status"] == "succeeded"
     with server.SessionLocal() as db:
-        assert credit_snapshot(db, str(user["id"])).balance == 205
+        assert credit_snapshot(db, str(user["id"])).balance == 220

@@ -2250,6 +2250,13 @@ function formatPlanPrice(plan) {
   }).format(plan.price_minor / 100);
 }
 
+function formatStorageLimit(megabytes) {
+  const value = Number(megabytes || 0);
+  if (!value) return '∞';
+  if (value >= 1024) return `${Math.round(value / 1024)} ГБ`;
+  return `${value} МБ`;
+}
+
 async function loadBilling() {
   if (!state.currentUser) return;
   const [summary, plans, ledger, paymentConfig] = await Promise.all([
@@ -2299,10 +2306,12 @@ async function loadBilling() {
     const footer = document.createElement('footer');
     const credits = document.createElement('b'); credits.textContent = `${plan.monthly_credits} кредитов`;
     const price = document.createElement('small');
-    price.textContent = plan.id === summary.plan?.id ? 'Текущий тариф' : formatPlanPrice(plan);
+    price.textContent = plan.id === summary.plan?.id
+      ? 'Текущий тариф'
+      : `${formatPlanPrice(plan)} / месяц`;
     const limitLine = document.createElement('small');
     const planLimits = plan.limits || {};
-    limitLine.textContent = `${planLimits.projects || '∞'} проектов · ${planLimits.members || '∞'} участников · ${planLimits.storage_mb || '∞'} МБ`;
+    limitLine.textContent = `${planLimits.projects || '∞'} проектов · ${planLimits.members || '∞'} участников · ${formatStorageLimit(planLimits.storage_mb)}`;
     footer.append(credits, price); card.append(title, description, limitLine, footer);
     if (plan.price_minor > 0 && plan.id !== summary.plan?.id) {
       const action = document.createElement('button');

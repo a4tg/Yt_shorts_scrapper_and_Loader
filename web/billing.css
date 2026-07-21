@@ -22,7 +22,7 @@
 .billing-limit { padding:12px; border:1px solid var(--line); border-radius:12px; background:rgba(255,255,255,.025); }
 .billing-limit span { display:block; color:var(--muted); font-size:11px; margin-bottom:5px; }
 .billing-limit b { font-size:18px; }
-.plan-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.plan-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
 .plan-card {
   padding: 14px;
   border: 1px solid var(--line);
