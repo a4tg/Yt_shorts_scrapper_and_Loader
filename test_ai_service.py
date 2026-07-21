@@ -307,6 +307,7 @@ def test_ai_image_endpoint_preserves_requested_quality(monkeypatch) -> None:
 
 def test_ai_clips_endpoint_accepts_project_video_attachment(monkeypatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(server, "media_duration", lambda _path: 600.0)
     client = register_user(); project = project_id(client)
     created = client.post(
         f"/api/projects/{project}/content", headers=csrf(client),
@@ -330,6 +331,10 @@ def test_ai_clips_endpoint_accepts_project_video_attachment(monkeypatch) -> None
         )
         assert result.status_code == 202, result.text
         assert result.json()["kind"] == "ai_clips"
+        assert result.json()["credits_reserved"] == 5
+        with server.SessionLocal() as db:
+            job = db.get(Job, result.json()["id"])
+            assert job.request_payload["source_duration_seconds"] == 600.0
     finally:
         target.unlink(missing_ok=True)
 

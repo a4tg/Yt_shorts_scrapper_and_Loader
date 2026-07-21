@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from billing_service import credit_snapshot, entitlement_snapshot
+from billing_service import credit_rate_catalog, credit_snapshot, entitlement_snapshot
 from database import get_db
 from saas_models import ContentAttachment, CreditLedger, Job, Plan, Project, Subscription, Workspace, WorkspaceMember
 
@@ -30,6 +30,11 @@ def plans(db: Session = Depends(get_db)) -> list[dict[str, object]]:
         select(Plan).where(Plan.is_active.is_(True)).order_by(Plan.sort_order, Plan.id)
     ).all()
     return [plan_payload(plan) for plan in records]
+
+
+@router.get("/credit-rates")
+def credit_rates() -> dict[str, object]:
+    return credit_rate_catalog()
 
 
 @router.get("/summary")

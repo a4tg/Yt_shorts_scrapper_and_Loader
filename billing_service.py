@@ -1,5 +1,6 @@
 import os
 import uuid
+import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -139,6 +140,40 @@ def signup_credits() -> int:
         return 20
 
 
+CREDIT_COST_CEILING_RUB = 0.75
+IMAGE_CREDIT_COSTS = {"low": 3, "medium": 15, "high": 45, "auto": 45}
+
+
+def credit_rate_catalog() -> dict[str, object]:
+    """Public, versioned explanation of how metered operations consume credits."""
+    return {
+        "version": "2026-07-22",
+        "cost_ceiling_rub": CREDIT_COST_CEILING_RUB,
+        "rates": {
+            "import": {"credits": 1, "unit": "100 imported items"},
+            "download_original": {"credits": 1, "unit": "video"},
+            "overlay_variant": {"credits": 2, "unit": "rendered variant"},
+            "ai_text": {"credits": 1, "unit": "standard request"},
+            "ai_image_low": {"credits": 3, "unit": "image"},
+            "ai_image_medium": {"credits": 15, "unit": "image"},
+            "ai_image_high": {"credits": 45, "unit": "image"},
+            "ai_transcription": {"credits": 1, "unit": "started 5 minutes"},
+            "ai_clip": {"credits": 2, "unit": "requested output clip"},
+            "ai_clips_start": {"credits": 1, "unit": "job"},
+        },
+    }
+
+
+def _image_quality(args: dict[str, object]) -> str:
+    configured = (
+        os.getenv("AAP_AI_IMAGE_QUALITY")
+        or os.getenv("OPENAI_IMAGE_QUALITY")
+        or "low"
+    )
+    quality = str(args.get("quality") or configured).strip().lower()
+    return quality if quality in IMAGE_CREDIT_COSTS else "high"
+
+
 def job_credit_cost(kind: str, args: dict[str, object]) -> int:
     if kind == "import":
         try:
@@ -148,19 +183,25 @@ def job_credit_cost(kind: str, args: dict[str, object]) -> int:
         # "All Shorts" is bounded by the API maximum of 1000 for reservation.
         return 10 if requested <= 0 else max(1, (requested + 99) // 100)
     if kind == "download":
-        # One credit per generated video variant. A download without overlays
-        # still produces one output and therefore costs one credit.
-        return max(1, len(list(args.get("overlays") or [])))
+        # The original without an overlay is cheap. Each rendered overlay variant
+        # uses FFmpeg CPU and costs two credits.
+        overlay_count = len(list(args.get("overlays") or []))
+        return 1 if overlay_count == 0 else overlay_count * 2
     if kind == "ai_text":
         return 1
     if kind == "ai_image":
-        return 5
+        return IMAGE_CREDIT_COSTS[_image_quality(args)]
     if kind == "ai_clips":
         try:
             count = int(args.get("count") or 1)
         except (TypeError, ValueError):
             count = 1
-        return max(3, count * 3)
+        try:
+            duration_seconds = max(0.0, float(args.get("source_duration_seconds") or 0))
+        except (TypeError, ValueError):
+            duration_seconds = 0.0
+        transcription_units = max(1, math.ceil(duration_seconds / 300))
+        return 1 + transcription_units + max(1, count) * 2
     return 0
 
 

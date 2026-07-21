@@ -125,8 +125,30 @@ def test_multiple_overlay_variants_reserve_multiple_credits() -> None:
         {"overlays": [{"path": "1"}, {"path": "2"}, {"path": "3"}]},
         str(user["id"]),
     )
-    assert job["credits_reserved"] == 3
-    assert client.get("/api/billing/summary").json()["available"] == 17
+    assert job["credits_reserved"] == 6
+    assert client.get("/api/billing/summary").json()["available"] == 14
+
+
+def test_ai_credit_rates_scale_with_quality_duration_and_clip_count() -> None:
+    client, user = registered_client()
+    low = server.manager.create(
+        "ai_image", {"quality": "low"}, str(user["id"]), job_id=f"low-{uuid.uuid4()}"
+    )
+    assert low["credits_reserved"] == 3
+    mark_running(str(low["id"]))
+    server.manager._finish_error(str(low["id"]), RuntimeError("test cleanup"))
+
+    clips = server.manager.create(
+        "ai_clips",
+        {"count": 3, "source_duration_seconds": 600},
+        str(user["id"]),
+        job_id=f"clips-{uuid.uuid4()}",
+    )
+    assert clips["credits_reserved"] == 9
+    rates = client.get("/api/billing/credit-rates")
+    assert rates.status_code == 200
+    assert rates.json()["cost_ceiling_rub"] == 0.75
+    assert rates.json()["rates"]["ai_image_high"]["credits"] == 45
 
 
 def test_import_releases_unused_estimate_after_actual_count_is_known() -> None:

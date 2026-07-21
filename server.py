@@ -59,6 +59,7 @@ from ai_service import (
     ai_public_config,
     generate_image,
     generate_text,
+    media_duration,
     render_vertical_clips,
     select_highlights,
     transcribe_media,
@@ -740,12 +741,19 @@ def create_ai_clips(payload: AIClipsRequest, request: Request) -> dict[str, obje
         if not (attachment.mime_type or "").startswith("video/"):
             raise HTTPException(400, "Для нарезки выберите видеофайл.")
     try:
+        source_duration_seconds = media_duration(source_path)
+    except AIServiceError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if source_duration_seconds > 10 * 60 * 60:
+        raise HTTPException(413, "Для одного задания поддерживается видео длительностью до 10 часов.")
+    try:
         return manager.create(
             "ai_clips",
             {
                 "source_path": str(source_path), "attachment_id": payload.attachment_id,
                 "count": payload.count, "min_seconds": payload.min_seconds,
                 "max_seconds": payload.max_seconds,
+                "source_duration_seconds": round(source_duration_seconds, 3),
             },
             owner_id=str(request.state.user.id), workspace_id=workspace_id, project_id=project_id,
         )

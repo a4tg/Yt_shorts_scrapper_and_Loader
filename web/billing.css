@@ -37,6 +37,12 @@
 .plan-card b { color: var(--ok); }
 .plan-card small { color: var(--muted); text-align: right; }
 .ledger-box { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
+.credit-rates-box { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
+.credit-rates-box summary { color: var(--muted); cursor: pointer; }
+.credit-rates-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 7px; margin-top: 10px; }
+.credit-rate-row { display: flex; justify-content: space-between; gap: 12px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,.02); font-size: 12px; }
+.credit-rate-row span { color: var(--muted); }
+.credit-rate-row b { color: var(--accent2); white-space: nowrap; }
 #billing-subscription-action { margin-top: 14px; }
 .ledger-box summary { color: var(--muted); cursor: pointer; }
 .ledger-list { display: grid; gap: 7px; margin-top: 10px; }

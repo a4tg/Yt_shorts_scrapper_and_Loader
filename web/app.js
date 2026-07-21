@@ -2259,11 +2259,12 @@ function formatStorageLimit(megabytes) {
 
 async function loadBilling() {
   if (!state.currentUser) return;
-  const [summary, plans, ledger, paymentConfig] = await Promise.all([
+  const [summary, plans, ledger, paymentConfig, creditRates] = await Promise.all([
     api('/api/billing/summary'),
     api('/api/billing/plans'),
     api('/api/billing/ledger?limit=8'),
-    api('/api/payments/config')
+    api('/api/payments/config'),
+    api('/api/billing/credit-rates')
   ]);
   $('#billing-available').textContent = summary.available;
   $('#billing-reserved').textContent = summary.reserved;
@@ -2330,6 +2331,26 @@ async function loadBilling() {
   subscriptionAction.dataset.action = summary.cancel_at_period_end ? 'resume' : 'cancel';
   subscriptionAction.textContent = summary.cancel_at_period_end
     ? 'Возобновить автопродление' : 'Отключить автопродление';
+
+  const rateLabels = {
+    import: 'Импорт метаданных',
+    download_original: 'Скачивание оригинала',
+    overlay_variant: 'Вариант с оверлеем',
+    ai_text: 'AI-текст',
+    ai_image_low: 'AI-изображение Low',
+    ai_image_medium: 'AI-изображение Medium',
+    ai_image_high: 'AI-изображение High',
+    ai_transcription: 'Расшифровка 5 минут',
+    ai_clip: 'Готовый AI-клип',
+    ai_clips_start: 'Запуск AI-нарезки'
+  };
+  const ratesContainer = $('#billing-credit-rates'); ratesContainer.replaceChildren();
+  for (const [key, rate] of Object.entries(creditRates.rates || {})) {
+    const row = document.createElement('div'); row.className = 'credit-rate-row';
+    const label = document.createElement('span'); label.textContent = rateLabels[key] || key;
+    const value = document.createElement('b'); value.textContent = `${rate.credits} кр.`;
+    row.append(label, value); ratesContainer.append(row);
+  }
 
   const ledgerContainer = $('#billing-ledger'); ledgerContainer.replaceChildren();
   if (!ledger.length) ledgerContainer.textContent = 'Операций пока нет.';
