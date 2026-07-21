@@ -1,8 +1,10 @@
 import uuid
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
 import server
+from admin_routes import _reported_ai_cost
 from auth_service import attempt_limiter
 from saas_models import User
 
@@ -36,6 +38,7 @@ def test_admin_api_is_hidden_from_regular_users() -> None:
     assert client.get("/api/admin/feedback").status_code == 404
     assert client.get("/api/admin/refunds").status_code == 404
     assert client.get("/api/admin/audit").status_code == 404
+    assert client.post("/api/admin/integrations/ai/check").status_code == 404
 
 
 def test_admin_can_read_commercial_overview() -> None:
@@ -56,11 +59,44 @@ def test_admin_can_read_commercial_overview() -> None:
     assert overview.json()["active_users_7d"] == 0
     assert overview.json()["completed_onboarding"] == 0
     assert overview.json()["open_feedback"] == 0
+    assert overview.json()["ai_usage_month"]["reported_cost_rub"] == 0
+    assert overview.json()["ai_usage_month"]["budget_rub"] == 5000
     assert users.status_code == 200
     assert users.json()[0]["email"] == payload["email"]
     assert users.json()[0]["is_admin"] is True
     assert payments.status_code == 200
     assert payments.json() == []
+
+
+def test_ai_cost_summary_does_not_double_count_nested_total() -> None:
+    payload = {
+        "usage": {
+            "transcription": {"cost_rub": 7.8},
+            "selection": {"cost_rub": 0.4},
+            "cost_rub_total": 8.2,
+        }
+    }
+    assert _reported_ai_cost(payload) == 8.2
+
+
+def test_admin_can_run_sanitized_ai_connection_check() -> None:
+    client, payload = register_client()
+    with server.SessionLocal() as db:
+        user = db.get(User, payload["id"])
+        user.is_admin = True
+        db.commit()
+    diagnostic = {
+        "status": "ok",
+        "provider": "aitunnel",
+        "model": "deepseek-v4-flash",
+        "api_mode": "chat_completions",
+        "latency_ms": 125,
+    }
+    with patch("admin_routes.check_ai_connection", return_value=diagnostic):
+        response = client.post("/api/admin/integrations/ai/check")
+    assert response.status_code == 200
+    assert response.json() == diagnostic
+    assert "key" not in str(response.json()).lower()
 
 
 def test_admin_can_grant_credits_resolve_feedback_and_inspect_failed_jobs() -> None:

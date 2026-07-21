@@ -25,7 +25,7 @@ def _setting(name: str, legacy_name: str, default: str = "") -> str:
 
 
 def ai_provider() -> str:
-    return _setting("AAP_AI_PROVIDER", "OPENAI_PROVIDER", "openai").lower()
+    return _setting("AAP_AI_PROVIDER", "OPENAI_PROVIDER", "aitunnel").lower()
 
 
 def ai_enabled() -> bool:
@@ -52,14 +52,14 @@ def ai_public_config() -> dict[str, object]:
         "provider": ai_provider(),
         "api_mode": _setting("AAP_AI_API_MODE", "OPENAI_API_MODE", "auto"),
         "features": features if configured else [],
-        "text_model": _setting("AAP_AI_TEXT_MODEL", "OPENAI_TEXT_MODEL", "gpt-5.4-mini"),
+        "text_model": _setting("AAP_AI_TEXT_MODEL", "OPENAI_TEXT_MODEL", "deepseek-v4-flash"),
         "premium_text_model": _setting(
-            "AAP_AI_PREMIUM_TEXT_MODEL", "OPENAI_PREMIUM_TEXT_MODEL"
+            "AAP_AI_PREMIUM_TEXT_MODEL", "OPENAI_PREMIUM_TEXT_MODEL", "gpt-5.4-mini"
         ),
         "image_model": _setting("AAP_AI_IMAGE_MODEL", "OPENAI_IMAGE_MODEL", "gpt-image-2"),
         "image_quality": _image_quality(),
         "transcription_model": _setting(
-            "AAP_AI_TRANSCRIPTION_MODEL", "OPENAI_TRANSCRIPTION_MODEL", "whisper-1"
+            "AAP_AI_TRANSCRIPTION_MODEL", "OPENAI_TRANSCRIPTION_MODEL", "whisper-large-v3-turbo"
         ),
         "transcription_timestamp_mode": _transcription_timestamp_mode(),
     }
@@ -125,8 +125,27 @@ def _headers() -> dict[str, str]:
 
 def _base_url() -> str:
     return _setting(
-        "AAP_AI_BASE_URL", "OPENAI_BASE_URL", "https://api.openai.com/v1"
+        "AAP_AI_BASE_URL", "OPENAI_BASE_URL", "https://api.aitunnel.ru/v1"
     ).rstrip("/")
+
+
+def check_ai_connection() -> dict[str, object]:
+    """Run an explicit, low-cost text probe and return only non-secret diagnostics."""
+    if not ai_enabled():
+        raise AIServiceError("AI API-ключ не настроен.")
+    started = time.perf_counter()
+    result = generate_text(
+        "Ответь только словом OK.",
+        "Это техническая проверка подключения API.",
+        max_output_tokens=8,
+    )
+    return {
+        "status": "ok",
+        "provider": ai_provider(),
+        "model": str(result.get("model") or ai_public_config()["text_model"]),
+        "api_mode": str(result.get("api_mode") or ai_public_config()["api_mode"]),
+        "latency_ms": round((time.perf_counter() - started) * 1000),
+    }
 
 
 def _retry_settings() -> tuple[int, float]:
@@ -258,10 +277,10 @@ def generate_text(
     premium: bool = False,
 ) -> dict[str, Any]:
     primary_model = _setting(
-        "AAP_AI_TEXT_MODEL", "OPENAI_TEXT_MODEL", "gpt-5.4-mini"
+        "AAP_AI_TEXT_MODEL", "OPENAI_TEXT_MODEL", "deepseek-v4-flash"
     )
     premium_model = _setting(
-        "AAP_AI_PREMIUM_TEXT_MODEL", "OPENAI_PREMIUM_TEXT_MODEL"
+        "AAP_AI_PREMIUM_TEXT_MODEL", "OPENAI_PREMIUM_TEXT_MODEL", "gpt-5.4-mini"
     )
     model = premium_model if premium and premium_model else primary_model
     mode = _setting("AAP_AI_API_MODE", "OPENAI_API_MODE", "auto").lower()
@@ -332,7 +351,7 @@ def transcribe_audio(
     request_timestamps: bool | None = None,
 ) -> dict[str, Any]:
     model = _setting(
-        "AAP_AI_TRANSCRIPTION_MODEL", "OPENAI_TRANSCRIPTION_MODEL", "whisper-1"
+        "AAP_AI_TRANSCRIPTION_MODEL", "OPENAI_TRANSCRIPTION_MODEL", "whisper-large-v3-turbo"
     )
     timestamp_mode = _transcription_timestamp_mode()
     if request_timestamps is None:
@@ -460,7 +479,7 @@ def transcribe_media(source: Path, temporary_dir: Path, log: Callable[[str], Non
     fallback_chunk_seconds = max(60, min(fallback_chunk_seconds, 600))
     timestamp_mode = _transcription_timestamp_mode()
     model = _setting(
-        "AAP_AI_TRANSCRIPTION_MODEL", "OPENAI_TRANSCRIPTION_MODEL", "whisper-1"
+        "AAP_AI_TRANSCRIPTION_MODEL", "OPENAI_TRANSCRIPTION_MODEL", "whisper-large-v3-turbo"
     )
     native_timestamps: bool | None
     if timestamp_mode == "provider" or model == "whisper-1":
@@ -621,7 +640,7 @@ def select_highlights(
                 "AAP_AI_PREMIUM_TEXT_MODEL", "OPENAI_PREMIUM_TEXT_MODEL"
             )
             primary_model = _setting(
-                "AAP_AI_TEXT_MODEL", "OPENAI_TEXT_MODEL", "gpt-5.4-mini"
+                "AAP_AI_TEXT_MODEL", "OPENAI_TEXT_MODEL", "deepseek-v4-flash"
             )
             if not premium_model or premium_model == primary_model:
                 raise AIServiceError("AI не смог вернуть корректный план клипов.") from exc

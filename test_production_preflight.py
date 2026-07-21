@@ -15,8 +15,10 @@ def complete_env() -> dict[str, str]:
         "SMTP_PASSWORD": "secret",
         "SMTP_FROM_EMAIL": "no-reply@example.com",
         "AAP_AI_API_KEY": "ai-secret",
-        "AAP_AI_BASE_URL": "https://api.openai.com/v1",
+        "AAP_AI_PROVIDER": "aitunnel",
+        "AAP_AI_BASE_URL": "https://api.aitunnel.ru/v1",
         "AAP_AI_API_MODE": "auto",
+        "AAP_AI_IMAGE_QUALITY": "low",
         "AAP_AI_FEATURES": "text,image,transcription,clips",
         "AAP_AI_TEXT_MODEL": "text-model",
         "AAP_AI_IMAGE_MODEL": "image-model",
@@ -62,12 +64,16 @@ def test_production_preflight_rejects_partial_or_insecure_ai_gateway() -> None:
     values = complete_env()
     values["AAP_AI_BASE_URL"] = "http://provider.example/v1"
     values["AAP_AI_API_MODE"] = "unknown"
+    values["AAP_AI_PROVIDER"] = "mystery"
+    values["AAP_AI_IMAGE_QUALITY"] = "ultra"
     values["AAP_AI_FEATURES"] = "text,image"
 
     errors = validate(values, commercial=False)
 
     assert any("HTTPS URL" in error for error in errors)
     assert any("API_MODE" in error for error in errors)
+    assert any("AI_PROVIDER" in error for error in errors)
+    assert any("IMAGE_QUALITY" in error for error in errors)
     assert any("clips" in error and "transcription" in error for error in errors)
 
 

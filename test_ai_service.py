@@ -194,6 +194,7 @@ def test_highlight_selection_rejects_overlap_and_out_of_bounds() -> None:
 
 def test_long_media_transcription_restores_absolute_timestamps(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("OPENAI_AUDIO_CHUNK_SECONDS", "600")
+    monkeypatch.setenv("AAP_AI_TRANSCRIPTION_TIMESTAMP_MODE", "provider")
     with (
         patch("ai_service.media_duration", return_value=1200),
         patch("ai_service.extract_audio") as extract,

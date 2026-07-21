@@ -1,4 +1,5 @@
 import uuid
+import os
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -7,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 import database
+from ai_service import AIServiceError, check_ai_connection
 from billing_service import InsufficientCreditsError, credit_snapshot, grant_credits
 from database import get_db
 from refund_service import (
@@ -72,8 +74,38 @@ def _audit(
     )
 
 
+def _reported_ai_cost(payload: object) -> float:
+    if isinstance(payload, dict):
+        for key in ("cost_rub_total", "cost_rub"):
+            try:
+                if key in payload:
+                    return max(0.0, float(payload[key] or 0))
+            except (TypeError, ValueError):
+                return 0.0
+        return sum(_reported_ai_cost(value) for value in payload.values())
+    if isinstance(payload, list):
+        return sum(_reported_ai_cost(value) for value in payload)
+    return 0.0
+
+
+def _ai_budget_rub() -> float:
+    try:
+        return max(0.0, float(os.getenv("AAP_AI_MONTHLY_BUDGET_RUB", "5000")))
+    except ValueError:
+        return 5000.0
+
+
 def get_refund_provider() -> YooKassaClient:
     return YooKassaClient()
+
+
+@router.post("/integrations/ai/check")
+def check_ai_integration(request: Request) -> dict[str, object]:
+    _require_admin(request)
+    try:
+        return check_ai_connection()
+    except AIServiceError as exc:
+        raise HTTPException(502, str(exc)) from exc
 
 
 @router.get("/overview")
@@ -96,6 +128,17 @@ def overview(request: Request, db: Session = Depends(get_db)) -> dict[str, objec
             ProductEvent.created_at >= now - timedelta(days=7)
         )
     ) or 0
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    ai_jobs = db.scalars(
+        select(Job).where(
+            Job.kind.in_(["ai_text", "ai_image", "ai_clips"]),
+            Job.created_at >= month_start,
+        )
+    ).all()
+    reported_ai_cost = round(
+        sum(_reported_ai_cost(job.result_payload or {}) for job in ai_jobs), 2
+    )
+    ai_budget = _ai_budget_rub()
     return {
         "users": int(db.scalar(select(func.count(User.id))) or 0),
         "verified_users": int(db.scalar(select(func.count(User.id)).where(User.email_verified_at.is_not(None))) or 0),
@@ -115,6 +158,13 @@ def overview(request: Request, db: Session = Depends(get_db)) -> dict[str, objec
             )
         ) or 0),
         "jobs": {str(status): int(count) for status, count in job_rows},
+        "ai_usage_month": {
+            "jobs": len(ai_jobs),
+            "credits_spent": sum(int(job.credits_spent or 0) for job in ai_jobs),
+            "reported_cost_rub": reported_ai_cost,
+            "budget_rub": ai_budget,
+            "remaining_rub": round(max(0.0, ai_budget - reported_ai_cost), 2),
+        },
     }
 
 

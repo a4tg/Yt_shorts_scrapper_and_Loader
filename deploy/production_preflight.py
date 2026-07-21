@@ -19,6 +19,8 @@ FEATURE_KEYS = (
 )
 AI_FEATURES = {"text", "image", "transcription", "clips"}
 AI_API_MODES = {"auto", "responses", "chat_completions"}
+AI_IMAGE_QUALITIES = {"low", "medium", "high", "auto"}
+AI_PROVIDERS = {"aitunnel", "openai", "custom"}
 
 
 def load_env(path: Path) -> dict[str, str]:
@@ -73,10 +75,19 @@ def validate(values: dict[str, str], *, commercial: bool) -> list[str]:
     ai_key = values.get("AAP_AI_API_KEY", "") or values.get("OPENAI_API_KEY", "")
     if not ai_key:
         errors.append("AAP_AI_API_KEY or OPENAI_API_KEY must be configured")
+    elif ai_key.lower() in {"replace-me", "your-api-key", "test-key", "secret"}:
+        errors.append("AAP_AI_API_KEY must not contain a placeholder value")
+    ai_provider = (
+        values.get("AAP_AI_PROVIDER", "").strip()
+        or values.get("OPENAI_PROVIDER", "").strip()
+        or "aitunnel"
+    ).lower()
+    if ai_provider not in AI_PROVIDERS:
+        errors.append("AAP_AI_PROVIDER must be aitunnel, openai or custom")
     ai_base_url = (
         values.get("AAP_AI_BASE_URL", "").strip()
         or values.get("OPENAI_BASE_URL", "").strip()
-        or "https://api.openai.com/v1"
+        or "https://api.aitunnel.ru/v1"
     )
     ai_parsed = urlparse(ai_base_url)
     if ai_parsed.scheme != "https" or not ai_parsed.hostname:
@@ -88,6 +99,13 @@ def validate(values: dict[str, str], *, commercial: bool) -> list[str]:
     ).lower()
     if ai_mode not in AI_API_MODES:
         errors.append("AAP_AI_API_MODE must be auto, responses or chat_completions")
+    image_quality = (
+        values.get("AAP_AI_IMAGE_QUALITY", "").strip()
+        or values.get("OPENAI_IMAGE_QUALITY", "").strip()
+        or "low"
+    ).lower()
+    if image_quality not in AI_IMAGE_QUALITIES:
+        errors.append("AAP_AI_IMAGE_QUALITY must be low, medium, high or auto")
     configured_ai_features = {
         item.strip().lower()
         for item in (
