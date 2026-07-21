@@ -28,6 +28,20 @@ from observability import metrics
 
 TERMINAL_STATUSES = {"done", "error", "deleted"}
 DOWNLOADABLE_JOB_KINDS = {"download", "ai_image", "ai_clips"}
+PRIVATE_RESULT_KEYS = {"balance", "cost_rub", "cost_rub_total"}
+
+
+def _public_result(value: object) -> object:
+    """Remove provider billing internals while preserving useful usage counters."""
+    if isinstance(value, dict):
+        return {
+            str(key): _public_result(item)
+            for key, item in value.items()
+            if str(key) not in PRIVATE_RESULT_KEYS and not str(key).startswith("_")
+        }
+    if isinstance(value, list):
+        return [_public_result(item) for item in value]
+    return value
 
 
 def utc_now() -> datetime:
@@ -149,7 +163,7 @@ class DatabaseJobManager:
         }
         payload.update({key: value for key, value in optional.items() if value is not None})
         if job.result_payload is not None:
-            payload["result"] = dict(job.result_payload)
+            payload["result"] = _public_result(dict(job.result_payload))
         if job.error_message:
             payload["error"] = job.error_message
         created_at = as_utc(job.created_at)

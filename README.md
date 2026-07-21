@@ -68,14 +68,32 @@ Decision Intelligence. Центр внимания извлекает сигна
 через общую очередь заданий и списывают кредиты только после успешного результата.
 Ключ OpenAI хранится на сервере и никогда не передаётся браузеру.
 
-Добавьте в `.env` минимум:
+Для рекомендованного экономичного профиля AI Tunnel добавьте в `.env`:
 
 ```env
-OPENAI_API_KEY=sk-...
-OPENAI_TEXT_MODEL=gpt-5.4-mini
-OPENAI_IMAGE_MODEL=gpt-image-1.5
-OPENAI_TRANSCRIPTION_MODEL=whisper-1
+AAP_AI_PROVIDER=aitunnel
+AAP_AI_API_KEY=sk-aitunnel-...
+AAP_AI_BASE_URL=https://api.aitunnel.ru/v1
+AAP_AI_API_MODE=auto
+AAP_AI_FEATURES=text,image,transcription,clips
+AAP_AI_TEXT_MODEL=deepseek-v4-flash
+AAP_AI_PREMIUM_TEXT_MODEL=gpt-5.4-mini
+AAP_AI_IMAGE_MODEL=gpt-image-2
+AAP_AI_IMAGE_QUALITY=low
+AAP_AI_TRANSCRIPTION_MODEL=whisper-large-v3-turbo
+AAP_AI_TRANSCRIPTION_TIMESTAMP_MODE=auto
+AAP_AI_TIMESTAMP_FALLBACK_CHUNK_SECONDS=300
 ```
+
+Основная текстовая модель обслуживает массовые запросы. Премиальная модель
+повторно вызывается только тогда, когда основной провайдер не смог вернуть
+валидный JSON-план клипов. Для изображений API принимает `quality` (`low`,
+`medium`, `high`, `auto`), а значение из окружения используется по умолчанию.
+Если STT-модель не возвращает сегментные таймкоды, сервер не переключается на
+дорогую модель: он строит оценочные таймкоды внутри коротких аудиофрагментов.
+Заявленная провайдером стоимость (`usage.cost_rub`) сохраняется внутри записи
+задания для расчёта себестоимости. Публичный API удаляет стоимость и баланс
+провайдера из ответа, а API-ключ никогда не передаётся клиенту.
 
 Новые аккаунты получают 14 дней пробного периода и 5 стартовых кредитов.
 Коммерческие тарифы задаются миграцией: Creator — 1 490 ₽/месяц и 200 кредитов,

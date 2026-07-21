@@ -83,6 +83,21 @@ def test_generate_text_falls_back_to_chat_completions(monkeypatch) -> None:
     assert call.call_args_list[1].args[0].endswith("/chat/completions")
 
 
+def test_generate_text_can_select_premium_model(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("AAP_AI_API_MODE", "chat_completions")
+    monkeypatch.setenv("AAP_AI_TEXT_MODEL", "cheap-model")
+    monkeypatch.setenv("AAP_AI_PREMIUM_TEXT_MODEL", "premium-model")
+    upstream = response({
+        "choices": [{"message": {"content": "Premium result"}}],
+        "usage": {"cost_rub": 0.5},
+    })
+    with patch("ai_service.httpx.post", return_value=upstream) as call:
+        result = ai_service.generate_text("Topic", "Instruction", premium=True)
+    assert call.call_args.kwargs["json"]["model"] == "premium-model"
+    assert result["model_tier"] == "premium"
+
+
 def test_generate_text_retries_explicit_temporary_provider_failure(monkeypatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setenv("AAP_AI_RETRY_BASE_SECONDS", "0")
@@ -123,6 +138,25 @@ def test_generate_image_decodes_base64(monkeypatch) -> None:
         image, metadata = ai_service.generate_image("Баннер")
     assert image == b"png-data"
     assert metadata["size"] == "1024x1024"
+
+
+def test_generate_image_sends_explicit_cost_controlling_quality(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    upstream = response({
+        "data": [{"b64_json": base64.b64encode(b"png-data").decode()}],
+        "usage": {"cost_rub": 1.87},
+    })
+    with patch("ai_service.httpx.post", return_value=upstream) as call:
+        _image, metadata = ai_service.generate_image("Banner", quality="low")
+    assert call.call_args.kwargs["json"]["quality"] == "low"
+    assert metadata["quality"] == "low"
+    assert metadata["usage"]["cost_rub"] == 1.87
+
+
+def test_usage_cost_rub_accepts_numeric_strings_and_rejects_invalid_values() -> None:
+    assert ai_service.usage_cost_rub({"cost_rub": "1.87"}) == 1.87
+    assert ai_service.usage_cost_rub({"cost_rub": "invalid"}) == 0
+    assert ai_service.usage_cost_rub(None) == 0
 
 
 def test_highlight_selection_validates_duration() -> None:
@@ -174,6 +208,69 @@ def test_long_media_transcription_restores_absolute_timestamps(tmp_path, monkeyp
     assert result["segments"][1]["start"] == 605
 
 
+def test_text_only_transcription_builds_estimated_timestamps_and_usage(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("AAP_AI_TRANSCRIPTION_MODEL", "whisper-large-v3-turbo")
+    monkeypatch.setenv("AAP_AI_TRANSCRIPTION_TIMESTAMP_MODE", "auto")
+    monkeypatch.setenv("AAP_AI_TIMESTAMP_FALLBACK_CHUNK_SECONDS", "300")
+    with (
+        patch("ai_service.media_duration", return_value=600),
+        patch("ai_service.extract_audio") as extract,
+        patch("ai_service.transcribe_audio", side_effect=[
+            {"text": "First sentence. Second sentence.", "usage": {"seconds": 300, "cost_rub": 0.65}},
+            {"text": "Third sentence. Fourth sentence.", "usage": {"seconds": 300, "cost_rub": 0.65}},
+        ]) as transcribe,
+    ):
+        result = ai_service.transcribe_media(Path("source.mp4"), tmp_path, lambda _message: None)
+    assert extract.call_count == 2
+    assert transcribe.call_args_list[0].kwargs["request_timestamps"] is True
+    assert transcribe.call_args_list[1].kwargs["request_timestamps"] is False
+    assert result["timestamps"] == "estimated"
+    assert result["segments"][0]["timestamp_source"] == "estimated"
+    assert result["segments"][-1]["end"] == 600
+    assert result["usage"]["seconds"] == 600
+    assert result["usage"]["cost_rub"] == 1.3
+
+
+def test_transcription_retries_only_rejected_timestamp_parameters(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("AAP_AI_API_KEY", "test-key")
+    monkeypatch.setenv("AAP_AI_TRANSCRIPTION_MODEL", "whisper-large-v3-turbo")
+    monkeypatch.setenv("AAP_AI_TRANSCRIPTION_TIMESTAMP_MODE", "auto")
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"audio")
+    rejected = MagicMock()
+    rejected.is_success = False
+    rejected.status_code = 422
+    rejected.headers = {}
+    rejected.json.return_value = {"error": {"message": "verbose_json unsupported"}}
+    accepted = response({"text": "Transcript", "usage": {"cost_rub": 0.13}})
+    with patch("ai_service.httpx.post", side_effect=[rejected, accepted]) as call:
+        result = ai_service.transcribe_audio(audio)
+    assert call.call_count == 2
+    assert call.call_args_list[0].kwargs["data"]["response_format"] == "verbose_json"
+    assert call.call_args_list[1].kwargs["data"]["response_format"] == "json"
+    assert result["text"] == "Transcript"
+
+
+def test_highlight_selection_retries_invalid_json_with_premium_model(monkeypatch) -> None:
+    monkeypatch.setenv("AAP_AI_TEXT_MODEL", "cheap-model")
+    monkeypatch.setenv("AAP_AI_PREMIUM_TEXT_MODEL", "premium-model")
+    transcript = {
+        "duration": 70,
+        "segments": [{"start": 0, "end": 70, "text": "A complete fragment"}],
+    }
+    usage: dict[str, object] = {}
+    with patch("ai_service.generate_text", side_effect=[
+        {"text": "not-json", "usage": {"cost_rub": 0.01}},
+        {"text": '[{"start": 5, "end": 35, "title": "Moment"}]', "usage": {"cost_rub": 0.2}},
+    ]) as generate:
+        clips = ai_service.select_highlights(
+            transcript, 1, 20, 60, usage_sink=usage
+        )
+    assert clips[0]["title"] == "Moment"
+    assert generate.call_args_list[1].kwargs["premium"] is True
+    assert usage["cost_rub"] == 0.21
+
+
 def test_ai_text_endpoint_is_project_scoped_and_reserves_credit(monkeypatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     client = register_user(); project = project_id(client)
@@ -187,6 +284,25 @@ def test_ai_text_endpoint_is_project_scoped_and_reserves_credit(monkeypatch) -> 
         assert job.project_id == project
         assert job.kind == "ai_text"
         assert job.credits_reserved == 1
+
+
+def test_ai_image_endpoint_preserves_requested_quality(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    client = register_user(); project = project_id(client)
+    result = client.post(
+        "/api/ai/images",
+        headers=csrf(client),
+        json={
+            "project_id": project,
+            "prompt": "Campaign banner",
+            "size": "1024x1024",
+            "quality": "low",
+        },
+    )
+    assert result.status_code == 202, result.text
+    with server.SessionLocal() as db:
+        job = db.get(Job, result.json()["id"])
+        assert job.request_payload["quality"] == "low"
 
 
 def test_ai_clips_endpoint_accepts_project_video_attachment(monkeypatch) -> None:

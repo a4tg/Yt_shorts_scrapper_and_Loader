@@ -13,7 +13,7 @@ from sqlalchemy import delete, func, select
 from fastapi.testclient import TestClient
 
 import server
-from job_queue import DatabaseJobManager, ProcessedJob, utc_now
+from job_queue import DatabaseJobManager, ProcessedJob, _public_result, utc_now
 from saas_models import CreditLedger, Job, JobFile, User
 from auth_service import attempt_limiter
 from billing_service import credit_snapshot
@@ -49,6 +49,23 @@ def delete_user(user_id: str) -> None:
         if user:
             db.delete(user)
             db.commit()
+
+
+def test_public_job_result_hides_provider_billing_internals() -> None:
+    result = _public_result({
+        "text": "Ready",
+        "usage": {
+            "input_tokens": 10,
+            "cost_rub": 1.25,
+            "balance": 998.75,
+            "nested": [{"cost_rub_total": 2.5, "seconds": 60}],
+        },
+        "_internal_note": "private",
+    })
+    assert result == {
+        "text": "Ready",
+        "usage": {"input_tokens": 10, "nested": [{"seconds": 60}]},
+    }
 
 
 def test_job_is_persistent_between_manager_instances() -> None:

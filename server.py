@@ -62,6 +62,7 @@ from ai_service import (
     render_vertical_clips,
     select_highlights,
     transcribe_media,
+    usage_cost_rub,
 )
 from observability import log_request, metrics, prometheus_text, request_id
 from database import SessionLocal, check_database
@@ -209,6 +210,7 @@ class AIImageRequest(BaseModel):
     project_id: str = Field(min_length=36, max_length=36)
     prompt: str = Field(min_length=3, max_length=8000)
     size: Literal["1024x1024", "1536x1024", "1024x1536"] = "1024x1024"
+    quality: Literal["low", "medium", "high", "auto"] | None = None
 
 
 class AIClipsRequest(BaseModel):
@@ -246,7 +248,11 @@ def process_media_job(
         shutil.rmtree(output_dir, ignore_errors=True)
         output_dir.mkdir(parents=True, exist_ok=True)
         log("Генерирую изображение")
-        image, metadata = generate_image(str(args["prompt"]), size=str(args["size"]))
+        image, metadata = generate_image(
+            str(args["prompt"]),
+            size=str(args["size"]),
+            quality=str(args["quality"]) if args.get("quality") else None,
+        )
         target = output_dir / "ai_image.png"
         target.write_bytes(image)
         return ProcessedJob(
@@ -262,10 +268,38 @@ def process_media_job(
         output_dir.mkdir(parents=True, exist_ok=True)
         transcript = transcribe_media(source, output_dir, log)
         log("Выбираю сильные фрагменты")
-        clips = select_highlights(transcript, int(args["count"]), int(args["min_seconds"]), int(args["max_seconds"]))
+        selection_usage: dict[str, object] = {}
+        clips = select_highlights(
+            transcript,
+            int(args["count"]),
+            int(args["min_seconds"]),
+            int(args["max_seconds"]),
+            usage_sink=selection_usage,
+        )
         archive = render_vertical_clips(source, clips, output_dir, log)
+        transcription_usage = transcript.get("usage") or {}
+        cost_rub_total = round(
+            usage_cost_rub(transcription_usage)
+            + usage_cost_rub(selection_usage),
+            6,
+        )
         return ProcessedJob(
-            result={"filename": archive.name, "format": "zip", "count": len(clips), "clips": clips},
+            result={
+                "filename": archive.name,
+                "format": "zip",
+                "count": len(clips),
+                "clips": clips,
+                "transcription": {
+                    "provider": transcript.get("provider"),
+                    "model": transcript.get("model"),
+                    "timestamps": transcript.get("timestamps"),
+                },
+                "usage": {
+                    "transcription": transcription_usage,
+                    "selection": selection_usage,
+                    "cost_rub_total": cost_rub_total,
+                },
+            },
             files=(archive,), expires_at=datetime.now(timezone.utc) + timedelta(hours=READY_HOURS),
         )
     if kind == "import":
@@ -669,7 +703,11 @@ def create_ai_image(payload: AIImageRequest, request: Request) -> dict[str, obje
     workspace_id, project_id = resolve_media_project(payload.project_id, request)
     try:
         return manager.create(
-            "ai_image", {"prompt": payload.prompt, "size": payload.size},
+            "ai_image", {
+                "prompt": payload.prompt,
+                "size": payload.size,
+                "quality": payload.quality,
+            },
             owner_id=str(request.state.user.id), workspace_id=workspace_id, project_id=project_id,
         )
     except InsufficientCreditsError as exc:
