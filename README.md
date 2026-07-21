@@ -480,6 +480,9 @@ YT_LOADER_BACKUP_DIR=/var/backups/yt-loader ./deploy/backup-data.sh
 
 ### Подключение оплаты через ЮKassa
 
+Актуальная пошаговая инструкция: [`deploy/payment-provider-setup.md`](deploy/payment-provider-setup.md).
+Зафиксированные тарифы и стресс-модель маржи: [`deploy/pricing-economics.md`](deploy/pricing-economics.md).
+
 Оплата включается только при одновременном наличии публичного HTTPS-адреса, `shopId` и
 секретного ключа. Сначала используй тестовый магазин ЮKassa и тестовые банковские карты.
 В `.env` на сервере укажи:

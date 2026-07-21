@@ -21,6 +21,14 @@ AI_FEATURES = {"text", "image", "transcription", "clips"}
 AI_API_MODES = {"auto", "responses", "chat_completions"}
 AI_IMAGE_QUALITIES = {"low", "medium", "high", "auto"}
 AI_PROVIDERS = {"aitunnel", "openai", "custom"}
+PLACEHOLDER_SECRETS = {
+    "replace-me",
+    "your-api-key",
+    "your-secret-key",
+    "test-key",
+    "secret",
+    "change-me",
+}
 
 
 def load_env(path: Path) -> dict[str, str]:
@@ -75,7 +83,7 @@ def validate(values: dict[str, str], *, commercial: bool) -> list[str]:
     ai_key = values.get("AAP_AI_API_KEY", "") or values.get("OPENAI_API_KEY", "")
     if not ai_key:
         errors.append("AAP_AI_API_KEY or OPENAI_API_KEY must be configured")
-    elif ai_key.lower() in {"replace-me", "your-api-key", "test-key", "secret"}:
+    elif ai_key.lower() in PLACEHOLDER_SECRETS:
         errors.append("AAP_AI_API_KEY must not contain a placeholder value")
     ai_provider = (
         values.get("AAP_AI_PROVIDER", "").strip()
@@ -148,6 +156,15 @@ def validate(values: dict[str, str], *, commercial: bool) -> list[str]:
             require(key)
         if not enabled(values, "YOOKASSA_WEBHOOK_ENFORCE_IP"):
             errors.append("YOOKASSA_WEBHOOK_ENFORCE_IP must be true")
+        payment_api_url = values.get(
+            "YOOKASSA_API_URL", "https://api.yookassa.ru/v3"
+        ).strip()
+        payment_api = urlparse(payment_api_url)
+        if payment_api.scheme != "https" or not payment_api.hostname:
+            errors.append("YOOKASSA_API_URL must be a complete HTTPS URL")
+        for key in ("YOOKASSA_SHOP_ID", "YOOKASSA_SECRET_KEY"):
+            if values.get(key, "").strip().lower() in PLACEHOLDER_SECRETS:
+                errors.append(f"{key} must not contain a placeholder value")
     return errors
 
 

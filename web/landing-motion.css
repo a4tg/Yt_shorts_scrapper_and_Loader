@@ -361,3 +361,6 @@ footer {
     scale: none;
   }
 }
+@media (min-width: 851px) {
+  .price-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}

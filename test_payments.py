@@ -116,6 +116,22 @@ def create_checkout(client: TestClient, provider: FakeYooKassa, plan_id: str = "
         )
 
 
+def create_credit_package_checkout(
+    client: TestClient, provider: FakeYooKassa, package_id: str = "credits_100"
+):
+    with patch.dict(
+        os.environ,
+        {
+            "YT_LOADER_PUBLIC_BASE_URL": "https://shorts.example.test",
+            "YOOKASSA_WEBHOOK_ENFORCE_IP": "false",
+        },
+    ), patch("payment_routes.get_provider", return_value=provider):
+        return client.post(
+            "/api/payments/credit-packages/checkout",
+            json={"package_id": package_id, "offer_accepted": True},
+        )
+
+
 def test_checkout_requires_explicit_recurring_consent() -> None:
     client, _user = registered_client()
     provider = FakeYooKassa()
@@ -177,6 +193,77 @@ def test_checkout_is_idempotent_for_double_click_and_scoped_to_user() -> None:
         assert payment.recurring_consent_at is not None
         assert payment.legal_version == "test-version"
     assert other_client.get(f"/api/payments/{first.json()['id']}").status_code == 404
+
+
+def test_credit_package_is_one_time_and_webhook_grants_once() -> None:
+    client, user = registered_client()
+    provider = FakeYooKassa()
+    with server.SessionLocal() as db:
+        db.add(
+            Subscription(
+                user_id=str(user["id"]),
+                plan_id="creator",
+                provider="yookassa",
+                status="active",
+                current_period_start=utc_now(),
+                current_period_end=utc_now() + timedelta(days=30),
+            )
+        )
+        db.commit()
+    catalog = client.get("/api/payments/credit-packages")
+    assert catalog.status_code == 200
+    assert [(item["id"], item["credits"], item["price_minor"]) for item in catalog.json()] == [
+        ("credits_100", 100, 89000),
+        ("credits_500", 500, 349000),
+        ("credits_1500", 1500, 849000),
+    ]
+
+    checkout_response = create_credit_package_checkout(client, provider, "credits_500")
+    assert checkout_response.status_code == 201, checkout_response.text
+    checkout = checkout_response.json()
+    assert checkout["purchase_type"] == "credit_package"
+    assert checkout["package_id"] == "credits_500"
+    assert checkout["recurring_consent_at"] is None
+    assert provider.create_calls[0]["save_payment_method"] is False
+    provider_id = next(iter(provider.payments))
+    provider.succeed(provider_id, saved=False)
+
+    succeeded = webhook(client, provider, provider_id)
+    assert succeeded.status_code == 200, succeeded.text
+    assert client.get("/api/billing/summary").json()["balance"] == 520
+    duplicate = webhook(client, provider, provider_id)
+    assert duplicate.json()["status"] == "duplicate"
+    assert client.get("/api/billing/summary").json()["balance"] == 520
+    with server.SessionLocal() as db:
+        subscriptions = db.scalars(
+            select(Subscription).where(Subscription.user_id == str(user["id"]))
+        ).all()
+        assert len(subscriptions) == 1
+
+
+def test_credit_package_requires_active_paid_subscription() -> None:
+    client, _user = registered_client()
+    provider = FakeYooKassa()
+    response = create_credit_package_checkout(client, provider, "credits_100")
+    assert response.status_code == 409
+    assert "активной платной подписке" in response.json()["detail"]
+    assert provider.create_calls == []
+
+
+def test_credit_package_requires_offer_and_known_package() -> None:
+    client, _user = registered_client()
+    provider = FakeYooKassa()
+    with patch.dict(
+        os.environ, {"YT_LOADER_PUBLIC_BASE_URL": "https://shorts.example.test"}
+    ), patch("payment_routes.get_provider", return_value=provider):
+        no_offer = client.post(
+            "/api/payments/credit-packages/checkout",
+            json={"package_id": "credits_100", "offer_accepted": False},
+        )
+    assert no_offer.status_code == 400
+    unknown = create_credit_package_checkout(client, provider, "credits_999")
+    assert unknown.status_code == 409
+    assert provider.create_calls == []
 
 
 def test_webhook_uses_provider_status_and_duplicate_does_not_double_grant() -> None:

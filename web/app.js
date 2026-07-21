@@ -2259,12 +2259,13 @@ function formatStorageLimit(megabytes) {
 
 async function loadBilling() {
   if (!state.currentUser) return;
-  const [summary, plans, ledger, paymentConfig, creditRates] = await Promise.all([
+  const [summary, plans, ledger, paymentConfig, creditRates, creditPackages] = await Promise.all([
     api('/api/billing/summary'),
     api('/api/billing/plans'),
     api('/api/billing/ledger?limit=8'),
     api('/api/payments/config'),
-    api('/api/billing/credit-rates')
+    api('/api/billing/credit-rates'),
+    api('/api/payments/credit-packages')
   ]);
   $('#billing-available').textContent = summary.available;
   $('#billing-reserved').textContent = summary.reserved;
@@ -2332,6 +2333,29 @@ async function loadBilling() {
   subscriptionAction.textContent = summary.cancel_at_period_end
     ? 'Возобновить автопродление' : 'Отключить автопродление';
 
+  const packageContainer = $('#billing-credit-packages'); packageContainer.replaceChildren();
+  const canBuyPackages = summary.subscription_status === 'active' && summary.plan?.id !== 'free';
+  for (const creditPackage of creditPackages) {
+    const card = document.createElement('article'); card.className = 'credit-package-card';
+    const copy = document.createElement('div');
+    const title = document.createElement('h4'); title.textContent = creditPackage.name;
+    const description = document.createElement('p'); description.textContent = creditPackage.description;
+    copy.append(title, description);
+    const amount = document.createElement('strong'); amount.textContent = `${creditPackage.credits} кредитов`;
+    const price = document.createElement('b');
+    price.textContent = new Intl.NumberFormat('ru-RU', {
+      style: 'currency', currency: creditPackage.currency, maximumFractionDigits: 0
+    }).format(creditPackage.price_minor / 100);
+    const action = document.createElement('button');
+    action.className = 'secondary'; action.type = 'button';
+    action.disabled = !paymentConfig.enabled || !canBuyPackages;
+    action.textContent = !paymentConfig.enabled
+      ? 'Оплата пока не настроена'
+      : canBuyPackages ? 'Купить пакет' : 'Нужна активная подписка';
+    action.addEventListener('click', () => openCreditPackageCheckout(creditPackage, action));
+    card.append(copy, amount, price, action); packageContainer.append(card);
+  }
+
   const rateLabels = {
     import: 'Импорт метаданных',
     download_original: 'Скачивание оригинала',
@@ -2367,12 +2391,36 @@ async function loadBilling() {
 let pendingCheckout = null;
 
 function openCheckoutDialog(plan, sourceButton) {
-  pendingCheckout = { plan, sourceButton };
+  pendingCheckout = { type: 'subscription', plan, sourceButton };
+  $('#checkout-dialog-eyebrow').textContent = 'Подтверждение подписки';
   $('#checkout-dialog-title').textContent = `Тариф «${plan.name}»`;
   $('#checkout-dialog-price').textContent = `${formatPlanPrice(plan)} / месяц`;
+  $('#checkout-dialog-renewal').textContent = 'Далее — та же сумма каждый месяц';
+  $('#checkout-dialog-copy').classList.remove('hidden');
+  $('#checkout-recurring-consent').closest('label').classList.remove('hidden');
   $('#checkout-dialog-status').textContent = '';
   $('#checkout-recurring-consent').checked = false;
   $('#checkout-offer-consent').checked = false;
+  $('#checkout-dialog-submit').disabled = true;
+  $('#checkout-dialog').showModal();
+  window.AAPAppMotion?.dialogFromSource?.(
+    $('#checkout-dialog'), sourceButton.getBoundingClientRect()
+  );
+}
+
+function openCreditPackageCheckout(creditPackage, sourceButton) {
+  pendingCheckout = { type: 'credit_package', creditPackage, sourceButton };
+  $('#checkout-dialog-eyebrow').textContent = 'Разовая покупка';
+  $('#checkout-dialog-title').textContent = creditPackage.name;
+  $('#checkout-dialog-price').textContent = new Intl.NumberFormat('ru-RU', {
+    style: 'currency', currency: creditPackage.currency, maximumFractionDigits: 0
+  }).format(creditPackage.price_minor / 100);
+  $('#checkout-dialog-renewal').textContent = `${creditPackage.credits} кредитов · без автопродления`;
+  $('#checkout-dialog-copy').classList.add('hidden');
+  $('#checkout-recurring-consent').closest('label').classList.add('hidden');
+  $('#checkout-recurring-consent').checked = true;
+  $('#checkout-offer-consent').checked = false;
+  $('#checkout-dialog-status').textContent = '';
   $('#checkout-dialog-submit').disabled = true;
   $('#checkout-dialog').showModal();
   window.AAPAppMotion?.dialogFromSource?.(
@@ -2401,6 +2449,14 @@ $('#checkout-confirm-form').addEventListener('submit', async (event) => {
     || !$('#checkout-recurring-consent').checked
     || !$('#checkout-offer-consent').checked
   ) return;
+  if (pendingCheckout.type === 'credit_package') {
+    await beginCreditPackageCheckout(
+      pendingCheckout.creditPackage.id,
+      $('#checkout-dialog-submit'),
+      pendingCheckout.sourceButton
+    );
+    return;
+  }
   const { plan, sourceButton } = pendingCheckout;
   await beginCheckout(plan.id, $('#checkout-dialog-submit'), sourceButton);
 });
@@ -2420,6 +2476,30 @@ async function beginCheckout(planId, button, sourceButton = button) {
       pendingCheckout = null;
       $('#checkout-dialog').close();
       showToast('Оплата подтверждена, кредиты начислены.');
+      await loadBilling();
+      return;
+    }
+    if (!payment.confirmation_url) throw new Error('ЮKassa не вернула ссылку подтверждения.');
+    location.assign(payment.confirmation_url);
+  } catch (error) {
+    showToast(error.message);
+    $('#checkout-dialog-status').textContent = error.message;
+    button.disabled = false; button.textContent = oldText;
+    sourceButton.disabled = false;
+  }
+}
+
+async function beginCreditPackageCheckout(packageId, button, sourceButton = button) {
+  const oldText = button.textContent; button.disabled = true; button.textContent = 'Создаю платёж…';
+  try {
+    const payment = await api('/api/payments/credit-packages/checkout', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ package_id: packageId, offer_accepted: true })
+    });
+    if (payment.status === 'succeeded') {
+      pendingCheckout = null;
+      $('#checkout-dialog').close();
+      showToast('Оплата подтверждена, дополнительные кредиты начислены.');
       await loadBilling();
       return;
     }

@@ -12,7 +12,9 @@ from payment_service import (
     PaymentInProgressError,
     PaymentNotConfiguredError,
     PaymentValidationError,
+    create_credit_package_payment,
     create_checkout_payment,
+    credit_package_catalog,
     payment_payload,
     process_webhook,
     public_base_url,
@@ -37,6 +39,11 @@ class CheckoutRequest(BaseModel):
     offer_accepted: bool = False
 
 
+class CreditPackageCheckoutRequest(BaseModel):
+    package_id: str = Field(min_length=1, max_length=40, pattern=r"^[a-z0-9_-]+$")
+    offer_accepted: bool = False
+
+
 def get_provider() -> YooKassaClient:
     return YooKassaClient()
 
@@ -58,6 +65,11 @@ def payment_config() -> dict[str, object]:
         "recurring": True,
         "legal_ready": legal.complete,
     }
+
+
+@router.get("/credit-packages")
+def list_credit_packages() -> list[dict[str, object]]:
+    return credit_package_catalog()
 
 
 @router.post("/checkout", status_code=201)
@@ -91,6 +103,41 @@ def create_checkout(payload: CheckoutRequest, request: Request) -> dict[str, obj
     except PaymentNotConfiguredError as exc:
         raise HTTPException(503, str(exc)) from exc
     except (PaymentValidationError, ActiveSubscriptionError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except PaymentInProgressError as exc:
+        raise HTTPException(425, str(exc)) from exc
+    except (YooKassaAPIError, YooKassaConfigurationError) as exc:
+        raise HTTPException(502, str(exc)) from exc
+
+
+@router.post("/credit-packages/checkout", status_code=201)
+def create_credit_package_checkout(
+    payload: CreditPackageCheckoutRequest, request: Request
+) -> dict[str, object]:
+    provider = get_provider()
+    public_url_ready = True
+    try:
+        public_base_url()
+    except PaymentNotConfiguredError:
+        public_url_ready = False
+    if not commercial_payments_ready(provider.configured, public_url_ready):
+        raise HTTPException(503, "Приём платежей ещё не активирован владельцем сервиса.")
+    if not payload.offer_accepted:
+        raise HTTPException(400, "Подтвердите принятие публичной оферты.")
+    limiter_key = f"credit-package:{request.state.user.id}"
+    if not attempt_limiter.allow(limiter_key, limit=10, window_seconds=10 * 60):
+        raise HTTPException(429, "Слишком много попыток оплаты. Повтори позже.")
+    try:
+        return create_credit_package_payment(
+            lambda: database.SessionLocal(),
+            provider,
+            str(request.state.user.id),
+            payload.package_id,
+            legal_version=legal_config().version,
+        )
+    except PaymentNotConfiguredError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except PaymentValidationError as exc:
         raise HTTPException(409, str(exc)) from exc
     except PaymentInProgressError as exc:
         raise HTTPException(425, str(exc)) from exc

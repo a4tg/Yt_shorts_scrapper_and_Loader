@@ -18,6 +18,7 @@ YT_LOADER_REQUIRE_LEGAL_ACCEPTANCE=true
 
 YOOKASSA_SHOP_ID=
 YOOKASSA_SECRET_KEY=
+YOOKASSA_API_URL=https://api.yookassa.ru/v3
 YOOKASSA_WEBHOOK_ENFORCE_IP=true
 YT_LOADER_PUBLIC_BASE_URL=https://allasplanned.ru
 YT_LOADER_ENABLE_PAYMENTS=false
@@ -60,6 +61,8 @@ curl -fsS -b cookies.txt https://allasplanned.ru/api/payments/config
 8. отменённый возврат и восстановление удержанных кредитов;
 9. отключение и возобновление автопродления;
 10. успешное продление и окончание подписки при неуспешном списании.
+11. разовую покупку каждого пакета кредитов без сохранения способа оплаты;
+12. повторный webhook пакета без повторного начисления и полный возврат пакета.
 
 Каждую операцию сверить одновременно в ЮKassa, пользовательском биллинге и
 админском журнале действий. Боевые ключи не записывать в Git, логи или
@@ -78,3 +81,6 @@ curl -fsS -b cookies.txt https://allasplanned.ru/api/payments/config
 
 Тексты в репозитории являются технической основой публикации, а не заключением
 о соответствии конкретной организационно-правовой форме владельца.
+
+Пошаговая настройка магазина и webhook: [payment-provider-setup.md](payment-provider-setup.md).
+Экономические допущения тарифов: [pricing-economics.md](pricing-economics.md).

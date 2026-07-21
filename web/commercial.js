@@ -9,9 +9,10 @@
   const actionNode = calculator.querySelector('[data-credit-action]');
 
   const plans = [
-    { limit: 5, name: 'Пробный', action: 'Начать бесплатно' },
+    { limit: 20, name: 'Пробный', action: 'Начать бесплатно' },
     { limit: 200, name: 'Creator', action: 'Попробовать Creator' },
-    { limit: 1000, name: 'Studio', action: 'Попробовать Studio' },
+    { limit: 700, name: 'Team', action: 'Попробовать Team' },
+    { limit: 1800, name: 'Agency', action: 'Выбрать Agency' },
   ];
 
   const pluralizeCredits = (amount) => {
@@ -43,14 +44,14 @@
     actionNode.textContent = plan.action;
     if (plan.name === 'Пробный') {
       noteNode.textContent = total
-        ? `Стартовых 5 кредитов хватит на выбранную пробу.`
+        ? `Стартовых 20 кредитов хватит на выбранную пробу.`
         : 'Можно начать с планирования — оно не расходует кредиты.';
     } else if (remaining >= 0) {
       noteNode.textContent = remaining
         ? `Останется около ${remaining.toLocaleString('ru-RU')} ${pluralizeCredits(remaining)} в месяц.`
         : 'Лимит тарифа используется полностью.';
     } else {
-      noteNode.textContent = `Нагрузка выше включённого лимита Studio на ${Math.abs(remaining).toLocaleString('ru-RU')} ${pluralizeCredits(Math.abs(remaining))}.`;
+      noteNode.textContent = `Нагрузка выше включённого лимита Agency на ${Math.abs(remaining).toLocaleString('ru-RU')} ${pluralizeCredits(Math.abs(remaining))}. Добавьте разовый пакет кредитов.`;
     }
   };
 

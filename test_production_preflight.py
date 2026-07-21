@@ -77,6 +77,17 @@ def test_production_preflight_rejects_partial_or_insecure_ai_gateway() -> None:
     assert any("clips" in error and "transcription" in error for error in errors)
 
 
+def test_commercial_preflight_rejects_insecure_or_placeholder_payment_config() -> None:
+    values = complete_env()
+    values["YOOKASSA_API_URL"] = "http://payments.example.test/v3"
+    values["YOOKASSA_SECRET_KEY"] = "your-secret-key"
+
+    errors = validate(values, commercial=True)
+
+    assert "YOOKASSA_API_URL must be a complete HTTPS URL" in errors
+    assert "YOOKASSA_SECRET_KEY must not contain a placeholder value" in errors
+
+
 def test_load_env_supports_comments_quotes_and_equals(tmp_path) -> None:
     path = tmp_path / ".env"
     path.write_text(

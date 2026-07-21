@@ -21,6 +21,42 @@ from yookassa_client import YooKassaAPIError, value_to_minor
 logger = logging.getLogger(__name__)
 
 
+CREDIT_PACKAGES: tuple[dict[str, object], ...] = (
+    {
+        "id": "credits_100",
+        "name": "Стартовый запас",
+        "description": "100 дополнительных кредитов без автопродления.",
+        "credits": 100,
+        "price_minor": 89_000,
+        "currency": "RUB",
+    },
+    {
+        "id": "credits_500",
+        "name": "Рабочий запас",
+        "description": "500 дополнительных кредитов по сниженной цене.",
+        "credits": 500,
+        "price_minor": 349_000,
+        "currency": "RUB",
+    },
+    {
+        "id": "credits_1500",
+        "name": "Командный запас",
+        "description": "1500 дополнительных кредитов для большой нагрузки.",
+        "credits": 1500,
+        "price_minor": 849_000,
+        "currency": "RUB",
+    },
+)
+
+
+def credit_package_catalog() -> list[dict[str, object]]:
+    return [dict(item) for item in CREDIT_PACKAGES]
+
+
+def _credit_package(package_id: str) -> dict[str, object] | None:
+    return next((dict(item) for item in CREDIT_PACKAGES if item["id"] == package_id), None)
+
+
 class PaymentProvider(Protocol):
     configured: bool
 
@@ -107,9 +143,13 @@ def validate_confirmation_url(value: str | None) -> str | None:
 
 
 def payment_payload(payment: Payment) -> dict[str, object]:
+    details = dict(payment.details or {})
     return {
         "id": payment.id,
         "plan_id": payment.plan_id,
+        "purchase_type": details.get("purchase_type", "subscription"),
+        "package_id": details.get("package_id"),
+        "package_name": details.get("package_name"),
         "status": payment.status,
         "amount_minor": payment.amount_minor,
         "currency": payment.currency,
@@ -149,11 +189,14 @@ def _validate_provider_payment(payment: Payment, payload: dict[str, Any]) -> str
         raise PaymentValidationError("Идентификатор платежа не совпадает.")
     if amount_minor != payment.amount_minor or currency != payment.currency:
         raise PaymentValidationError("Сумма или валюта платежа не совпадает.")
+    payment_details = dict(payment.details or {})
     expected = {
         "local_payment_id": payment.id,
         "user_id": payment.user_id,
         "plan_id": str(payment.plan_id or ""),
     }
+    if payment_details.get("purchase_type") == "credit_package":
+        expected["package_id"] = str(payment_details.get("package_id") or "")
     if any(metadata.get(key) != value for key, value in expected.items()):
         raise PaymentValidationError("Metadata платежа не совпадает.")
     return status
@@ -240,7 +283,7 @@ def apply_verified_payment(db: Session, payment: Payment, payload: dict[str, Any
     provider_id = str(payload["id"])
     payment.provider_payment_id = provider_id
     payment.provider_created_at = parse_datetime(payload.get("created_at"))
-    payment.details = _safe_provider_details(payload)
+    payment.details = {**dict(payment.details or {}), **_safe_provider_details(payload)}
     payment_method = payload.get("payment_method") if isinstance(payload.get("payment_method"), dict) else {}
     payment.provider_payment_method_id = str(dict(payment_method).get("id") or "") or None
 
@@ -252,7 +295,18 @@ def apply_verified_payment(db: Session, payment: Payment, payload: dict[str, Any
         payment.status = "succeeded"
         payment.paid_at = parse_datetime(payload.get("captured_at")) or utc_now()
         payment.failure_reason = None
-        _activate_subscription(db, payment, payload)
+        if dict(payment.details or {}).get("purchase_type") == "credit_package":
+            grant_credits(
+                db,
+                payment.user_id,
+                payment.credits,
+                operation_type="credit_package",
+                description=f"Пакет {dict(payment.details or {}).get('package_name') or payment.credits}: +{payment.credits} кредитов",
+                idempotency_key=f"payment:{payment.provider_payment_id}",
+                payment_id=payment.id,
+            )
+        else:
+            _activate_subscription(db, payment, payload)
         return True
     if status == "canceled":
         payment.status = "canceled"
@@ -333,12 +387,17 @@ def create_checkout_payment(
         email = user.email
         plan_name = plan.name
 
-    metadata = {"local_payment_id": payment_id, "user_id": user_id, "plan_id": plan_id}
+    metadata = {
+        "local_payment_id": payment_id,
+        "user_id": user_id,
+        "plan_id": plan_id,
+        "package_id": "",
+    }
     try:
         provider_payload = provider.create_payment(
             amount_minor=amount_minor,
             currency=currency,
-            description=f"YT Loader — тариф {plan_name}",
+            description=f"All As Planned — тариф {plan_name}",
             idempotency_key=idempotency_key,
             metadata=metadata,
             return_url=f"{return_url_base}/?payment={payment_id}",
@@ -367,6 +426,123 @@ def create_checkout_payment(
         apply_verified_payment(db, stored, provider_payload)
         result = payment_payload(stored)
     return result
+
+
+def create_credit_package_payment(
+    session_factory: Callable[[], Session],
+    provider: PaymentProvider,
+    user_id: str,
+    package_id: str,
+    *,
+    legal_version: str,
+) -> dict[str, object]:
+    if not provider.configured:
+        raise PaymentNotConfiguredError("ЮKassa пока не настроена администратором.")
+    return_url_base = public_base_url()
+    package = _credit_package(package_id)
+    if package is None:
+        raise PaymentValidationError("Пакет кредитов недоступен для оплаты.")
+    now = utc_now()
+    with session_factory() as db, db.begin():
+        user = db.scalar(select(User).where(User.id == user_id).with_for_update())
+        if user is None:
+            raise PaymentValidationError("Пользователь не найден.")
+        active_subscription = db.scalar(
+            select(Subscription).where(
+                Subscription.user_id == user_id,
+                Subscription.status == "active",
+                Subscription.current_period_end > now,
+            )
+        )
+        if active_subscription is None:
+            raise PaymentValidationError(
+                "Дополнительные кредиты доступны только при активной платной подписке."
+            )
+        recent_payments = db.scalars(
+            select(Payment)
+            .where(
+                Payment.user_id == user_id,
+                Payment.plan_id.is_(None),
+                Payment.status.in_(["creating", "pending"]),
+                Payment.created_at >= now - timedelta(minutes=30),
+            )
+            .order_by(Payment.created_at.desc())
+        ).all()
+        existing = next(
+            (
+                item
+                for item in recent_payments
+                if dict(item.details or {}).get("package_id") == package_id
+            ),
+            None,
+        )
+        if existing:
+            if existing.status == "creating" and not existing.confirmation_url:
+                raise PaymentInProgressError("Платёж уже создаётся. Повтори запрос через несколько секунд.")
+            return payment_payload(existing)
+        payment = Payment(
+            id=str(uuid.uuid4()),
+            user_id=user_id,
+            plan_id=None,
+            provider="yookassa",
+            idempotency_key=f"credit-package:{uuid.uuid4()}",
+            status="creating",
+            amount_minor=int(package["price_minor"]),
+            currency=str(package["currency"]),
+            credits=int(package["credits"]),
+            details={
+                "purchase_type": "credit_package",
+                "package_id": package_id,
+                "package_name": str(package["name"]),
+            },
+            offer_accepted_at=now,
+            recurring_consent_at=None,
+            legal_version=legal_version[:40],
+        )
+        db.add(payment)
+        db.flush()
+        payment_id = payment.id
+        idempotency_key = payment.idempotency_key
+        email = user.email
+
+    metadata = {
+        "local_payment_id": payment_id,
+        "user_id": user_id,
+        "plan_id": "",
+        "package_id": package_id,
+    }
+    try:
+        provider_payload = provider.create_payment(
+            amount_minor=int(package["price_minor"]),
+            currency=str(package["currency"]),
+            description=f"All As Planned — {package['name']}, {package['credits']} кредитов",
+            idempotency_key=idempotency_key,
+            metadata=metadata,
+            return_url=f"{return_url_base}/?payment={payment_id}",
+            customer_email=email,
+            save_payment_method=False,
+        )
+    except Exception as exc:
+        with session_factory() as db, db.begin():
+            failed = db.get(Payment, payment_id)
+            if failed:
+                failed.status = "error"
+                failed.failure_reason = str(exc)[:1000]
+        raise
+
+    with session_factory() as db, db.begin():
+        stored = db.scalar(select(Payment).where(Payment.id == payment_id).with_for_update())
+        _validate_provider_payment(stored, provider_payload)
+        stored.provider_payment_id = str(provider_payload["id"])
+        confirmation = provider_payload.get("confirmation")
+        confirmation_url = (
+            str(dict(confirmation).get("confirmation_url") or "")
+            if isinstance(confirmation, dict)
+            else None
+        ) or None
+        stored.confirmation_url = validate_confirmation_url(confirmation_url)
+        apply_verified_payment(db, stored, provider_payload)
+        return payment_payload(stored)
 
 
 def process_webhook(
@@ -604,12 +780,13 @@ class SubscriptionRenewalWorker:
             "local_payment_id": payment_id,
             "user_id": renewal_user_id,
             "plan_id": renewal_plan_id,
+            "package_id": "",
         }
         try:
             provider_payload = provider.create_payment(
                 amount_minor=amount_minor,
                 currency=currency,
-                description=f"YT Loader — продление {plan_name}",
+                description=f"All As Planned — продление {plan_name}",
                 idempotency_key=idempotency_key,
                 metadata=metadata,
                 payment_method_id=method_id,

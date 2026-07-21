@@ -376,7 +376,7 @@
           <div class="ai-card-title"><span>▧</span><div><h3>Изображение</h3><p>Квадрат, вертикаль или горизонталь</p></div></div>
           <label><span>Описание изображения</span><textarea id="ai-image-prompt" rows="7" maxlength="8000" required placeholder="Опишите сюжет, композицию, стиль и надписи…"></textarea></label>
           <label><span>Формат</span><select id="ai-image-size"><option value="1024x1024">Квадрат 1:1</option><option value="1024x1536">Вертикальный 2:3</option><option value="1536x1024">Горизонтальный 3:2</option></select></label>
-          <button class="primary" type="submit">Создать · 5 кредитов</button>
+          <button class="primary" type="submit">Создать · от 3 кредитов</button>
           <div id="ai-image-status" class="status hidden" aria-live="polite"></div>
           <div id="ai-image-result" class="ai-image-result hidden"><img alt="Сгенерированное изображение" decoding="async"><div><a class="primary" href="#">Скачать PNG</a><button class="ghost" type="button" data-save-ai="image">Сохранить в проект</button></div></div>
         </form>
@@ -406,6 +406,12 @@
       <div id="billing-limits" class="billing-limits" aria-live="polite"></div>
       <div id="billing-plans" class="plan-grid" aria-live="polite"></div>
       <button id="billing-subscription-action" class="ghost hidden" type="button" aria-label="Управление подпиской"></button>
+      <section class="credit-packages-section">
+        <div class="credit-packages-heading">
+          <div><h3>Дополнительные кредиты</h3><p>Разовая покупка без подписки и автопродления. Кредиты не сгорают, пока действует аккаунт.</p></div>
+        </div>
+        <div id="billing-credit-packages" class="credit-package-grid" aria-live="polite"></div>
+      </section>
       <details class="credit-rates-box">
         <summary>Как расходуются кредиты</summary>
         <div id="billing-credit-rates" class="credit-rates-list" aria-live="polite"></div>
@@ -729,14 +735,14 @@
   </dialog>
   <dialog id="checkout-dialog" class="account-dialog checkout-dialog">
     <form id="checkout-confirm-form">
-      <p class="eyebrow">Подтверждение подписки</p>
+      <p id="checkout-dialog-eyebrow" class="eyebrow">Подтверждение подписки</p>
       <h2 id="checkout-dialog-title">Тариф</h2>
       <div class="checkout-total">
         <span>К оплате сейчас</span>
         <strong id="checkout-dialog-price">—</strong>
-        <small>Далее — та же сумма каждый месяц</small>
+        <small id="checkout-dialog-renewal">Далее — та же сумма каждый месяц</small>
       </div>
-      <p class="checkout-copy">
+      <p id="checkout-dialog-copy" class="checkout-copy">
         После первой оплаты способ оплаты будет сохранён в ЮKassa для ежемесячного
         продления. Автопродление можно отключить в любой момент на странице тарифа;
         доступ сохранится до конца оплаченного периода.
