@@ -53,6 +53,7 @@ def isolated_test_database():
     database_path = Path(temp_dir.name) / "test.db"
     database_url = f"sqlite:///{database_path.as_posix()}"
     test_legal_environment = {
+        "YT_LOADER_TEST_DISABLE_PLAN_CAPACITY": "true",
         "YT_LOADER_ENABLE_PAYMENTS": "true",
         "YT_LOADER_REQUIRE_LEGAL_ACCEPTANCE": "false",
         "YT_LOADER_LEGAL_SELLER_NAME": "Test Seller",

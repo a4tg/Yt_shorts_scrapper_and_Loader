@@ -18,7 +18,7 @@ def test_rollout_is_pinned_backed_up_and_readiness_gated() -> None:
     assert source.index("docker compose build") < source.index("deploy/backup-data.sh")
     assert source.index("deploy/backup-data.sh") < source.index("docker compose up")
     assert "/api/health/ready" in source
-    assert "s4h5i6j7k8l9" in source
+    assert "t5i6j7k8l9m0" in source
     assert "production_smoke.py" in source
     assert "--require-ai" in source
 

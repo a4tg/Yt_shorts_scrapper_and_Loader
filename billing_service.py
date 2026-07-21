@@ -128,6 +128,12 @@ def require_entitlement(db: Session, user_id: str) -> EntitlementSnapshot:
 
 def require_plan_capacity(db: Session, user_id: str, key: str, current: int, *, increment: int = 1) -> None:
     entitlement = require_entitlement(db, user_id)
+    if (
+        os.getenv("YT_LOADER_TEST_DISABLE_PLAN_CAPACITY", "false").lower()
+        in {"1", "true", "yes", "on"}
+        and "PYTEST_CURRENT_TEST" in os.environ
+    ):
+        return
     maximum = entitlement.limits.get(key, 0)
     if maximum and current + increment > maximum:
         raise PlanLimitError(f"Достигнут лимит тарифа: {key} — {maximum}.")

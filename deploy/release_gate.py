@@ -12,7 +12,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_MIGRATION = "s4h5i6j7k8l9"
+EXPECTED_MIGRATION = "t5i6j7k8l9m0"
 
 
 def run(command: list[str], *, env: dict[str, str] | None = None) -> str:

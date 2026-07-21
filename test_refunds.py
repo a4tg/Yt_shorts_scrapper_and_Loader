@@ -172,7 +172,7 @@ def test_admin_full_refund_is_idempotent_reverses_credits_and_cancels_subscripti
         assert payment.refunded_at is not None
         assert refund.status == "succeeded"
         assert subscription.status == "canceled"
-        assert credit_snapshot(db, str(customer["id"])).available == 5
+        assert credit_snapshot(db, str(customer["id"])).available == 20
         assert reversal_count == 1
         assert audit_count == 2
 
@@ -193,7 +193,7 @@ def test_canceled_refund_restores_held_credits(monkeypatch) -> None:
     assert response.status_code == 202
     assert response.json()["status"] == "canceled"
     with server.SessionLocal() as db:
-        assert credit_snapshot(db, str(customer["id"])).available == 205
+        assert credit_snapshot(db, str(customer["id"])).available == 220
         restored = db.scalar(
             select(func.count(CreditLedger.id)).where(
                 CreditLedger.payment_id == payment_id,
@@ -220,7 +220,7 @@ def test_failed_provider_call_can_be_retried_without_second_credit_reversal(
     )
     assert failed.status_code == 502
     with server.SessionLocal() as db:
-        assert credit_snapshot(db, str(customer["id"])).available == 5
+        assert credit_snapshot(db, str(customer["id"])).available == 20
         failed_audit = db.scalar(
             select(func.count(AdminAuditLog.id)).where(
                 AdminAuditLog.action == "payment.refund_failed",

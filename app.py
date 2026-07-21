@@ -512,7 +512,7 @@ def create_logo_variants_batch(
 class DownloaderApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title("YT Loader")
+        self.root.title("All As Planned Desktop")
         self.root.geometry("1050x940")
         self.root.minsize(900, 760)
 

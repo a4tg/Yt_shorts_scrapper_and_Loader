@@ -71,7 +71,7 @@ test "$ready" -eq 1 || fail "readiness did not become healthy within 120 seconds
 
 docker compose exec -T yt-loader \
   alembic current |
-  grep -q 's4h5i6j7k8l9' ||
+  grep -q 't5i6j7k8l9m0' ||
   fail "database is not at the expected Alembic revision"
 
 echo "6/6 Verifying the deployed domain"

@@ -305,9 +305,9 @@ nano .env
 
 ```dotenv
 POSTGRES_PASSWORD=replace-with-url-safe-openssl-value
-YT_LOADER_PUBLIC_BASE_URL=https://shorts.example.com
+YT_LOADER_PUBLIC_BASE_URL=https://allasplanned.ru
 YT_LOADER_SECURE_COOKIES=true
-YT_LOADER_ALLOWED_HOSTS=shorts.example.com,localhost,127.0.0.1
+YT_LOADER_ALLOWED_HOSTS=allasplanned.ru,www.allasplanned.ru,localhost,127.0.0.1
 YT_LOADER_REQUIRE_EMAIL_VERIFICATION=false
 ```
 
@@ -349,7 +349,7 @@ SMTP. Без рабочей почтовой доставки сервис на�
 невозможно подтвердить или восстановить:
 
 ```dotenv
-YT_LOADER_PUBLIC_BASE_URL=https://shorts.example.com
+YT_LOADER_PUBLIC_BASE_URL=https://allasplanned.ru
 YT_LOADER_REQUIRE_EMAIL_VERIFICATION=true
 SMTP_HOST=smtp.example.com
 SMTP_PORT=587
@@ -488,7 +488,7 @@ YT_LOADER_BACKUP_DIR=/var/backups/yt-loader ./deploy/backup-data.sh
 В `.env` на сервере укажи:
 
 ```dotenv
-YT_LOADER_PUBLIC_BASE_URL=https://shorts.example.com
+YT_LOADER_PUBLIC_BASE_URL=https://allasplanned.ru
 YOOKASSA_SHOP_ID=your-shop-id
 YOOKASSA_SECRET_KEY=your-secret-key
 YOOKASSA_WEBHOOK_ENFORCE_IP=true
@@ -506,7 +506,7 @@ docker compose logs -f yt-loader
 В личном кабинете ЮKassa создай webhook на адрес:
 
 ```text
-https://shorts.example.com/api/payments/yookassa/webhook
+https://allasplanned.ru/api/payments/yookassa/webhook
 ```
 
 Подпиши его на события `payment.succeeded` и `payment.canceled`. Nginx принимает этот

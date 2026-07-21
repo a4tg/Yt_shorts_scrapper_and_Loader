@@ -52,7 +52,17 @@ class FakeClient:
                 "enabled": payments_enabled,
                 "legal_ready": True,
             },
-            "/api/billing/plans": [{"code": "creator"}, {"code": "studio"}],
+            "/api/billing/plans": [
+                {"id": "free", "price_minor": 0, "monthly_credits": 20},
+                {"id": "creator", "price_minor": 149000, "monthly_credits": 200},
+                {"id": "studio", "price_minor": 449000, "monthly_credits": 700},
+                {"id": "agency", "price_minor": 999000, "monthly_credits": 1800},
+            ],
+            "/api/payments/credit-packages": [
+                {"id": "credits_100", "price_minor": 89000, "credits": 100},
+                {"id": "credits_500", "price_minor": 349000, "credits": 500},
+                {"id": "credits_1500", "price_minor": 849000, "credits": 1500},
+            ],
         }
 
     def json(self, path: str, **_kwargs):
@@ -74,7 +84,7 @@ def test_production_smoke_covers_complete_commercial_product() -> None:
     )
 
     assert "AI provider and capabilities" in completed
-    assert "YooKassa and commercial plans" in completed
+    assert "YooKassa, commercial plans and credit packages" in completed
     assert len(client.pages) == 6
 
 

@@ -159,8 +159,37 @@ def run_checks(
         _expect(payments.get("enabled") is True, "YooKassa payments are disabled")
         _expect(payments.get("legal_ready") is True, "Payment legal configuration is incomplete")
         plans = client.json("/api/billing/plans")
-        _expect(isinstance(plans, list) and len(plans) >= 2, "Commercial plans are unavailable")
-        completed.append("YooKassa and commercial plans")
+        expected_plans = {
+            "free": (0, 20),
+            "creator": (149_000, 200),
+            "studio": (449_000, 700),
+            "agency": (999_000, 1_800),
+        }
+        actual_plans = {
+            str(item.get("id")): (
+                int(item.get("price_minor", -1)),
+                int(item.get("monthly_credits", -1)),
+            )
+            for item in plans
+            if isinstance(item, dict)
+        }
+        _expect(actual_plans == expected_plans, "Commercial plan catalog is inconsistent")
+        packages = client.json("/api/payments/credit-packages")
+        expected_packages = {
+            "credits_100": (89_000, 100),
+            "credits_500": (349_000, 500),
+            "credits_1500": (849_000, 1_500),
+        }
+        actual_packages = {
+            str(item.get("id")): (
+                int(item.get("price_minor", -1)),
+                int(item.get("credits", -1)),
+            )
+            for item in packages
+            if isinstance(item, dict)
+        }
+        _expect(actual_packages == expected_packages, "Credit package catalog is inconsistent")
+        completed.append("YooKassa, commercial plans and credit packages")
 
     return completed
 

@@ -13,7 +13,7 @@
 - публичные юридические документы и сохранение согласия при регистрации;
 - fail-safe блокировка ЮKassa до заполнения и проверки реквизитов.
 
-Головная миграция Alembic: `s4h5i6j7k8l9`.
+Головная миграция Alembic: `t5i6j7k8l9m0`.
 
 ## Локальная проверка кандидата
 
@@ -70,7 +70,7 @@ curl -fsS https://allasplanned.ru/api/health/ready
 curl -fsS https://allasplanned.ru/api/legal/config
 ```
 
-Ожидается миграция `s4h5i6j7k8l9`, healthy-контейнеры и `status=ok`.
+Ожидается миграция `t5i6j7k8l9m0`, healthy-контейнеры и `status=ok`.
 
 ## Что не включать автоматически
 

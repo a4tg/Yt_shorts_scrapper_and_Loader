@@ -163,7 +163,7 @@ def audit_payments() -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Управление пользователями YT Loader")
+    parser = argparse.ArgumentParser(description="Управление пользователями All As Planned")
     subparsers = parser.add_subparsers(dest="command", required=True)
     create_parser = subparsers.add_parser("create-admin", help="Создать или обновить администратора")
     create_parser.add_argument("--email", required=True)

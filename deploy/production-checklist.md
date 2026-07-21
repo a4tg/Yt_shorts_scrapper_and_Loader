@@ -51,7 +51,7 @@ production.
 ## Workspace Depth V2
 
 - [ ] Перед миграцией создан и проверен свежий снимок PostgreSQL и `server_data`.
-- [ ] Миграция дошла до `s4h5i6j7k8l9`, downgrade отдельно проверен на копии данных.
+- [ ] Миграция дошла до `t5i6j7k8l9m0`, downgrade отдельно проверен на копии данных.
 - [ ] Chat Anywhere работает на desktop/mobile, восстанавливает положение окна и получает realtime-события.
 - [ ] Viewer открывает поддерживаемые изображения, видео, аудио, PDF, тексты и таблицы; неподдерживаемые типы скачиваются безопасно.
 - [ ] Версии, compare, contextual review и client/team visibility проверены двумя аккаунтами.
@@ -118,7 +118,7 @@ unset AAP_SMOKE_EMAIL AAP_SMOKE_PASSWORD
 сессию входа. Она проверяет readiness, регистрацию и восстановление пароля,
 юридические страницы, workspace, AI-возможности, ЮKassa и тарифы.
 
-Ожидаемая ревизия Alembic: `s4h5i6j7k8l9`. Readiness должен вернуть `status`, `database`
+Ожидаемая ревизия Alembic: `t5i6j7k8l9m0`. Readiness должен вернуть `status`, `database`
 и `workers` со значением `ok`.
 
 Для самого первого перехода со старой JSON/Basic Auth версии используй
