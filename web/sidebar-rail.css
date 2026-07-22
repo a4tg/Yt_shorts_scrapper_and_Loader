@@ -1,0 +1,149 @@
+/* Desktop navigation rail: compact at rest, full navigation on approach. */
+@media (min-width: 761px) {
+  .app-shell {
+    grid-template-columns: 78px minmax(0, 1fr);
+  }
+
+  .workspace-sidebar {
+    width: 78px;
+    padding: 20px 10px;
+    overflow: hidden;
+    isolation: isolate;
+    box-shadow: 10px 0 30px rgba(0, 0, 0, 0);
+    transition:
+      width 320ms var(--motion-ease-enter, cubic-bezier(.22, 1, .36, 1)),
+      padding 320ms var(--motion-ease-enter, cubic-bezier(.22, 1, .36, 1)),
+      box-shadow 220ms ease,
+      border-color 220ms ease;
+  }
+
+  .workspace-sidebar:hover,
+  .workspace-sidebar:focus-within {
+    width: 250px;
+    padding: 24px 16px;
+    border-right-color: rgba(126, 109, 239, .38);
+    box-shadow: 22px 0 56px rgba(0, 0, 0, .42);
+  }
+
+  .workspace-brand {
+    min-height: 62px;
+    padding: 0 10px 22px;
+  }
+
+  .workspace-logo {
+    flex: 0 0 38px;
+  }
+
+  .workspace-brand div {
+    min-width: 160px;
+    opacity: 0;
+    translate: -8px 0;
+    transition: opacity 150ms ease, translate 250ms var(--motion-ease-enter, ease);
+  }
+
+  .workspace-sidebar:hover .workspace-brand div,
+  .workspace-sidebar:focus-within .workspace-brand div {
+    display: block;
+    opacity: 1;
+    translate: 0;
+    transition-delay: 70ms;
+  }
+
+  .workspace-switcher {
+    padding: 0 6px 18px;
+  }
+
+  .workspace-switcher label,
+  .workspace-switcher select {
+    display: none;
+  }
+
+  .workspace-switcher > div {
+    display: block;
+  }
+
+  .workspace-switcher button {
+    width: 100%;
+    height: 34px;
+  }
+
+  .workspace-sidebar:hover .workspace-switcher label,
+  .workspace-sidebar:focus-within .workspace-switcher label {
+    display: block;
+  }
+
+  .workspace-sidebar:hover .workspace-switcher > div,
+  .workspace-sidebar:focus-within .workspace-switcher > div {
+    display: grid;
+  }
+
+  .workspace-sidebar:hover .workspace-switcher select,
+  .workspace-sidebar:focus-within .workspace-switcher select {
+    display: block;
+  }
+
+  .workspace-sidebar:hover .workspace-switcher button,
+  .workspace-sidebar:focus-within .workspace-switcher button {
+    width: auto;
+  }
+
+  .workspace-nav-item {
+    min-height: 42px;
+    justify-content: center;
+    gap: 0;
+    padding: 10px;
+    overflow: hidden;
+    white-space: nowrap;
+    font-size: 0;
+    transition:
+      color var(--motion-duration-fast, 160ms) ease,
+      border-color var(--motion-duration-fast, 160ms) ease,
+      background var(--motion-duration-fast, 160ms) ease,
+      translate var(--motion-duration-fast, 160ms) var(--motion-ease-enter, ease),
+      padding 260ms var(--motion-ease-enter, ease),
+      gap 260ms var(--motion-ease-enter, ease);
+  }
+
+  .workspace-nav-item span {
+    flex: 0 0 24px;
+    width: 24px;
+    font-size: 18px;
+  }
+
+  .workspace-sidebar:hover .workspace-nav-item,
+  .workspace-sidebar:focus-within .workspace-nav-item {
+    justify-content: flex-start;
+    gap: 12px;
+    padding: 10px 12px;
+    font-size: 12px;
+  }
+
+  .workspace-nav-bottom {
+    padding-top: 14px;
+  }
+
+  .workspace-sidebar::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 1px;
+    background: linear-gradient(180deg, transparent, rgba(139, 123, 242, .42), transparent);
+    opacity: .45;
+    pointer-events: none;
+  }
+
+  .workspace-sidebar:hover::after,
+  .workspace-sidebar:focus-within::after {
+    opacity: 1;
+  }
+}
+
+@media (min-width: 761px) and (prefers-reduced-motion: reduce) {
+  .workspace-sidebar,
+  .workspace-brand div,
+  .workspace-nav-item {
+    transition: none;
+  }
+}

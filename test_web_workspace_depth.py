@@ -31,6 +31,17 @@ class WorkspaceDepthFoundationTests(unittest.TestCase):
         self.assertIn("buildWorkspaceHash", router)
         self.assertIn("route:change", router)
 
+    def test_desktop_sidebar_uses_hover_and_keyboard_navigation_rail(self) -> None:
+        html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
+        styles = (ROOT / "web" / "sidebar-rail.css").read_text(encoding="utf-8")
+        self.assertIn('href="/assets/sidebar-rail.css"', html)
+        self.assertIn("@media (min-width: 761px)", styles)
+        self.assertIn(".workspace-sidebar:hover", styles)
+        self.assertIn(".workspace-sidebar:focus-within", styles)
+        self.assertIn("grid-template-columns: 78px minmax(0, 1fr)", styles)
+        self.assertIn("width: 250px", styles)
+        self.assertIn("prefers-reduced-motion: reduce", styles)
+
     def test_project_graph_and_flowchart_editor_are_wired_as_workspace_module(self) -> None:
         html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
         entrypoint = (ROOT / "web" / "workspace-depth.js").read_text(encoding="utf-8")
