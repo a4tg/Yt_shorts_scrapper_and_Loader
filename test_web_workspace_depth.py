@@ -37,6 +37,7 @@ class WorkspaceDepthFoundationTests(unittest.TestCase):
         script = (ROOT / "web" / "modules" / "project-graph.js").read_text(encoding="utf-8")
         styles = (ROOT / "web" / "project-graph.css").read_text(encoding="utf-8")
         editor_styles = (ROOT / "web" / "project-graph-editor.css").read_text(encoding="utf-8")
+        polish_styles = (ROOT / "web" / "project-graph-polish.css").read_text(encoding="utf-8")
         for marker in (
             'data-page="graph"',
             'id="project-graph-viewport"',
@@ -44,6 +45,10 @@ class WorkspaceDepthFoundationTests(unittest.TestCase):
             'data-node-kind="decision"',
             'data-graph-action="add"',
             'id="project-graph-history-dialog"',
+            'href="/assets/project-graph-polish.css"',
+            'id="project-graph-summary"',
+            'data-graph-action="zoom-in"',
+            'data-graph-action="zoom-out"',
         ):
             self.assertIn(marker, html)
         self.assertIn("registerModule('project-graph'", entrypoint)
@@ -58,11 +63,15 @@ class WorkspaceDepthFoundationTests(unittest.TestCase):
         self.assertIn("const projectChanged = projectId !== state.projectId", script)
         self.assertIn("new MutationObserver", script)
         self.assertIn("state.projectId || context?.project?.id", script)
+        self.assertIn("GRAPH_LAYOUT_VERSION = 3", script)
+        self.assertIn("visibleGraphNodes", script)
         for selector in (".project-graph-node", ".project-diagram-node", ".project-diagram-edge", ".project-graph-minimap"):
             self.assertIn(selector, styles)
         self.assertIn(".project-diagram-edge-list", editor_styles)
         self.assertIn(".project-graph-custom-form", editor_styles)
         self.assertIn(".graph-history-dialog", editor_styles)
+        self.assertIn(".project-graph-toolbar-secondary", polish_styles)
+        self.assertIn(".has-graph-selection .project-graph-inspector", polish_styles)
 
     def test_decision_intelligence_attention_center_is_wired(self) -> None:
         html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")

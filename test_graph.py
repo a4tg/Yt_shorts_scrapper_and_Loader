@@ -169,7 +169,7 @@ def test_collaborative_graph_state_custom_nodes_history_and_conflicts() -> None:
     add_member(owner, workspace["id"], client_user, "client")
     payload = {
         "revision": 0,
-        "viewport": {"x": 120, "y": 80, "zoom": 0.8},
+        "viewport": {"x": 120, "y": 80, "zoom": 0.8, "layout_version": 3},
         "positions": {
             f"project:{project['id']}": {"x": 900, "y": 620},
         },
@@ -208,6 +208,7 @@ def test_collaborative_graph_state_custom_nodes_history_and_conflicts() -> None:
     owner_graph = owner.get(f"/api/projects/{project['id']}/graph").json()
     owner_nodes = {node["id"]: node for node in owner_graph["nodes"]}
     assert owner_graph["viewport"]["zoom"] == 0.8
+    assert owner_graph["viewport"]["layout_version"] == 3
     assert owner_nodes[f"project:{project['id']}"]["x"] == 900
     assert owner_nodes["custom:launch-risk"]["extra"]["description"] == "Проверить оплату до запуска"
     assert any(edge["relation"] == "linked_to" for edge in owner_graph["edges"])

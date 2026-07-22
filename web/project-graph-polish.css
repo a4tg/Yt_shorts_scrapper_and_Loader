@@ -1,0 +1,370 @@
+/* Project map v2: compact controls, readable entities and a canvas-first layout. */
+.project-graph-map-view {
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 680px;
+}
+
+.project-graph-toolbar {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  background:
+    linear-gradient(180deg, rgba(19, 32, 47, .98), rgba(13, 24, 36, .98));
+}
+
+.project-graph-toolbar-primary,
+.project-graph-toolbar-secondary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.project-graph-search {
+  flex: 1 1 320px;
+  max-width: 460px;
+}
+
+.project-graph-search input {
+  min-height: 40px;
+  padding-inline: 38px 12px;
+  border-color: #344b65;
+  border-radius: 11px;
+  background:
+    linear-gradient(90deg, transparent 0 36px, rgba(73, 96, 123, .35) 36px 37px, transparent 37px),
+    #0a1520;
+  font-size: 13px;
+}
+
+.project-graph-search::before {
+  content: "⌕";
+  position: absolute;
+  z-index: 1;
+  margin: 9px 0 0 12px;
+  color: #8297af;
+  font-size: 18px;
+  pointer-events: none;
+}
+
+.project-graph-toolbar-actions,
+.project-graph-zoom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.project-graph-toolbar-actions button,
+.project-graph-zoom button {
+  min-height: 36px;
+  padding: 7px 11px;
+  border: 1px solid #334a63;
+  border-radius: 9px;
+  background: #162638;
+  color: #b5c5d7;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.project-graph-toolbar-actions button:hover,
+.project-graph-zoom button:hover {
+  border-color: #617a98;
+  background: #1d3046;
+  color: #eef4fc;
+  transform: translateY(-1px);
+}
+
+.project-graph-toolbar-actions .primary {
+  border-color: rgba(128, 109, 237, .72);
+  background: linear-gradient(135deg, #765fe1, #5f6de2);
+  color: #fff;
+  box-shadow: 0 8px 22px rgba(91, 83, 215, .2);
+}
+
+.project-graph-toolbar-secondary {
+  padding-top: 10px;
+  border-top: 1px solid rgba(61, 82, 106, .55);
+}
+
+.project-graph-filters {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: 6px;
+  overflow: visible;
+}
+
+.project-graph-filters button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  padding: 5px 9px;
+  border: 1px solid #263a50;
+  border-radius: 999px;
+  background: rgba(15, 28, 42, .7);
+  color: #71869e;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.project-graph-filters button.active {
+  border-color: #49627f;
+  background: #21344a;
+  color: #d3deeb;
+}
+
+.project-graph-filters button b {
+  display: grid;
+  min-width: 19px;
+  height: 19px;
+  place-items: center;
+  padding-inline: 4px;
+  border-radius: 99px;
+  background: rgba(124, 107, 232, .16);
+  color: #a99af7;
+  font-size: 10px;
+}
+
+.project-graph-zoom {
+  flex: 0 0 auto;
+  color: #879ab0;
+}
+
+.project-graph-zoom > span {
+  margin-right: 4px;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.project-graph-zoom button:first-of-type,
+.project-graph-zoom button:last-of-type {
+  width: 32px;
+  padding: 0;
+  font-size: 18px;
+}
+
+.project-graph-zoom output {
+  width: 42px;
+  color: #9fb1c6;
+  font-size: 11px;
+  text-align: right;
+}
+
+.project-graph-body {
+  position: relative;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.project-graph-viewport {
+  background-color: #07111b;
+  background-image:
+    radial-gradient(circle at 50% 45%, rgba(75, 83, 178, .09), transparent 45%),
+    radial-gradient(circle, #263b52 1px, transparent 1px);
+  background-size: 100% 100%, 24px 24px;
+}
+
+.project-graph-viewport::after {
+  content: "Колесо мыши — масштаб · перетаскивание фона — навигация";
+  position: absolute;
+  left: 14px;
+  bottom: 12px;
+  padding: 6px 9px;
+  border: 1px solid rgba(52, 74, 99, .5);
+  border-radius: 8px;
+  background: rgba(7, 17, 27, .78);
+  color: #60778f;
+  font-size: 10px;
+  pointer-events: none;
+}
+
+.project-graph-node {
+  width: 210px;
+  min-height: 82px;
+  height: 82px;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 11px;
+  padding: 11px;
+  border-color: #344b64;
+  border-radius: 14px;
+  background: linear-gradient(145deg, rgba(25, 42, 60, .98), rgba(14, 27, 40, .98));
+  box-shadow: 0 12px 30px rgba(0, 0, 0, .28), inset 0 1px rgba(255, 255, 255, .025);
+  transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease, opacity .16s ease;
+}
+
+.project-graph-node.filtered {
+  display: none;
+}
+
+.project-graph-node:hover {
+  border-color: #7189a6;
+  box-shadow: 0 15px 34px rgba(0, 0, 0, .36), 0 0 0 1px rgba(133, 153, 180, .12);
+}
+
+.project-graph-node.selected {
+  border-color: #9886ff;
+  box-shadow: 0 0 0 3px rgba(145, 125, 243, .17), 0 18px 42px rgba(0, 0, 0, .4);
+}
+
+.project-graph-node > span:first-child {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  font-size: 11px;
+}
+
+.project-graph-node strong {
+  display: -webkit-box;
+  overflow: hidden;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.project-graph-node small {
+  margin-top: 5px;
+  font-size: 10px;
+}
+
+.project-graph-node i {
+  margin-top: 4px;
+  font-size: 9px;
+}
+
+.project-graph-edge path {
+  stroke: #31475f;
+  stroke-width: 1.35;
+  opacity: .55;
+}
+
+.project-graph-edge.active path {
+  stroke: #796be0;
+  stroke-width: 2.2;
+  opacity: .95;
+  filter: drop-shadow(0 0 4px rgba(121, 107, 224, .45));
+}
+
+.project-graph-edge text {
+  paint-order: stroke;
+  stroke: #07111b;
+  stroke-width: 5px;
+  fill: #9a8df0;
+  font-size: 10px;
+  text-transform: none;
+}
+
+.project-graph-minimap {
+  right: 12px;
+  bottom: 12px;
+  width: 112px;
+  height: 68px;
+  border-color: rgba(61, 83, 108, .65);
+  background: rgba(8, 18, 28, .84);
+}
+
+.project-graph-inspector {
+  display: none;
+  position: absolute;
+  z-index: 5;
+  top: 12px;
+  right: 12px;
+  bottom: 12px;
+  width: 320px;
+  padding: 16px;
+  border: 1px solid #344a63;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #101c29, #0b1621);
+  box-shadow: 0 20px 54px rgba(0, 0, 0, .46);
+}
+
+.has-graph-selection .project-graph-inspector {
+  display: block;
+  animation: graph-inspector-in .2s ease both;
+}
+
+.has-graph-selection .project-graph-minimap {
+  right: 344px;
+}
+
+.project-graph-inspector > header {
+  grid-template-columns: 46px minmax(0, 1fr) 32px;
+}
+
+.project-graph-inspector > header > span {
+  width: 46px;
+  height: 46px;
+}
+
+.project-graph-inspector > header small,
+.project-graph-inspector dt,
+.project-graph-inspector dd,
+.project-graph-inspector > section > strong,
+.project-graph-inspector > section > button span,
+.project-graph-inspector > section > button b {
+  font-size: 11px;
+}
+
+.project-graph-inspector > header strong {
+  margin-top: 4px;
+  font-size: 13px;
+}
+
+.project-graph-inspector-close {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid #344a63;
+  border-radius: 8px;
+  background: #152438;
+  color: #9fb1c6;
+  font-size: 19px;
+}
+
+.project-graph-inspector > section > button {
+  align-items: center;
+  padding: 9px;
+}
+
+@keyframes graph-inspector-in {
+  from { opacity: 0; transform: translateX(12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@media (max-width: 1050px) {
+  .project-graph-toolbar-primary,
+  .project-graph-toolbar-secondary { align-items: stretch; flex-wrap: wrap; }
+  .project-graph-search { max-width: none; }
+  .project-graph-toolbar-actions { margin-left: 0; }
+  .project-graph-zoom { width: 100%; margin-left: 0; }
+}
+
+@media (max-width: 760px) {
+  .project-graph-map-view { min-height: 620px; }
+  .project-graph-toolbar { padding: 10px; }
+  .project-graph-toolbar-primary,
+  .project-graph-toolbar-secondary { display: grid; grid-template-columns: 1fr; }
+  .project-graph-toolbar-actions { width: 100%; overflow-x: auto; }
+  .project-graph-toolbar-actions button { flex: 0 0 auto; }
+  .project-graph-zoom > span { margin-right: auto; }
+  .project-graph-inspector { display: none; }
+  .has-graph-selection .project-graph-inspector {
+    display: block;
+    position: absolute;
+    right: 8px;
+    bottom: 8px;
+    top: auto;
+    width: min(320px, calc(100% - 16px));
+    max-height: 58%;
+  }
+  .project-graph-node { width: 194px; }
+  .has-graph-selection .project-graph-minimap { right: 12px; }
+  .project-graph-viewport::after { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .project-graph-body,
+  .project-graph-node,
+  .has-graph-selection .project-graph-inspector { transition: none; animation: none; }
+}

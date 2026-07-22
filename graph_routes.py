@@ -88,6 +88,7 @@ class GraphViewport(BaseModel):
     x: float = Field(ge=-100_000, le=100_000)
     y: float = Field(ge=-100_000, le=100_000)
     zoom: float = Field(ge=0.2, le=2.5)
+    layout_version: int = Field(default=1, ge=1, le=100)
 
 
 class CustomGraphNodeInput(BaseModel):

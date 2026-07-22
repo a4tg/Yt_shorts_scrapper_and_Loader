@@ -1,7 +1,11 @@
 const WORLD_WIDTH = 2200;
 const WORLD_HEIGHT = 1500;
+const GRAPH_CARD_WIDTH = 210;
+const GRAPH_CARD_HEIGHT = 82;
+const GRAPH_LAYOUT_VERSION = 3;
 const TYPE_LABELS = { project: 'Проект', content: 'Контент', asset: 'Файлы', conversation: 'Чаты', review: 'Замечания', insight: 'Решения и риски', user: 'Команда', diagram: 'Схемы', custom: 'Свои узлы' };
 const TYPE_ICONS = { project: 'AAP', content: '▤', asset: '◇', conversation: '◌', review: '!', insight: '◆', user: '●', diagram: '⌘', custom: '✦' };
+const RELATION_LABELS = { has_asset: 'содержит файл', contains: 'содержит', linked_to: 'связано с', relates_to: 'связано с', discussed_in: 'обсуждается', member_of: 'участник', depends_on: 'зависит от', blocks: 'блокирует', produces: 'создаёт', references: 'ссылается', assigned_to: 'назначено' };
 
 function node(tag, className, text) {
   const value = document.createElement(tag); if (className) value.className = className;
@@ -29,7 +33,7 @@ export function initProjectGraph({ bus, bridge }) {
   const diagramForm = root.querySelector('.project-diagram-node-form');
   const state = {
     context: bridge.getContext?.() || {}, projectId: null, graph: { nodes: [], edges: [] },
-    mapTransform: { x: 0, y: 0, zoom: 1 }, selectedGraphId: null, linkSource: null, linkTarget: null,
+    mapTransform: { x: 0, y: 0, zoom: 1, layout_version: GRAPH_LAYOUT_VERSION }, selectedGraphId: null, linkSource: null, linkTarget: null,
     filters: new Set(Object.keys(TYPE_LABELS)), source: null, refreshTimer: null,
     diagrams: [], diagram: null, selectedNodeKey: null, diagramTransform: { x: 0, y: 0, zoom: 1 },
     history: [], future: [], dirty: false, saveTimer: null, connectSource: null,
@@ -37,7 +41,10 @@ export function initProjectGraph({ bus, bridge }) {
   };
 
   function showError(error) { bridge.notify?.(error?.message || 'Не удалось обновить карту.', 'error'); }
-  function applyTransform(world, transform) { world.style.transform = `translate(${transform.x}px,${transform.y}px) scale(${transform.zoom})`; }
+  function applyTransform(world, transform) {
+    world.style.transform = `translate(${transform.x}px,${transform.y}px) scale(${transform.zoom})`;
+    if (world === graphWorld) root.querySelector('#project-graph-zoom-value').value = `${Math.round(transform.zoom * 100)}%`;
+  }
   function syncGraphPermissions() {
     root.querySelectorAll('[data-graph-action="add"],[data-graph-action="link"]').forEach((button) => {
       button.classList.toggle('hidden', !editable(state.context));
@@ -47,20 +54,25 @@ export function initProjectGraph({ bus, bridge }) {
   function layoutGraph(useSaved = true) {
     const groups = {};
     for (const item of state.graph.nodes) (groups[item.entity_type] ||= []).push(item);
-    const columns = { user: 80, content: 360, diagram: 700, project: 950, asset: 1130, review: 1500, conversation: 1780 };
-    columns.insight = 1650;
-    for (const [type, items] of Object.entries(groups)) {
-      if (type === 'project') { items[0]._x = 970; items[0]._y = 690; continue; }
-      if (type === 'custom') {
-        items.forEach((item, index) => {
-          item._x = useSaved ? Number(item.x ?? 1020) : 760 + (index % 4) * 190;
-          item._y = useSaved ? Number(item.y ?? 180) : 170 + Math.floor(index / 4) * 120;
-        });
-        continue;
-      }
-      const x = columns[type] || 1100; const spacing = Math.min(135, 1080 / Math.max(1, items.length));
-      items.forEach((item, index) => { item._x = x + (index % 2) * 85; item._y = 170 + index * spacing; });
-    }
+    const lanes = [
+      ['project', 'custom'],
+      ['content', 'diagram'],
+      ['asset', 'review'],
+      ['conversation', 'insight', 'user'],
+    ].map((types) => types.flatMap((type) => (groups[type] || []).sort((a, b) => String(a.label || '').localeCompare(String(b.label || ''), 'ru'))));
+    const tallest = Math.max(1, ...lanes.map((items) => items.length));
+    const centerY = Math.max(380, 110 + (Math.min(tallest, 9) - 1) * 58);
+    lanes.forEach((items, lane) => {
+      const x = 110 + lane * 285;
+      const spacing = 104;
+      const startY = centerY - ((Math.min(items.length, 9) - 1) * spacing) / 2;
+      items.forEach((item, index) => {
+        const column = Math.floor(index / 9);
+        const row = index % 9;
+        item._x = x + column * 230;
+        item._y = startY + row * spacing;
+      });
+    });
     const saved = state.graph.positions || {};
     if (useSaved) for (const item of state.graph.nodes) {
       if (saved[item.id]) { item._x = Number(saved[item.id].x); item._y = Number(saved[item.id].y); }
@@ -71,7 +83,7 @@ export function initProjectGraph({ bus, bridge }) {
   function graphStatePayload() {
     return {
       revision: Number(state.graph.revision || 0),
-      viewport: { ...state.mapTransform },
+      viewport: { x: state.mapTransform.x, y: state.mapTransform.y, zoom: state.mapTransform.zoom, layout_version: GRAPH_LAYOUT_VERSION },
       positions: Object.fromEntries(state.graph.nodes.map((item) => [
         item.id, { x: Number(item._x || 0), y: Number(item._y || 0) }
       ])),
@@ -129,46 +141,70 @@ export function initProjectGraph({ bus, bridge }) {
   }
 
   function edgePath(source, target) {
-    const sx = source._x + 78, sy = source._y + 31, tx = target._x + 78, ty = target._y + 31;
+    const sx = source._x + GRAPH_CARD_WIDTH / 2, sy = source._y + GRAPH_CARD_HEIGHT / 2;
+    const tx = target._x + GRAPH_CARD_WIDTH / 2, ty = target._y + GRAPH_CARD_HEIGHT / 2;
     const bend = Math.max(70, Math.abs(tx - sx) * .45);
     return `M ${sx} ${sy} C ${sx + (tx >= sx ? bend : -bend)} ${sy}, ${tx - (tx >= sx ? bend : -bend)} ${ty}, ${tx} ${ty}`;
   }
 
   function renderGraphEdges() {
     graphEdges.replaceChildren(); graphEdges.setAttribute('viewBox', `0 0 ${WORLD_WIDTH} ${WORLD_HEIGHT}`);
+    const visible = new Set(visibleGraphNodes().map((item) => item.id));
     const byId = new Map(state.graph.nodes.map((item) => [item.id, item]));
     const defs = svg('defs'); const marker = svg('marker', { id: 'graph-arrow', markerWidth: 8, markerHeight: 8, refX: 7, refY: 4, orient: 'auto' }); marker.append(svg('path', { d: 'M0,0 L8,4 L0,8 Z' })); defs.append(marker); graphEdges.append(defs);
     for (const edge of state.graph.edges) {
-      const source = byId.get(edge.source), target = byId.get(edge.target); if (!source || !target) continue;
-      const group = svg('g', { class: `project-graph-edge${edge.manual ? ' manual' : ''}`, 'data-edge-id': edge.id });
+      const source = byId.get(edge.source), target = byId.get(edge.target); if (!source || !target || !visible.has(source.id) || !visible.has(target.id)) continue;
+      const active = state.selectedGraphId && (edge.source === state.selectedGraphId || edge.target === state.selectedGraphId);
+      const group = svg('g', { class: `project-graph-edge${edge.manual ? ' manual' : ''}${active ? ' active' : ''}`, 'data-edge-id': edge.id });
       const path = svg('path', { d: edgePath(source, target), 'marker-end': 'url(#graph-arrow)' }); group.append(path);
-      if (edge.label || edge.relation) { const x = (source._x + target._x) / 2 + 78, y = (source._y + target._y) / 2 + 25; const label = svg('text', { x, y }); label.textContent = edge.label || edge.relation.replaceAll('_', ' '); group.append(label); }
+      if (edge.manual || active) { const x = (source._x + target._x) / 2 + GRAPH_CARD_WIDTH / 2, y = (source._y + target._y) / 2 + GRAPH_CARD_HEIGHT / 2 - 10; const label = svg('text', { x, y }); label.textContent = edge.label || RELATION_LABELS[edge.relation] || edge.relation?.replaceAll('_', ' '); group.append(label); }
       graphEdges.append(group);
     }
   }
 
   function renderMinimap() {
     const minimap = graphViewport.querySelector('.project-graph-minimap'); minimap.replaceChildren();
-    for (const item of state.graph.nodes) { const dot = node('i', item.entity_type); dot.style.left = `${(item._x / WORLD_WIDTH) * 100}%`; dot.style.top = `${(item._y / WORLD_HEIGHT) * 100}%`; minimap.append(dot); }
+    const items = visibleGraphNodes();
+    const limits = graphLimits(items, 20);
+    for (const item of items) { const dot = node('i', item.entity_type); dot.style.left = `${((item._x - limits.minX) / limits.width) * 100}%`; dot.style.top = `${((item._y - limits.minY) / limits.height) * 100}%`; minimap.append(dot); }
+  }
+
+  function graphQuery() { return root.querySelector('#project-graph-search').value.trim().toLocaleLowerCase('ru-RU'); }
+  function graphNodeVisible(item, query = graphQuery()) {
+    return Boolean(item) && state.filters.has(item.entity_type) && (!query || `${item.label} ${item.subtitle || ''}`.toLocaleLowerCase('ru-RU').includes(query));
+  }
+  function visibleGraphNodes() { const query = graphQuery(); return state.graph.nodes.filter((item) => graphNodeVisible(item, query)); }
+  function graphLimits(items, padding = 0) {
+    if (!items.length) return { minX: 0, minY: 0, maxX: WORLD_WIDTH, maxY: WORLD_HEIGHT, width: WORLD_WIDTH, height: WORLD_HEIGHT };
+    const minX = Math.min(...items.map((item) => item._x)) - padding;
+    const minY = Math.min(...items.map((item) => item._y)) - padding;
+    const maxX = Math.max(...items.map((item) => item._x + GRAPH_CARD_WIDTH)) + padding;
+    const maxY = Math.max(...items.map((item) => item._y + GRAPH_CARD_HEIGHT)) + padding;
+    return { minX, minY, maxX, maxY, width: Math.max(1, maxX - minX), height: Math.max(1, maxY - minY) };
   }
 
   function renderGraph() {
-    graphNodes.replaceChildren(); const query = root.querySelector('#project-graph-search').value.trim().toLocaleLowerCase('ru-RU');
+    graphNodes.replaceChildren(); const query = graphQuery();
     for (const item of state.graph.nodes) {
       if (item._x === undefined) { item._x = WORLD_WIDTH / 2 + Number(item.x || 0); item._y = WORLD_HEIGHT / 2 + Number(item.y || 0); }
-      const visible = state.filters.has(item.entity_type) && (!query || `${item.label} ${item.subtitle}`.toLocaleLowerCase('ru-RU').includes(query));
-      const card = node('button', `project-graph-node ${item.entity_type}${item.id === state.selectedGraphId ? ' selected' : ''}${visible ? '' : ' filtered'}`); card.type = 'button'; card.dataset.graphNodeId = item.id; card.style.transform = `translate(${item._x}px,${item._y}px)`;
+      const visible = graphNodeVisible(item, query);
+      const card = node('button', `project-graph-node ${item.entity_type}${item.id === state.selectedGraphId ? ' selected' : ''}${visible ? '' : ' filtered'}`); card.type = 'button'; card.dataset.graphNodeId = item.id; card.style.transform = `translate(${item._x}px,${item._y}px)`; card.title = item.label;
       if (item.entity_type === 'custom') card.style.setProperty('--graph-node-color', item.extra?.color || '#6f61d9');
       const icon = node('span', '', TYPE_ICONS[item.entity_type] || '•'); const copy = node('span'); copy.append(node('strong', '', item.label), node('small', '', item.subtitle || TYPE_LABELS[item.entity_type] || item.entity_type));
       if (item.status) copy.append(node('i', '', item.status)); card.append(icon, copy); graphNodes.append(card);
     }
+    const visibleCount = visibleGraphNodes().length;
+    root.querySelector('#project-graph-summary').textContent = `${visibleCount} из ${state.graph.nodes.length} узлов`;
     renderGraphEdges(); renderMinimap();
   }
 
   function renderGraphFilters() {
     const filters = root.querySelector('#project-graph-filters'); filters.replaceChildren();
     for (const [type, label] of Object.entries(TYPE_LABELS)) {
-      const button = node('button', state.filters.has(type) ? 'active' : '', label); button.type = 'button'; button.dataset.graphFilter = type; filters.append(button);
+      const count = state.graph.nodes.filter((item) => item.entity_type === type).length;
+      if (!count) continue;
+      const button = node('button', state.filters.has(type) ? 'active' : ''); button.type = 'button'; button.dataset.graphFilter = type;
+      button.append(node('span', '', label), node('b', '', String(count))); filters.append(button);
     }
   }
 
@@ -218,9 +254,11 @@ export function initProjectGraph({ bus, bridge }) {
 
   function renderGraphInspector() {
     const selected = graphNode(state.selectedGraphId); graphInspector.replaceChildren();
+    root.querySelector('.project-graph-body').classList.toggle('has-graph-selection', Boolean(selected));
     if (!selected) { const empty = node('div', 'project-graph-inspector-empty'); empty.append(node('span', '', '⌘'), node('strong', '', 'Выберите узел'), node('p', '', 'Здесь появятся свойства, связи и быстрые действия.')); graphInspector.append(empty); return; }
     const header = node('header'); header.append(node('span', selected.entity_type, TYPE_ICONS[selected.entity_type] || '•'));
-    const copy = node('div'); copy.append(node('small', '', TYPE_LABELS[selected.entity_type] || selected.entity_type), node('strong', '', selected.label)); header.append(copy); graphInspector.append(header);
+    const copy = node('div'); copy.append(node('small', '', TYPE_LABELS[selected.entity_type] || selected.entity_type), node('strong', '', selected.label)); header.append(copy);
+    const close = node('button', 'project-graph-inspector-close', '×'); close.type = 'button'; close.dataset.graphAction = 'close-inspector'; close.setAttribute('aria-label', 'Закрыть свойства узла'); header.append(close); graphInspector.append(header);
     const meta = node('dl'); for (const [label, value] of [['Тип', selected.kind], ['Статус', selected.status || '—'], ['ID', selected.entity_id]]) meta.append(node('dt', '', label), node('dd', '', value)); graphInspector.append(meta);
     if (selected.entity_type === 'custom' && editable(state.context)) graphInspector.append(customNodeForm(selected));
     const actions = node('div', 'project-graph-inspector-actions');
@@ -229,7 +267,7 @@ export function initProjectGraph({ bus, bridge }) {
     const relationships = node('section'); relationships.append(node('strong', '', 'Связи'));
     for (const edge of state.graph.edges.filter((item) => item.source === selected.id || item.target === selected.id)) {
       const other = graphNode(edge.source === selected.id ? edge.target : edge.source); if (!other) continue;
-      const row = node('button'); row.type = 'button'; row.dataset.graphSelect = other.id; row.append(node('span', '', edge.label || edge.relation), node('b', '', other.label));
+      const row = node('button'); row.type = 'button'; row.dataset.graphSelect = other.id; row.append(node('span', '', `${edge.source === selected.id ? '→' : '←'} ${edge.label || RELATION_LABELS[edge.relation] || edge.relation}`), node('b', '', other.label));
       if (edge.manual && editable(state.context)) { const remove = node('i', '', '×'); remove.dataset.deleteLink = edge.id; row.append(remove); } relationships.append(row);
     }
     graphInspector.append(relationships);
@@ -346,19 +384,33 @@ export function initProjectGraph({ bus, bridge }) {
     state.projectId = projectId;
     const graph = await bridge.api(`/api/projects/${projectId}/graph`);
     state.graph = graph; state.selectedGraphId = state.graph.nodes.some((item) => item.id === state.selectedGraphId) ? state.selectedGraphId : null;
-    layoutGraph(); renderGraphFilters(); renderGraphInspector();
-    if (graph.viewport?.zoom) {
-      Object.assign(state.mapTransform, graph.viewport);
+    const currentLayout = Number(graph.viewport?.layout_version || 1) >= GRAPH_LAYOUT_VERSION;
+    layoutGraph(currentLayout); renderGraphFilters(); renderGraphInspector();
+    if (currentLayout && graph.viewport?.zoom) {
+      Object.assign(state.mapTransform, graph.viewport, { layout_version: GRAPH_LAYOUT_VERSION });
       applyTransform(graphWorld, state.mapTransform);
+    } else {
+      Object.assign(state.mapTransform, { layout_version: GRAPH_LAYOUT_VERSION });
+      requestAnimationFrame(() => { if (!fitGraph()) setTimeout(fitGraph, 80); saveGraphPositions(); });
     }
   }
 
   function fitGraph() {
     const bounds = graphViewport.getBoundingClientRect();
     if (bounds.width < 1 || bounds.height < 1) return false;
-    const zoom = Math.min(.9, bounds.width / WORLD_WIDTH, bounds.height / WORLD_HEIGHT);
-    Object.assign(state.mapTransform, { x: (bounds.width - WORLD_WIDTH * zoom) / 2, y: (bounds.height - WORLD_HEIGHT * zoom) / 2, zoom }); applyTransform(graphWorld, state.mapTransform);
+    const limits = graphLimits(visibleGraphNodes(), 60);
+    const zoom = Math.max(.28, Math.min(1.08, bounds.width / limits.width, bounds.height / limits.height));
+    Object.assign(state.mapTransform, { x: (bounds.width - limits.width * zoom) / 2 - limits.minX * zoom, y: (bounds.height - limits.height * zoom) / 2 - limits.minY * zoom, zoom, layout_version: GRAPH_LAYOUT_VERSION }); applyTransform(graphWorld, state.mapTransform);
     return true;
+  }
+
+  function zoomGraph(factor) {
+    const bounds = graphViewport.getBoundingClientRect();
+    const next = Math.max(.2, Math.min(2.5, state.mapTransform.zoom * factor));
+    const px = bounds.width / 2; const py = bounds.height / 2;
+    state.mapTransform.x = px - ((px - state.mapTransform.x) / state.mapTransform.zoom) * next;
+    state.mapTransform.y = py - ((py - state.mapTransform.y) / state.mapTransform.zoom) * next;
+    state.mapTransform.zoom = next; applyTransform(graphWorld, state.mapTransform); scheduleGraphSave();
   }
 
   function connectRealtime() {
@@ -510,11 +562,18 @@ export function initProjectGraph({ bus, bridge }) {
 
   root.addEventListener('click', async (event) => {
     const view = event.target.closest('[data-graph-view]')?.dataset.graphView; if (view) setView(view);
-    const filter = event.target.closest('[data-graph-filter]')?.dataset.graphFilter; if (filter) { state.filters.has(filter) ? state.filters.delete(filter) : state.filters.add(filter); renderGraphFilters(); renderGraph(); }
+    const filter = event.target.closest('[data-graph-filter]')?.dataset.graphFilter; if (filter) {
+      state.filters.has(filter) ? state.filters.delete(filter) : state.filters.add(filter);
+      if (state.selectedGraphId && !graphNodeVisible(graphNode(state.selectedGraphId))) state.selectedGraphId = null;
+      renderGraphFilters(); renderGraph(); renderGraphInspector();
+    }
     const graphAction = event.target.closest('[data-graph-action]')?.dataset.graphAction;
     if (graphAction === 'add') addCustomNode();
-    else if (graphAction === 'layout') { layoutGraph(false); saveGraphPositions(); }
+    else if (graphAction === 'layout') { layoutGraph(false); fitGraph(); saveGraphPositions(); }
     else if (graphAction === 'fit') { fitGraph(); scheduleGraphSave(); }
+    else if (graphAction === 'zoom-in') zoomGraph(1.15);
+    else if (graphAction === 'zoom-out') zoomGraph(1 / 1.15);
+    else if (graphAction === 'close-inspector') { state.selectedGraphId = null; renderGraph(); renderGraphInspector(); }
     else if (graphAction === 'refresh') loadGraph().catch(showError);
     else if (graphAction === 'link') startLinking();
     else if (graphAction === 'history') showGraphHistory().catch(showError);
@@ -530,6 +589,9 @@ export function initProjectGraph({ bus, bridge }) {
       const id = graphCard.dataset.graphNodeId;
       if (root.classList.contains('graph-linking')) { if (!state.linkSource) state.linkSource = id; else if (id !== state.linkSource) { state.linkTarget = id; state.selectedGraphId = id; renderGraphInspector(); } }
       else { state.selectedGraphId = id; renderGraph(); renderGraphInspector(); }
+    }
+    else if ((event.target === graphViewport || event.target === graphWorld) && state.selectedGraphId && !root.classList.contains('graph-linking')) {
+      state.selectedGraphId = null; renderGraph(); renderGraphInspector();
     }
     const diagramId = event.target.closest('[data-diagram-id]')?.dataset.diagramId; if (diagramId) { root.classList.remove('show-diagram-library'); openDiagram(diagramId).catch(showError); }
     const kind = event.target.closest('[data-node-kind]')?.dataset.nodeKind; if (kind) addDiagramNode(kind);

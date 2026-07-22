@@ -40,6 +40,7 @@
   <link rel="stylesheet" href="/assets/brand-graphics.css">
   <link rel="stylesheet" href="/assets/performance.css">
   <link rel="stylesheet" href="/assets/readability.css">
+  <link rel="stylesheet" href="/assets/project-graph-polish.css">
 </head>
 <body>
   <a id="skip-link" class="skip-link" href="#auth-screen">Перейти к форме входа</a>
@@ -332,9 +333,16 @@
       <div id="project-graph-workspace" class="project-graph-workspace">
         <section class="project-graph-map-view">
           <header class="project-graph-toolbar">
-            <label><span class="sr-only">Поиск на карте</span><input id="project-graph-search" type="search" placeholder="Найти сущность или связь"></label>
-            <div id="project-graph-filters" class="project-graph-filters"></div>
-            <button class="primary" data-graph-action="add" type="button">+ Узел</button><button data-graph-action="link" type="button">Связать</button><button data-graph-action="layout" type="button">Разложить</button><button data-graph-action="fit" type="button">Вписать</button><button data-graph-action="history" type="button">История</button><button data-graph-action="refresh" type="button" aria-label="Обновить карту">↻</button>
+            <div class="project-graph-toolbar-primary">
+              <label class="project-graph-search"><span class="sr-only">Поиск на карте</span><input id="project-graph-search" type="search" placeholder="Найти узел на карте"></label>
+              <div class="project-graph-toolbar-actions">
+                <button class="primary" data-graph-action="add" type="button">+ Узел</button><button data-graph-action="link" type="button">Связать</button><button data-graph-action="layout" type="button">Разложить</button><button data-graph-action="history" type="button">История</button><button data-graph-action="refresh" type="button" aria-label="Обновить карту" title="Обновить карту">↻</button>
+              </div>
+            </div>
+            <div class="project-graph-toolbar-secondary">
+              <div id="project-graph-filters" class="project-graph-filters" aria-label="Фильтры карты"></div>
+              <div class="project-graph-zoom" aria-label="Масштаб карты"><span id="project-graph-summary">0 узлов</span><button data-graph-action="zoom-out" type="button" aria-label="Уменьшить масштаб">−</button><button data-graph-action="fit" type="button">Вписать</button><button data-graph-action="zoom-in" type="button" aria-label="Увеличить масштаб">+</button><output id="project-graph-zoom-value">100%</output></div>
+            </div>
           </header>
           <div class="project-graph-body">
             <div id="project-graph-viewport" class="project-graph-viewport" tabindex="0"><div class="project-graph-world"><svg class="project-graph-edges" aria-hidden="true"></svg><div class="project-graph-nodes"></div></div><div class="project-graph-minimap"></div></div>
