@@ -4,7 +4,7 @@ import { ContextRouter } from './core/context-router.js';
 import { initChatAnywhere } from './modules/chat-anywhere.js';
 import { initAssetViewer } from './modules/asset-viewer.js';
 import { initAssetReviews } from './modules/asset-reviews.js';
-import { initProjectGraph } from './modules/project-graph.js';
+import { initProjectGraph } from './modules/project-graph.js?v=20260722.2';
 import { initDecisionIntelligence } from './modules/decision-intelligence.js';
 
 const flags = new FeatureFlags(window.AAPLegacyApp?.getAuthConfig?.() || {});

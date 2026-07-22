@@ -42,6 +42,7 @@
   <link rel="stylesheet" href="/assets/readability.css">
   <link rel="stylesheet" href="/assets/project-graph-polish.css">
   <link rel="stylesheet" href="/assets/sidebar-rail.css">
+  <link rel="stylesheet" href="/assets/project-graph-fullscreen.css">
 </head>
 <body>
   <a id="skip-link" class="skip-link" href="#auth-screen">Перейти к форме входа</a>
@@ -337,7 +338,7 @@
             <div class="project-graph-toolbar-primary">
               <label class="project-graph-search"><span class="sr-only">Поиск на карте</span><input id="project-graph-search" type="search" placeholder="Найти узел на карте"></label>
               <div class="project-graph-toolbar-actions">
-                <button class="primary" data-graph-action="add" type="button">+ Узел</button><button data-graph-action="link" type="button">Связать</button><button data-graph-action="layout" type="button">Разложить</button><button data-graph-action="history" type="button">История</button><button data-graph-action="refresh" type="button" aria-label="Обновить карту" title="Обновить карту">↻</button>
+                <button class="primary" data-graph-action="add" type="button">+ Узел</button><button data-graph-action="link" type="button">Связать</button><button data-graph-action="layout" type="button">Разложить</button><button data-graph-action="history" type="button">История</button><button class="project-graph-fullscreen-button" data-graph-action="fullscreen" type="button" aria-label="Открыть карту на весь экран" aria-pressed="false">⛶ На весь экран</button><button data-graph-action="refresh" type="button" aria-label="Обновить карту" title="Обновить карту">↻</button>
               </div>
             </div>
             <div class="project-graph-toolbar-secondary">
@@ -789,6 +790,6 @@
   <script src="/assets/motion-system.js" defer></script>
   <script src="/assets/app-motion.js" defer></script>
   <script src="/assets/app.js" defer></script>
-  <script src="/assets/workspace-depth.js" type="module" defer></script>
+  <script src="/assets/workspace-depth.js?v=20260722.2" type="module" defer></script>
 </body>
 </html>

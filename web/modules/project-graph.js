@@ -23,6 +23,7 @@ function clone(value) { return JSON.parse(JSON.stringify(value)); }
 
 export function initProjectGraph({ bus, bridge }) {
   const root = document.querySelector('.project-graph-page'); if (!root) return {};
+  const graphWorkspace = root.querySelector('#project-graph-workspace');
   document.querySelector('#graph-nav-button')?.classList.remove('hidden');
   const mapView = root.querySelector('.project-graph-map-view'); const diagramView = root.querySelector('.project-diagram-view');
   const graphViewport = root.querySelector('#project-graph-viewport'); const graphWorld = graphViewport.querySelector('.project-graph-world');
@@ -413,6 +414,57 @@ export function initProjectGraph({ bus, bridge }) {
     state.mapTransform.zoom = next; applyTransform(graphWorld, state.mapTransform); scheduleGraphSave();
   }
 
+  function graphFullscreenActive() {
+    return document.fullscreenElement === graphWorkspace || graphWorkspace.classList.contains('is-window-fullscreen');
+  }
+
+  function updateGraphFullscreen() {
+    const active = graphFullscreenActive();
+    const button = root.querySelector('[data-graph-action="fullscreen"]');
+    button?.setAttribute('aria-pressed', String(active));
+    button?.setAttribute('aria-label', active ? 'Выйти из полноэкранного режима' : 'Открыть карту на весь экран');
+    button?.replaceChildren(document.createTextNode(active ? '⊡ Выйти' : '⛶ На весь экран'));
+    setTimeout(() => mapView.classList.contains('hidden') ? fitDiagram() : fitGraph(), 80);
+  }
+
+  async function toggleGraphFullscreen() {
+    if (document.fullscreenElement === graphWorkspace) {
+      await document.exitFullscreen();
+      return;
+    }
+    if (graphWorkspace.classList.contains('is-window-fullscreen')) {
+      graphWorkspace.classList.remove('is-window-fullscreen');
+      document.documentElement.classList.remove('graph-fullscreen-fallback');
+      updateGraphFullscreen();
+      return;
+    }
+    if (typeof graphWorkspace.requestFullscreen === 'function' && !document.fullscreenElement) {
+      try {
+        const entered = await Promise.race([
+          Promise.resolve(graphWorkspace.requestFullscreen()).then(() => true),
+          new Promise((resolve) => setTimeout(() => resolve(false), 280)),
+        ]);
+        if (entered && document.fullscreenElement === graphWorkspace) return;
+      } catch (_error) {
+        // Fullscreen may be blocked by browser policy; the fixed canvas below keeps the feature usable.
+      }
+    }
+    graphWorkspace.classList.add('is-window-fullscreen');
+    document.documentElement.classList.add('graph-fullscreen-fallback');
+    updateGraphFullscreen();
+  }
+
+  function onGraphFullscreenChange() {
+    if (document.fullscreenElement === graphWorkspace) {
+      graphWorkspace.classList.remove('is-window-fullscreen');
+      document.documentElement.classList.remove('graph-fullscreen-fallback');
+    } else if (!graphWorkspace.classList.contains('is-window-fullscreen')) {
+      graphWorkspace.classList.remove('is-window-fullscreen');
+      document.documentElement.classList.remove('graph-fullscreen-fallback');
+    }
+    updateGraphFullscreen();
+  }
+
   function connectRealtime() {
     state.source?.close(); if (!state.projectId || typeof EventSource === 'undefined') return;
     const source = new EventSource(`/api/projects/${state.projectId}/message-events`); state.source = source;
@@ -573,6 +625,7 @@ export function initProjectGraph({ bus, bridge }) {
     else if (graphAction === 'fit') { fitGraph(); scheduleGraphSave(); }
     else if (graphAction === 'zoom-in') zoomGraph(1.15);
     else if (graphAction === 'zoom-out') zoomGraph(1 / 1.15);
+    else if (graphAction === 'fullscreen') toggleGraphFullscreen().catch(showError);
     else if (graphAction === 'close-inspector') { state.selectedGraphId = null; renderGraph(); renderGraphInspector(); }
     else if (graphAction === 'refresh') loadGraph().catch(showError);
     else if (graphAction === 'link') startLinking();
@@ -629,7 +682,10 @@ export function initProjectGraph({ bus, bridge }) {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); saveDiagram().catch(showError); }
     else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo(); }
     else if (event.key === 'Delete' && state.selectedNodeKey) deleteSelectedNode();
-    else if (event.key === 'Escape') { cancelLinking(); state.connectSource = null; root.classList.remove('diagram-connecting'); }
+    else if (event.key === 'Escape') {
+      cancelLinking(); state.connectSource = null; root.classList.remove('diagram-connecting');
+      if (graphWorkspace.classList.contains('is-window-fullscreen')) toggleGraphFullscreen().catch(showError);
+    }
   });
 
   async function activate(context) {
@@ -660,8 +716,9 @@ export function initProjectGraph({ bus, bridge }) {
     if (!root.classList.contains('hidden')) activate(bridge.getContext?.()).catch(showError);
   });
   pageObserver.observe(root, { attributes: true, attributeFilter: ['class'] });
+  document.addEventListener('fullscreenchange', onGraphFullscreenChange);
   const initial = bridge.getContext?.(); if (initial?.project?.id) activate(initial).catch(showError);
   applyTransform(graphWorld, state.mapTransform); applyTransform(diagramWorld, state.diagramTransform); renderGraphFilters();
   syncGraphPermissions();
-  return { destroy: () => { pageObserver.disconnect(); state.source?.close(); clearTimeout(state.saveTimer); clearTimeout(state.graphSaveTimer); clearTimeout(state.refreshTimer); } };
+  return { destroy: () => { pageObserver.disconnect(); document.removeEventListener('fullscreenchange', onGraphFullscreenChange); document.documentElement.classList.remove('graph-fullscreen-fallback'); state.source?.close(); clearTimeout(state.saveTimer); clearTimeout(state.graphSaveTimer); clearTimeout(state.refreshTimer); } };
 }

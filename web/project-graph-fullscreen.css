@@ -1,0 +1,62 @@
+/* A distraction-free map canvas, with a fixed-position fallback for older browsers. */
+html.graph-fullscreen-fallback,
+html.graph-fullscreen-fallback body {
+  overflow: hidden;
+}
+
+#project-graph-workspace:fullscreen,
+#project-graph-workspace.is-window-fullscreen {
+  width: 100vw;
+  height: 100vh;
+  min-height: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: #071019;
+  box-shadow: none;
+}
+
+#project-graph-workspace.is-window-fullscreen {
+  position: fixed;
+  z-index: 10000;
+  inset: 0;
+}
+
+#project-graph-workspace:fullscreen .project-graph-map-view,
+#project-graph-workspace.is-window-fullscreen .project-graph-map-view,
+#project-graph-workspace:fullscreen .project-diagram-view,
+#project-graph-workspace.is-window-fullscreen .project-diagram-view {
+  height: 100%;
+  min-height: 0;
+}
+
+#project-graph-workspace:fullscreen .project-graph-toolbar,
+#project-graph-workspace.is-window-fullscreen .project-graph-toolbar {
+  padding-inline: clamp(12px, 2vw, 28px);
+  background: linear-gradient(180deg, rgba(17, 30, 44, .99), rgba(9, 19, 29, .99));
+  box-shadow: 0 12px 34px rgba(0, 0, 0, .2);
+}
+
+.project-graph-fullscreen-button[aria-pressed="true"] {
+  border-color: rgba(145, 125, 243, .72);
+  background: rgba(111, 91, 217, .18);
+  color: #ded8ff;
+}
+
+#project-graph-workspace:fullscreen .project-graph-viewport::after,
+#project-graph-workspace.is-window-fullscreen .project-graph-viewport::after {
+  content: "Полноэкранный режим · Esc — выход · колесо мыши — масштаб";
+}
+
+@media (max-width: 760px) {
+  .project-graph-fullscreen-button {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #project-graph-workspace:fullscreen,
+  #project-graph-workspace.is-window-fullscreen {
+    scroll-behavior: auto;
+  }
+}

@@ -165,7 +165,8 @@ class VisualQualityTests(unittest.TestCase):
                 reference = node.attrs.get("src") or node.attrs.get("href")
                 if reference and reference.startswith("/assets/"):
                     references.append(reference)
-                    self.assertTrue((WEB / reference.removeprefix("/assets/")).is_file(), f"Missing {reference}")
+                    asset_path = reference.removeprefix("/assets/").split("?", 1)[0]
+                    self.assertTrue((WEB / asset_path).is_file(), f"Missing {reference}")
             linked = [reference for reference in references if not reference.endswith("brand-mark.svg")]
             duplicates = [value for value, count in Counter(linked).items() if count > 1]
             self.assertEqual(duplicates, [], f"Duplicate asset requests in {name}: {duplicates}")

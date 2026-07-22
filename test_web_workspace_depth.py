@@ -10,7 +10,7 @@ class WorkspaceDepthFoundationTests(unittest.TestCase):
         html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
         entrypoint = (ROOT / "web" / "workspace-depth.js").read_text(encoding="utf-8")
         flags = (ROOT / "web" / "core" / "feature-flags.js").read_text(encoding="utf-8")
-        self.assertIn('src="/assets/workspace-depth.js" type="module"', html)
+        self.assertIn('src="/assets/workspace-depth.js?v=', html)
         self.assertIn("window.AAPWorkspaceDepth", entrypoint)
         for name in (
             "chat_anywhere",
@@ -49,6 +49,7 @@ class WorkspaceDepthFoundationTests(unittest.TestCase):
         styles = (ROOT / "web" / "project-graph.css").read_text(encoding="utf-8")
         editor_styles = (ROOT / "web" / "project-graph-editor.css").read_text(encoding="utf-8")
         polish_styles = (ROOT / "web" / "project-graph-polish.css").read_text(encoding="utf-8")
+        fullscreen_styles = (ROOT / "web" / "project-graph-fullscreen.css").read_text(encoding="utf-8")
         for marker in (
             'data-page="graph"',
             'id="project-graph-viewport"',
@@ -60,6 +61,8 @@ class WorkspaceDepthFoundationTests(unittest.TestCase):
             'id="project-graph-summary"',
             'data-graph-action="zoom-in"',
             'data-graph-action="zoom-out"',
+            'href="/assets/project-graph-fullscreen.css"',
+            'data-graph-action="fullscreen"',
         ):
             self.assertIn(marker, html)
         self.assertIn("registerModule('project-graph'", entrypoint)
@@ -76,6 +79,9 @@ class WorkspaceDepthFoundationTests(unittest.TestCase):
         self.assertIn("state.projectId || context?.project?.id", script)
         self.assertIn("GRAPH_LAYOUT_VERSION = 3", script)
         self.assertIn("visibleGraphNodes", script)
+        self.assertIn("toggleGraphFullscreen", script)
+        self.assertIn("requestFullscreen", script)
+        self.assertIn("fullscreenchange", script)
         for selector in (".project-graph-node", ".project-diagram-node", ".project-diagram-edge", ".project-graph-minimap"):
             self.assertIn(selector, styles)
         self.assertIn(".project-diagram-edge-list", editor_styles)
@@ -83,6 +89,8 @@ class WorkspaceDepthFoundationTests(unittest.TestCase):
         self.assertIn(".graph-history-dialog", editor_styles)
         self.assertIn(".project-graph-toolbar-secondary", polish_styles)
         self.assertIn(".has-graph-selection .project-graph-inspector", polish_styles)
+        self.assertIn("#project-graph-workspace:fullscreen", fullscreen_styles)
+        self.assertIn("#project-graph-workspace.is-window-fullscreen", fullscreen_styles)
 
     def test_decision_intelligence_attention_center_is_wired(self) -> None:
         html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
